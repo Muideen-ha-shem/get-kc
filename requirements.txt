@@ -1,0 +1,7 @@
+crawl4ai
+playwright
+langchain
+chromadb
+openai
+python-dotenv
+streamlit
