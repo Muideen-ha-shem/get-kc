@@ -14,6 +14,10 @@ from supabase import PostgrestAPIError
 
 import os
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 
 async def main():
@@ -25,7 +29,9 @@ async def main():
     # Configuration for the browser used in crawling
 
     browser_cfg = BrowserConfig(
-
+        headless=True,
+        # Use a real user profile string structure
+        user_agent_mode="random", 
         text_mode=True,  # Extract only visible text (no images/media)
 
     )
@@ -35,6 +41,13 @@ async def main():
     # Configuration for how the crawler should run
 
     run_cfg = CrawlerRunConfig(
+
+
+        # Wait for the network to be completely idle for at least 500ms
+        # Add an explicit extra buffer (in seconds) before data extraction starts
+        delay_before_return_html=2.0,
+        # Bypass heavy processing that might crash during load state transitions
+        js_code=None,
 
         excluded_tags=["script", "style", "form", "header", "footer", "nav"],  # Remove unwanted HTML tags
 
@@ -50,7 +63,7 @@ async def main():
 
         remove_overlay_elements=True,  # Clean overlays/popups
 
-        magic=True,  # Let crawler auto-tune settings if needed
+
 
         simulate_user=True,  # Behave like a real user (e.g., scrolling, clicking)
 
@@ -91,6 +104,7 @@ async def main():
         debug=True,
 
         use_playwright=True,  # Use Playwright for browser automation
+        undetected_browser=True, # Use advanced anti-bot techniques
 
     ) as crawler:
 
@@ -159,13 +173,9 @@ def process_result(result):
         
 
         try:
-
             # Generate embeddings for the document and store them using the Supabase client
-
             embed_documents(result_json, sb_client)
-
         except Exception as e:
-
             print(f"Error embedding documents: {e}")
 
 

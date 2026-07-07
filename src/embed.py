@@ -11,7 +11,8 @@ from langchain_text_splitters import HTMLSemanticPreservingSplitter  # Preserves
 
 from langchain_ollama import OllamaEmbeddings  # Interface for embedding with Ollama models
 
-from langchain.docstore.document import Document  # Document object used by LangChain
+from langchain_core.documents import Document
+# from langchain.docstore.document import Document  # Document object used by LangChain
 
 from supabase import Client
 
