@@ -1,0 +1,21 @@
+SOURCE URL: https://ha-shem.com/case-study/transformative-power-apps-solutions/
+============================================================
+
+# Axxela Cuts Training Costs & Onboarding Time by 60%
+* Home
+* Case Studies
+* Axxela Cuts Training Costs & Onboarding Time by 60%
+Case Study
+###  Axella Cuts Training Costs & Onboarding Time by 60%
+Our biggest challenge was streamlining training and onboarding. Ha-Shem developed a training management app that integrates seamlessly with SharePoint and Power Automate. It eliminated errors and saves our HR team a whopping 60% of their time in planning and approving budgets!
+We recently deployed two applications for Axxela, a major player in the Oil and Gas sector. The first is a Training Management Application that eliminates time wastage and human errors associated with manual management processes.
+Our solution pulls data from Axxela’s SharePoint database, creating an algorithm that accesses staff and division information and distributes budgets equitably. The solution also taps into capabilities of Power Automate to create an approval workflow. This solution has eliminated human error and saved the Human Resources team 60% of the time previously spent planning and managing annual staff training and budget approval. It also keeps their training record to ensure they meet regulatory requirements.
+Our second application is the Pre-Employment Medical Application, which streamlines the process of obtaining medical information for new employees onboarded into Axxela’s workforce.
+This secure, seamless communication channel between HR, new employees, and the company’s HMO has resulted in a more efficient and productive onboarding process, serving more than a hundred staff, and speeding up the onboarding process from months to just a few weeks.
+## More Case Studies
+### 2x More Secure: See How We Helped MainOne Double Their Security
+We needed to take our security to the next level," says MainOne, a leading West African data center and connectivity provider. Ha-Shem understood our challenges and implemented a comprehensive suite of Microsoft security solutions.
+### Automate Audit Confirmations & Slash Backlogs by 85%: See How FSDH Did It
+Ha-Shem's RPA solution using Microsoft Power Automate and Power Apps was a game-changer for us at FSDH Merchant Bank. We were struggling with manual audit confirmations, which caused inefficiencies and declining customer satisfaction.
+### A4 Associates Transforms Project Management for NNPC
+At A4 Associates, managing high-pressure projects for the NNPC demanded accuracy and agility. Ha-Shem transformed our approach with a custom Microsoft Power Apps solution featuring a mobile field app, real-time updates, and seamless data integration. The results?

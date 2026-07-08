@@ -1,0 +1,127 @@
+SOURCE URL: https://ha-shem.com/writer/queen/
+============================================================
+
+# Queen Odili
+* Home
+* Author: Queen Odili
+30Jun 26
+##   Ha-Shem Limited Becomes Certified to Deliver SolarWinds Certification Training
+* Queen Odili
+* No Comments
+Ha-Shem Limited now delivers official SolarWinds certification training. Learn how certified SolarWinds training helps IT teams build skills, improve platform adoption, and get more value from SolarWinds solutions.
+09Jun 26
+##   7 Insights from the SolarWinds IT Trends Report 2026, and Why You Shouldn’t Ignore Them
+* Queen Odili
+* No Comments
+The SolarWinds IT Trends Report 2026 reveals a critical turning point for businesses navigating AI. From a widening gap between leadership perception and frontline reality, to IT teams shifting from operators to orchestrators, the findings are both eye-opening and actionable. In this post, Ha-Shem breaks it all down in plain…
+17Feb 26
+##   Alert Fatigue Is Real: A Day in the Life of an On-Call Engineer
+* Queen Odili
+* No Comments
+Being an on-call engineer is tough. Endless alerts, unclear priorities, and constant interruptions can lead to alert fatigue and mistakes. Incident response on-call engineer teams need clarity, speed, and actionable insights. SolarWinds Incident Response helps IT teams filter noise, prioritize real issues, and reduce downtime, so your engineers can respond…
+17Dec 25
+##   Why Cloud Data Loss Happens and How to Prevent It.
+* Queen Odili
+* No Comments
+Cloud data isn’t automatically safe. Learn the real reasons organizations lose data in Microsoft 365, and how Veeam Data Cloud Backup, delivered by Ha-Shem Limited, protects your business from deletion, ransomware, outages, and compliance risks.
+06Nov 25
+##   Big Moves from Adobe: What’s New, What’s Changed, and Why It Matters for You
+* Queen Odili
+* No Comments
+Adobe just dropped major updates, and they’re not just upgrades, they’re game changers. Whether you’re managing projects, designing content, or building a brand, these new tools make work smoother, faster, and a lot more creative.
+22Aug 25
+##   Ha-Shem Limited & SolarWinds at GITEX Nigeria 2025 – Free Tickets + Advanced-C Partner News
+* Queen Odili
+* No Comments
+Ha-Shem Limited has reached a new milestone - officially joining the SolarWinds Advanced-C Tier through the Fast Track Program. This achievement highlights our growing expertise as a trusted SolarWinds reseller in Nigeria, equipping organizations with advanced IT monitoring, service management, and infrastructure solutions tailored to their needs. For our clients,…
+09Jul 25
+##   AI in SolarWinds ITSM Saves 23 Hours Per Agent – Every Week!
+* Queen Odili
+* No Comments
+23 Hours Saved. Every Week. Per Agent. 😳 That’s not a typo - it’s the power of AI in SolarWinds ITSM. What if your IT team could stop drowning in tickets and start working smarter, not harder? Discover how AI is flipping the script on traditional IT service delivery and…
+03Jul 25
+##   AI Assistant in Adobe Acrobat Reduces Document Processing Time by 50%!
+* Queen Odili
+* No Comments
+Instantly summarize and secure your documents with Adobe Acrobat’s AI Assistant. Faster insights, safer data, smarter workflows - see how it transforms your productivity.
+17Feb 25
+##   Two Awards, One Simple Truth: Your Trust In Us Spoke Loud
+* Queen Odili
+* No Comments
+Our commitment to customers has now been recognized beyond our clients and team - It has earned us 2 awards! The prestigious Most Customer-Centric IT Company 2024 – Nigeria and Cloud Solutions Innovation Award 2024 at the MEA Business Awards!
+21Jan 25
+##   The Hidden Cost of Ignoring Database Health
+* Queen Odili
+* No Comments
+You might not hear the loud alarms yet, but ignoring your database health could lead to financial disasters you didn’t see coming. Just ask Apex Inventory Ltd, who lost billions on Black Friday due to a database crash that could’ve been prevented.
+## Recent Posts
+* Ha-Shem Limited Becomes Certified to Deliver SolarWinds Certification Training
+* 7 Insights from the SolarWinds IT Trends Report 2026, and Why You Shouldn’t Ignore Them
+* Alert Fatigue Is Real: A Day in the Life of an On-Call Engineer
+* Why Cloud Data Loss Happens and How to Prevent It.
+* Olajumoke Toriola recognized as a finalist at the Women in Tech Global Awards 2025 – Women in Tech Community Award
+## Recent Comments
+## Categories
+* Adobe2
+* AI1
+* Awards3
+* Business12
+* Cloud4
+* Digital Transformation7
+* Microsoft 365 Copilot2
+* Microsoft Product5
+* New & Noteworthy37
+* News & Media7
+* Others3
+* Product Update3
+* Sales1
+* Security7
+* SolarWinds3
+* SolarWinds Products6
+* ITSM2
+* Sophos5
+* Training1
+* Veeam1
+* Work Life6
+## Archives
+* June 2026 2
+* February 2026 1
+* December 2025 2
+* November 2025 1
+* August 2025 1
+* July 2025 5
+* June 2025 2
+* May 2025 1
+* April 2025 1
+* February 2025 1
+* January 2025 2
+* April 2024 1
+* October 2023 3
+* May 2023 1
+* April 2023 1
+* March 2023 2
+* December 2022 2
+* September 2022 1
+* August 2022 1
+* July 2022 1
+* June 2022 2
+* March 2022 2
+* February 2022 1
+* December 2021 4
+* November 2021 1
+* October 2021 2
+* September 2021 1
+* August 2021 1
+* May 2021 2
+* March 2021 2
+* February 2021 2
+* December 2020 1
+* October 2020 1
+* July 2020 1
+* June 2020 3
+* May 2020 1
+* March 2020 1
+* January 2020 1
+* June 2019 1
+* March 2019 1
+* February 2019 4
