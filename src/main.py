@@ -29,10 +29,10 @@ async def main():
     # Configuration for the browser used in crawling
 
     browser_cfg = BrowserConfig(
-        headless=True,
+        headless=False,
         # Use a real user profile string structure
         user_agent_mode="random", 
-        text_mode=True,  # Extract only visible text (no images/media)
+        text_mode=False,  # Extract only visible text (no images/media)
 
     )
 
@@ -65,9 +65,9 @@ async def main():
 
 
 
-        simulate_user=True,  # Behave like a real user (e.g., scrolling, clicking)
+        simulate_user=False,  # Behave like a real user (e.g., scrolling, clicking)
 
-        override_navigator=True,  # Mask headless browser properties
+        override_navigator=False,  # Mask headless browser properties
 
         verbose=True,  # Output crawl logs
 
