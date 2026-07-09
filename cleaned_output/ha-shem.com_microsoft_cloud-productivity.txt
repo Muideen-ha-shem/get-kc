@@ -1,41 +1,249 @@
-SOURCE URL: https://ha-shem.com/microsoft/cloud-productivity/
-============================================================
+---
+source_url: "https://ha-shem.com/microsoft/cloud-productivity/"
+title: "Cloud Productivity"
+---
 
 # Cloud Productivity
-###  Cloud Productivity
-Microsoft 365 (including Office 365) plans have created the possibility for businesses of every size with unique technology needs to access flexible, efficient, faster, easier, and familiar-to-use productivity solutions. There is a plan for every user in your organisation, aligning with your business requirements – from the standalone plans to Business to Enterprise to Frontline workers – combining cloud-based versions of the Office application suites with online services and security solutions. Before moving on, it’s important to note that all Microsoft 365/Office 365 plans are licensed per user.
-Let’s dive right into the Business plans. For most small to mid-sized businesses with up to 300 employees, this is their entry point. This service family has a maximum limit of 300 users. This means that you must not exceed a cumulative quantity of 300 seats per tenant for Business Basic, Business Standard, Business Premium, and Apps for Business (formerly Office 365 Business).
-Get Pricing
-Request A Demo
-Microsoft 365 Basic Subscription Tiers
-* Business Basic - Get powerful productivity tools with Office apps for the web. You can communicate with professional email and collaborate and chat with Microsoft Teams video conferencing. In addition, you can enjoy online services like OneDrive and SharePoint Online, and security features like MFA, and cloud user self-service password change. This plan is priced at $6 per user per month (annual commitment)
-* Business Standard - With this plan, get what is available in Business Basic, introductory security, plus an option to install Word, Excel, PowerPoint, Outlook, Teams, Access, and Publisher as desktop applications. You can work offline and upload changes to the cloud when you reconnect. You can also access the Teams webinars feature and have large meetings. The newest addition to this Business plan is the Bing Chat Enterprise, which enables you to have AI-powered web chat for research, getting better answers, and finding new ways to be creative, with the assurance of user and organisational data protection. Pricing is at $12.50 per user per month (annual commitment)
-* Business Premium - This plan combines productivity, security, and device management. Here, you get all the Standard features plus comprehensive security with defense against advanced cyber threats, including phishing and ransomware protection and encryption to keep your data secure. Other notable features include Windows 11 Business Edition and Microsoft Defender for Business. It is priced at $22 per user per month (annual commitment)
-* Apps for Business - Included in Business Standard and Premium, think of this plan as the online subscription equivalent of your on-prem Microsoft Office 2021 Standard. You get to install your familiar Office applications on your desktop and have access to 1TB of OneDrive cloud storage per user, Access and Publisher (PC only). With monthly up-to-date versions of Outlook, Word, PowerPoint, Excel, and OneNote, you pay $8.25 per user per month (annual commitment)
-For the Enterprise service family, we have the respective Office 365, Microsoft 365, and Frontline Workers subscription tiers. But before breaking it down, you should keep in mind that there is no limit to the number of seats you can purchase for an Enterprise plan, so if you find that you are close to reaching the limit for the Business plans, start considering any of the Enterprise plans closest to the Business plan you had in mind.
-Office 365 Enterprise Subscription Tiers
-* Office 365 E1 - Just like Business Basic, this plan comprises online services and Office applications on the web. If you have more than 300 users in your organisation, and you are looking for a plan that offers just the same (and a bit more) as the Business Basic plan, E1 is your best bet with pricing per user per month$10 (annual commitment)
-* Office 365 E3 - Expand the E1 plan by adding features like 5TB of initial OneDrive storage, SharePoint Plan 2, 100 GB mailbox, 100GB initial archive with automatic expansion of up to 1.5 TB, Office desktop apps, Data Loss Prevention for emails and files, and basic message encryption, then you get your Office 365 E3 package at $23 per user per month (annual commitment)
-* Office 365 E5 - If you are looking for an Office 365 Enterprise plan that is heavy on enterprise-grade security, E5 is the one. All you get in the Office 365 E3 plan plus advanced voice, analytics, security, and compliance services at $38 per user per month (annual commitment)
-* Apps for Enterprise - This Office 2021 Professional Plus online equivalent gives you the premium Office experience at $12 per user per month (annual commitment)
-Microsoft 365 Enterprise Subscription Tiers
-* **Microsoft 365 E3** - The future is AI-driven, and M365 E3 is built to prepare you for it. Apart from the powerful combination of Windows 11 Enterprise E3 + Enterprise Mobility and Security E3 + Office 365 E3, you can also access a strong Zero Trust foundation by securing your identities, devices, and apps. Priced at $36 per user per month (annual commitment)
-* **Microsoft 365 E5** - Priced at $57 per user per month (annual commitment)
-Microsoft 365 Frontline Workers Subscription Tiers
-When it comes to providing essential technology tools, no one is left out with Microsoft 365; there is a plan for everyone to be empowered and productive. Microsoft defines Frontline Workers as "…any individual—regardless of education or industry—who works directly with customers, clients, or other recipients of services." If any of the users in your organisation fall under this category, then the next step is to identify their specific requirements by looking through the features in the F plans that would meet them. Don't think that since this plan is for "frontline workers," it would not include any security features, because it does! Let's dive in deeper to see what the F plans have.
-* **Office 365 F3** - Focused on productivity and basic security, the Office 365 F3 plan is priced at $4 per user per month (annual commitment)
-* Microsoft 365 F1$2.50 per user per month (annual commitment)
-* Microsoft 365 F3 - This plan combines the productivity from Office 365 F3 and mobility and security from EMS E3 and Windows Enterprise E3 (F3 version) for frontline workers who need a more comprehensive solution. You get all of the features in the F1 plan plus basic auditing and retention tools for compliance, Power Apps, Power Automate, Power Virtual Agents for Teams, Dataverse for Teams, Credential Guard, Device Guard, BitLocker and BitLocker to Go, and many more advanced security and compliance features. It is priced at $8.00 per user per month (annual commitment)
-Limitations of the F Plans
-* Office desktop apps or the Outlook desktop app cannot be accessed in the F Plans.
-* F3 users have full access to documents in Office for the web, while F1 users have read-only access.
-* F plans are limited to devices with integrated screens smaller than 10.9 inches on Office mobile apps.
-* As it touches SharePoint, F3 and F1 plans don't include site mailboxes or personal sites.
-* In Teams, users with the F3 and F1 plans won't be able to create live events and webinars or use Teams Phone capabilities without the purchase of additional add-ons.
-* F3 users have a 2 GB mailbox that they can access through Outlook on the web. F1 users don't have mailbox rights. Although a mailbox is provisioned for users through the Exchange Kiosk plan, they aren't entitled to use it. We recommend that you disable Outlook on the web for F1 users.
-We offer a free user profiling session to organisations who need to navigate their way through the various Microsoft 365 plans, and find the appropriate fit for their users. You might also be looking for a licensing specialist who can advise you freely on changing or mixing plans; well, lucky you, you have come to the right place - we are just an enquiry away.
-* Home – Microsoft
-* Cloud Productivity
-* Cloud Security
-* Business Applications
-* Azure
+
+## Cloud Productivity
+
+Microsoft 365 (including Office 365) plans have created the possibility for businesses of every size with unique technology needs to access flexible, efficient, faster, easier, and familiar-to-use productivity solutions.
+
+There is a plan for every user in your organisation, aligning with your business requirements – from the standalone plans to Business to Enterprise to Frontline workers – combining cloud-based versions of the Office application suites with online services and security solutions.
+
+Before moving on, it’s important to note that all Microsoft 365/Office 365 plans are licensed per user.
+
+Let’s dive right into the Business plans.
+
+For most small to mid-sized businesses with up to 300 employees, this is their entry point.
+
+This service family has a maximum limit of 300 users.
+
+This means that you must not exceed a cumulative quantity of 300 seats per tenant for:
+
+- Business Basic
+- Business Standard
+- Business Premium
+- Apps for Business (formerly Office 365 Business)
+
+## Get Pricing
+
+## Request A Demo
+
+# Microsoft 365 Business Subscription Tiers
+
+## Business Basic
+
+Get powerful productivity tools with Office apps for the web.
+
+You can communicate with professional email and collaborate and chat with Microsoft Teams video conferencing.
+
+In addition, you can enjoy online services like OneDrive and SharePoint Online, and security features like MFA, and cloud user self-service password change.
+
+**Pricing:** $6 per user per month (annual commitment)
+
+---
+
+## Business Standard
+
+With this plan, get what is available in Business Basic, introductory security, plus an option to install:
+
+- Word
+- Excel
+- PowerPoint
+- Outlook
+- Teams
+- Access
+- Publisher
+
+These are available as desktop applications.
+
+You can work offline and upload changes to the cloud when you reconnect.
+
+You can also access the Teams webinars feature and have large meetings.
+
+The newest addition to this Business plan is the Bing Chat Enterprise, which enables you to have AI-powered web chat for research, getting better answers, and finding new ways to be creative, with the assurance of user and organisational data protection.
+
+**Pricing:** $12.50 per user per month (annual commitment)
+
+---
+
+## Business Premium
+
+This plan combines productivity, security, and device management.
+
+Here, you get all the Standard features plus comprehensive security with defense against advanced cyber threats, including phishing and ransomware protection and encryption to keep your data secure.
+
+Other notable features include:
+
+- Windows 11 Business Edition
+- Microsoft Defender for Business
+
+**Pricing:** $22 per user per month (annual commitment)
+
+---
+
+## Apps for Business
+
+Included in Business Standard and Premium, think of this plan as the online subscription equivalent of your on-prem Microsoft Office 2021 Standard.
+
+You get to install your familiar Office applications on your desktop and have access to:
+
+- 1TB of OneDrive cloud storage per user
+- Access
+- Publisher (PC only)
+
+With monthly up-to-date versions of:
+
+- Outlook
+- Word
+- PowerPoint
+- Excel
+- OneNote
+
+**Pricing:** $8.25 per user per month (annual commitment)
+
+# Office 365 Enterprise Subscription Tiers
+
+For the Enterprise service family, we have the respective Office 365, Microsoft 365, and Frontline Workers subscription tiers.
+
+Before breaking it down, you should keep in mind that there is no limit to the number of seats you can purchase for an Enterprise plan.
+
+If you find that you are close to reaching the limit for the Business plans, start considering any of the Enterprise plans closest to the Business plan you had in mind.
+
+## Office 365 E1
+
+Just like Business Basic, this plan comprises online services and Office applications on the web.
+
+If you have more than 300 users in your organisation, and you are looking for a plan that offers just the same (and a bit more) as the Business Basic plan, E1 is your best bet.
+
+**Pricing:** $10 per user per month (annual commitment)
+
+---
+
+## Office 365 E3
+
+Expand the E1 plan by adding features like:
+
+- 5TB of initial OneDrive storage
+- SharePoint Plan 2
+- 100 GB mailbox
+- 100GB initial archive with automatic expansion of up to 1.5 TB
+- Office desktop apps
+- Data Loss Prevention for emails and files
+- Basic message encryption
+
+**Pricing:** $23 per user per month (annual commitment)
+
+---
+
+## Office 365 E5
+
+If you are looking for an Office 365 Enterprise plan that is heavy on enterprise-grade security, E5 is the one.
+
+All you get in the Office 365 E3 plan plus advanced voice, analytics, security, and compliance services.
+
+**Pricing:** $38 per user per month (annual commitment)
+
+---
+
+## Apps for Enterprise
+
+This Office 2021 Professional Plus online equivalent gives you the premium Office experience.
+
+**Pricing:** $12 per user per month (annual commitment)
+
+# Microsoft 365 Enterprise Subscription Tiers
+
+## Microsoft 365 E3
+
+The future is AI-driven, and M365 E3 is built to prepare you for it.
+
+Apart from the powerful combination of:
+
+- Windows 11 Enterprise E3
+- Enterprise Mobility and Security E3
+- Office 365 E3
+
+You can also access a strong Zero Trust foundation by securing your identities, devices, and apps.
+
+**Pricing:** $36 per user per month (annual commitment)
+
+---
+
+## Microsoft 365 E5
+
+**Pricing:** $57 per user per month (annual commitment)
+
+# Microsoft 365 Frontline Workers Subscription Tiers
+
+When it comes to providing essential technology tools, no one is left out with Microsoft 365; there is a plan for everyone to be empowered and productive.
+
+Microsoft defines Frontline Workers as:
+
+> "...any individual—regardless of education or industry—who works directly with customers, clients, or other recipients of services."
+
+If any of the users in your organisation fall under this category, then the next step is to identify their specific requirements by looking through the features in the F plans that would meet them.
+
+Don't think that since this plan is for "frontline workers," it would not include any security features, because it does.
+
+Let's dive in deeper to see what the F plans have.
+
+## Office 365 F3
+
+Focused on productivity and basic security.
+
+**Pricing:** $4 per user per month (annual commitment)
+
+---
+
+## Microsoft 365 F1
+
+**Pricing:** $2.50 per user per month (annual commitment)
+
+---
+
+## Microsoft 365 F3
+
+This plan combines the productivity from Office 365 F3 and mobility and security from EMS E3 and Windows Enterprise E3 (F3 version) for frontline workers who need a more comprehensive solution.
+
+You get all of the features in the F1 plan plus:
+
+- Basic auditing and retention tools for compliance
+- Power Apps
+- Power Automate
+- Power Virtual Agents for Teams
+- Dataverse for Teams
+- Credential Guard
+- Device Guard
+- BitLocker
+- BitLocker to Go
+- Many more advanced security and compliance features
+
+**Pricing:** $8.00 per user per month (annual commitment)
+
+# Limitations of the F Plans
+
+- Office desktop apps or the Outlook desktop app cannot be accessed in the F Plans.
+- F3 users have full access to documents in Office for the web, while F1 users have read-only access.
+- F plans are limited to devices with integrated screens smaller than 10.9 inches on Office mobile apps.
+- As it touches SharePoint, F3 and F1 plans don't include site mailboxes or personal sites.
+- In Teams, users with the F3 and F1 plans won't be able to create live events and webinars or use Teams Phone capabilities without the purchase of additional add-ons.
+- F3 users have a 2 GB mailbox that they can access through Outlook on the web.
+- F1 users don't have mailbox rights.
+- Although a mailbox is provisioned for users through the Exchange Kiosk plan, they aren't entitled to use it.
+- We recommend that you disable Outlook on the web for F1 users.
+
+# Advisory Services
+
+We offer a free user profiling session to organisations who need to navigate their way through the various Microsoft 365 plans, and find the appropriate fit for their users.
+
+You might also be looking for a licensing specialist who can advise you freely on changing or mixing plans; well, lucky you, you have come to the right place - we are just an enquiry away.
+
+# Related Microsoft Sections
+
+- Home – Microsoft
+- Cloud Productivity
+- Cloud Security
+- Business Applications
+- Azure

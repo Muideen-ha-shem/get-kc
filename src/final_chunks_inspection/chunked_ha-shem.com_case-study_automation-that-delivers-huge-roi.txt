@@ -1,0 +1,35 @@
+🌐 PAGE SOURCE URL: https://ha-shem.com/case-study/automation-that-delivers-huge-roi/
+🧩 SEGMENTED CHUNK COUNT: 2
+============================================================
+
+=========================================
+📝 CHUNK 1 of 2 | Size: 700 chars
+=========================================
+# Automate Audit Confirmations & Slash Backlogs by 85%: See How FSDH Did It
+* Home
+* Case Studies
+* Automate Audit Confirmations & Slash Backlogs by 85%: See How FSDH Did It
+Case Study
+###  Automate Audit Confirmations & Slash Backlogs by 85%
+Ha-Shem’s RPA solution using Microsoft Power Automate and Power Apps was a game-changer for us at FSDH Merchant Bank. We were struggling with manual audit confirmations, which caused inefficiencies and declining customer satisfaction.
+###  See How FSDH Did It
+In past years, the Nigerian banking industry has contributed about N168.4 trillion to the country’s Gross Domestic Product (GDP). It’s undoubtedly an industry with huge potential for progressively 
+
+=========================================
+📝 CHUNK 2 of 2 | Size: 3492 chars
+=========================================
+changing the fortune of the country. In light of this, increased operational efficiencies would no doubt be needed for banking companies to reach their full potential.
+We are proud to be part of the bid to move this industry to a great height by deploying innovative Microsoft solutions and other processes built around Microsoft technologies to transform the operational efficiencies of banks. One of these projects is Robotic Process Automation for FSDH Bank.
+FSDH Merchant Bank was among the first companies to be granted a merchant bank license by the Central Bank of Nigeria (CBN). The bank provides a range of corporate banking, business banking, prestige banking, global custody services, treasury, and global market.
+FSDH wanted increased efficiency and accuracy for their audit confirmation process which used to be confirmed manually and this often takes a lot of days to locate and source for the right information when an audit request comes in, before verification can occur. With a notable expansion of their customer base, came a workload increment that became quite overwhelming for their employees, and so, it was not surprising when they began to record an increase in oversights that should normally have been avoided, a backlog of unattended customers, and about a 65% decline in customer satisfaction rate which incited their need for a more efficient process that would reduce redundancy and allow team members optimally perform their assignments with minimal error. Hence, the bank engaged Ha-Shem Limited for assistance.
+Being the innovative I.T. solutions provider that we are, our team of in-house Microsoft specialists came to the rescue with Robotic Process Automation (RPA), a solution that is built on the Microsoft Power platform tenants – Power Automate and Power Apps – and customizable to supporting any other organization in reaching the actualized landmark of a 100% improvement in operational efficiency, accuracy, and productivity across teams. The RPA solution deployed for FSDH can churn out audit confirmation requests on a daily basis.
+The result?
+The elimination of manual audit confirmation processes helped FSDH streamline communication and collaboration between stakeholders across their different branches by over 85%. There was also a 92% increase in efficiency and the ability to stay on track with productivity timelines and progress reports thereby reducing backlogs and providing a competitive advantage over their competitors who still depend on manual processes.
+## More Case Studies
+### 2x More Secure: See How We Helped MainOne Double Their Security
+We needed to take our security to the next level," says MainOne, a leading West African data center and connectivity provider. Ha-Shem understood our challenges and implemented a comprehensive suite of Microsoft security solutions.
+### A4 Associates Transforms Project Management for NNPC
+At A4 Associates, managing high-pressure projects for the NNPC demanded accuracy and agility. Ha-Shem transformed our approach with a custom Microsoft Power Apps solution featuring a mobile field app, real-time updates, and seamless data integration. The results?
+### Axxela Cuts Training Costs & Onboarding Time by 60%
+Our biggest challenge was streamlining training and onboarding. Ha-Shem developed a training management app that integrates seamlessly with SharePoint and Power Automate. It eliminated errors and saves our HR team a whopping 60% of their time in planning and approving budgets!
+

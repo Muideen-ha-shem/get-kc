@@ -1,0 +1,73 @@
+🌐 PAGE SOURCE URL: Unknown URL
+🧩 SEGMENTED CHUNK COUNT: 4
+============================================================
+
+=========================================
+📝 CHUNK 1 of 4 | Size: 577 chars
+=========================================
+---
+source_url: "https://ha-shem.com/case-study/2x-more-secure-see-how-we-helped-mainone-double-their-security/"
+title: "2x More Secure: See How We Helped MainOne Double Their Security"
+---
+
+# 2x More Secure: See How We Helped MainOne Double Their Security
+
+## Case Study
+
+## 2x More Secure
+
+“We needed to take our security to the next level”, says MainOne, a leading West African data center and connectivity provider.
+
+Ha-Shem understood our challenges and implemented a comprehensive suite of Microsoft security solutions.
+
+## See How We Helped MainOne Double Their Security
+
+=========================================
+📝 CHUNK 2 of 4 | Size: 592 chars
+=========================================
+While we continue to help organisations in their digital transformation journey, we are paying equal attention to the security of our customers.
+
+We deploy Microsoft technologies for the end-to-end security of our customers.
+
+An example is the project for a leading West African data center and connectivity solutions provider, MainOne.
+
+Our team of experts assisted them in deploying:
+
+- Identity Access Management
+- Local Administrator Password Solution
+- Azure AD Application Proxy
+- Azure AD Password Protection
+- An upgrade of Microsoft Endpoint Configuration Manager to the 2203 version
+
+=========================================
+📝 CHUNK 3 of 4 | Size: 543 chars
+=========================================
+This resulted in a 2x more secure business environment.
+
+# More Case Studies
+
+## Automate Audit Confirmations & Slash Backlogs by 85%: See How FSDH Did It
+
+Ha-Shem's RPA solution using Microsoft Power Automate and Power Apps was a game-changer for us at FSDH Merchant Bank.
+
+We were struggling with manual audit confirmations, which caused inefficiencies and declining customer satisfaction.
+
+## A4 Associates Transforms Project Management for NNPC
+
+At A4 Associates, managing high-pressure projects for the NNPC demanded accuracy and agility.
+
+=========================================
+📝 CHUNK 4 of 4 | Size: 507 chars
+=========================================
+Ha-Shem transformed our approach with a custom Microsoft Power Apps solution featuring a mobile field app, real-time updates, and seamless data integration.
+
+The results?
+
+## Axxela Cuts Training Costs & Onboarding Time by 60%
+
+Our biggest challenge was streamlining training and onboarding.
+
+Ha-Shem developed a training management app that integrates seamlessly with SharePoint and Power Automate.
+
+It eliminated errors and saves our HR team a whopping 60% of their time in planning and approving budgets!
+

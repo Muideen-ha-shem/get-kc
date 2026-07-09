@@ -104,10 +104,8 @@ Cloud data isn’t automatically safe. Learn the real reasons organizations lose
 Olajumoke Toriola is named a finalist for the 2025 Women in Tech Community Award, celebrating leadership, inclusion, and impact in the global tech ecosystem.
 ### Big Moves from Adobe: What’s New, What’s Changed, and Why It Matters for You
 Adobe just dropped major updates, and they’re not just upgrades, they’re game changers. Whether you’re managing projects, designing content, or building a brand, these new…
-* 1
-* 2
-* 3
-FAQs
+
+#FAQs
 ###  Got questions? Here are some answers.
 What kind of I.T. services do you provide?
 We provide a variety of I.T. services tailored to your business needs and requirements. We are your one-stop company for everything: cybersecurity, software development, I.T. management, data backup and restore, and lots more.

@@ -2,7 +2,6 @@ SOURCE URL: http://ha-shem.com/policies
 ============================================================
 
 # POLICIES
-* Home
 * POLICIES
 PRIVACY POLICY  COOKIES POLICY
 ### HA-SHEM LIMITED’S PRIVACY POLICY
@@ -26,7 +25,7 @@ We may collect and process the following information about you:
 · When you provide your Personal Data while signing up for a service or purchasing a product.
 · Personal Data that we obtain or learn, such as information about the browser or device you use to access this site, how you use this site and the pages you visit, traffic and location data
 · When you contact our customer support, whether by phone, email, or chat
-· [We may also ask you for information if you experience problems using this site. We may also ask you to complete surveys for research purposes, although you don’t have to respond to these.
+· We may also ask you for information if you experience problems using this site. We may also ask you to complete surveys for research purposes, although you don’t have to respond to these.
 3. USE OF YOUR PERSONAL DATA
 We may use your Personal Data as follows:
 · Provide, maintain, and improve our services

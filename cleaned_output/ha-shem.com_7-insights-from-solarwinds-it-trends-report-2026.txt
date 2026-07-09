@@ -1,73 +1,60 @@
-SOURCE URL: https://ha-shem.com/7-insights-from-solarwinds-it-trends-report-2026/
-============================================================
+---
+source_url: "https://ha-shem.com/case-study/2x-more-secure-see-how-we-helped-mainone-double-their-security/"
+title: "2x More Secure: See How We Helped MainOne Double Their Security"
+---
 
-# 7 Insights from the SolarWinds IT Trends Report 2026, and Why You Shouldn’t Ignore Them
-* Home
-* BLOG
-* AI
-* 7 Insights from the SolarWinds IT Trends Report 2026, and Why You Shouldn’t Ignore Them
-* June 9, 2026
-* Queen Odili
-## 7 Insights from the SolarWinds IT Trends Report 2026, and Why You Shouldn't Ignore Them
-Every year, SolarWinds surveys over 1,000 IT professionals worldwide. The 2026 report asks a specific question: as AI and automation take over more of the technical work, what is happening to the people, teams, and organisations behind it?
-The answers are worth reading carefully. Some of them confirm what you probably suspect. Others might be uncomfortable.
-Here are the 7 insights
-1. The Gap Between Leadership and Frontline Staff Is Wider Than Most Organisations Admit
-47% vs 13%
-C-suite executives who say their IT team is extremely prepared for AI’s demands versus Technical Contributors who agree.
-Nearly half of senior leaders say their IT teams are extremely prepared for AI. And only 13%
-That is a 34-point gap between how prepared leadership thinks their teams are, and how prepared those teams believe they are.
-The issue is not that leaders are intentionally out of touch; it is that day-to-day friction is rarely visible from the top. When decisions about AI investment, rollout timelines, and team expectations are built on an inflated picture of readiness, the strategy looks solid until it meets reality.
-1. AI Adoption Is Broader on Paper Than It Is in Practice
-The headline figure says 50% of organisations have embraced AI16% have done so completely12% are genuinely neutral
-What’s interesting is where adoption is working. Mid-sized organisations (roughly 250 to 5,000 employees)
-If you are trying to benchmark where your organisation should be, that middle-tier trajectory is worth paying attention to.
-1. AI Is Delivering Real Value, But Not Where Most People Expect
-In daily IT operations, AI is proving most useful in three areas:
-* Reducing manual effort – 65% of respondents report meaningful time savings
-* Faster root-cause analysis when systems fail – 61% see faster diagnosis and resolution
-* More confident decision-making – 49% say AI improves judgment under pressure
-Those are practical, measurable gains. But if you push past the headline uses, the picture shifts.
-Only 38% say AI has improved outage prevention. Just 27% have seen a real reduction in alert noise. For now, AI performs best as a layer of support for human decisions, not as a replacement for them.
-1. AI Is Shifting Workload, Not Removing It
-71% of IT professionals say AI has made their roles more demanding, not less.
-This might be the most important finding in the report, and the one most business leaders are not prepared for.
-When AI takes over repetitive tasks, it not only reduces the workload but also shifts it.
-Teams now spend more time checking if the output is correct, handling governance and compliance, fitting AI results into workflows that weren’t designed for them, and trying to keep up with tools that evolve faster than most training can cover.
-Deploying AI without adjusting expectations, workload, or support structures does not make your IT team more efficient. It gives them a different kind of pressure with the same constraints. That then becomes a planning problem
-1. Trust Is the Real Blocker, And It Is Being Earned Slowly
-71% of respondents say their biggest frustration with AI is having to double-check everything it produces. 62% say they find it hard to trust AI recommendations at all.
-That level of skepticism does not come from teams being resistant to new tools. It comes from experience. AI has given enough wrong, incomplete, or context-free answers that people have learned to treat it as a first draft, not a final answer.
-83% of respondents agree that AI is only as effective as the quality and range of data it can access.trust problemdata problem
-1. IT Roles Are Genuinely Changing, But the Transition Is Uneven
-80% of IT professionals agree that their roles are shifting from execution to governance
-But here is the catch: Only 13% of technical contributors strongly agree with that framing. Most are still deep in the operational work. The shift is real, but it is happening at different speeds for different people in the same organisation.
-For business leaders, that has practical implications for hiring, performance expectations, and how you structure your IT team. The skills that mattered three years ago and the skills that matter now are not the same list
-1. Leaders And Their Teams Are Often Focused on Different Problems at the Same Time.
-When asked what IT teams need most to work effectively with AI, the answers split clearly by role:
-Leaders said
-Frontline staff said
-Both groups are right. They are just dealing with different layers of the same problem. Leaders are thinking about organisational risk. Engineers are thinking about day-to-day capability. When neither group gets what they need, adoption stalls and frustration builds in both directions.
-The report also points to some specific friction points worth naming:
-* 43% cite data privacy and security concerns as a barrier to effective AI use
-* 28% flag platform fragmentation, too many disconnected tools, no coherent workflow
-* 17% simply do not have the time to build AI literacy while keeping up with their current workload
-These are solvable problems. But they require someone to name them clearly and commit to fixing them, not just noting them in a strategy deck.
-## What This Report Is Really Pointing To
-The organisations seeing real results from AI are not the ones with the most tools or the most ambitious rollout plans. They are the ones who have been honest about where their gaps are and have taken deliberate steps to close them.
-Leadership alignment, team training, data quality, governance. These are not the exciting parts of an AI strategy. They are the parts that determine whether the exciting parts work.
-## What Should Business Leaders Do Next?
-Based on the report’s findings, here are four practical steps worth prioritising:
-* Bridge the perception gap
-* Invest in training, not tools alone
-* Build governance frameworks early.
-* Redefine what “IT success” looks like
-## Ready to Turn These Insights into Action?
-This is exactly the kind of conversation we love having with our clients. We bring you the technology and help you understand what it means for your specific business, where you are right now, and what a smart, sustainable path forward looks like.
-The SolarWinds IT Trends Report 2026
-Let’s talk today and map out a technology strategy that is built around your business
-Tags:IT Trend Report'26 SolarWinds
-Share:
-Previous Post Alert Fatigue Is Real: A Day in the Life of an On-Call Engineer
-Next Post Ha-Shem Limited Becomes Certified to Deliver SolarWinds Certification Training
-### Leave A Comment Cancel Comment
+# 2x More Secure: See How We Helped MainOne Double Their Security
+
+## Case Study
+
+## 2x More Secure
+
+“We needed to take our security to the next level”, says MainOne, a leading West African data center and connectivity provider.
+
+Ha-Shem understood our challenges and implemented a comprehensive suite of Microsoft security solutions.
+
+## See How We Helped MainOne Double Their Security
+
+While we continue to help organisations in their digital transformation journey, we are paying equal attention to the security of our customers.
+
+We deploy Microsoft technologies for the end-to-end security of our customers.
+
+An example is the project for a leading West African data center and connectivity solutions provider, MainOne.
+
+Our team of experts assisted them in deploying:
+
+- Identity Access Management
+- Local Administrator Password Solution
+- Azure AD Application Proxy
+- Azure AD Password Protection
+- An upgrade of Microsoft Endpoint Configuration Manager to the 2203 version
+
+This resulted in a 2x more secure business environment.
+
+# More Case Studies
+
+## Automate Audit Confirmations & Slash Backlogs by 85%: See How FSDH Did It
+
+Ha-Shem's RPA solution using Microsoft Power Automate and Power Apps was a game-changer for us at FSDH Merchant Bank.
+
+We were struggling with manual audit confirmations, which caused inefficiencies and declining customer satisfaction.
+
+## A4 Associates Transforms Project Management for NNPC
+
+At A4 Associates, managing high-pressure projects for the NNPC demanded accuracy and agility.
+
+Ha-Shem transformed our approach with a custom Microsoft Power Apps solution featuring a mobile field app, real-time updates, and seamless data integration.
+
+The results?
+
+## Axxela Cuts Training Costs & Onboarding Time by 60%
+
+Our biggest challenge was streamlining training and onboarding.
+
+Ha-Shem developed a training management app that integrates seamlessly with SharePoint and Power Automate.
+
+It eliminated errors and saves our HR team a whopping 60% of their time in planning and approving budgets!
+
+## Contact
+
+WhatsApp us

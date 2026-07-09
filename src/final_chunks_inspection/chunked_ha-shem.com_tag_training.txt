@@ -1,21 +1,30 @@
-SOURCE URL: https://ha-shem.com/tag/veeam-software/
+🌐 PAGE SOURCE URL: https://ha-shem.com/tag/training/
+🧩 SEGMENTED CHUNK COUNT: 2
 ============================================================
 
-# Veeam Software
+=========================================
+📝 CHUNK 1 of 2 | Size: 700 chars
+=========================================
+# Training
 * Home
 * BLOG
-* Tag: Veeam Software
-17Dec 25
-##   Why Cloud Data Loss Happens and How to Prevent It.
+* Tag: Training
+30Jun 26
+##   Ha-Shem Limited Becomes Certified to Deliver SolarWinds Certification Training
 * Queen Odili
 * No Comments
-Cloud data isn’t automatically safe. Learn the real reasons organizations lose data in Microsoft 365, and how Veeam Data Cloud Backup, delivered by Ha-Shem Limited, protects your business from deletion, ransomware, outages, and compliance risks.
+Ha-Shem Limited now delivers official SolarWinds certification training. Learn how certified SolarWinds training helps IT teams build skills, improve platform adoption, and get more value from SolarWinds solutions.
 ## Recent Posts
 * Ha-Shem Limited Becomes Certified to Deliver SolarWinds Certification Training
 * 7 Insights from the SolarWinds IT Trends Report 2026, and Why You Shouldn’t Ignore Them
 * Alert Fatigue Is Real: A Day in the Life of an On-Call Engineer
 * Why Cloud Data Loss Happens and How to Prevent It.
-* Olajumoke Toriola recognized as a finalist at the Women in Tech Global Awards 2025 – Women in Tech Community Award
+* Olajumoke Torio
+
+=========================================
+📝 CHUNK 2 of 2 | Size: 1091 chars
+=========================================
+la recognized as a finalist at the Women in Tech Global Awards 2025 – Women in Tech Community Award
 ## Recent Comments
 ## Categories
 * Adobe2
@@ -81,4 +90,4 @@ Cloud data isn’t automatically safe. Learn the real reasons organizations lose
 * June 2019 1
 * March 2019 1
 * February 2019 4
-WhatsApp us
+

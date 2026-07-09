@@ -2,12 +2,11 @@ SOURCE URL: https://ha-shem.com/professional-services/it-outsourcing/
 ============================================================
 
 # I.T. Outsourcing
-###  I.T. Outsourcing
 It is hard to come across a skilled engineer these days; another challenge is having a local support partner with the necessary experience and maturity level required to keep your business moving.
 Our existence has spanned over 20 years, and our experience has armed us with building a solid reputation for expertise in the Nigerian I.T. industry. We take ownership of any I.T. task that you want to outsource and partner with you all the way to address those needs.
 If you have been looking for a professional services firm that can support your technology infrastructure through outsourcing, and also offer the tools, resources, and processes to make your business successful, our team is ready to take up that position.
 Contact Us
-* Home – Services
+* Services
 * Training
 * CBT Certifications
 * CBT Rentals

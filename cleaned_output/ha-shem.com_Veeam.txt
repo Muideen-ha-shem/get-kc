@@ -85,5 +85,3 @@ Role-based access control, cross-region backup and encryption help to secure you
 One platform centrally manages Azure backup with other cloud, virtual, physical, SaaS and Kubernetes environments under a single, powerful interface.
 ### **We’re at Your Service!**
 Don’t leave the fate of your critical business data to chance. Each Veeam product addresses specific data protection and management needs. To learn more, contact our team.
-Talk to an Expert
-Download Datasheet

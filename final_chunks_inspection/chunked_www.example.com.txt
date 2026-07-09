@@ -1,0 +1,10 @@
+🌐 PAGE SOURCE URL: https://www.example.com
+🧩 SEGMENTED CHUNK COUNT: 1
+============================================================
+
+=========================================
+📝 CHUNK 1 of 1 | Size: 118 chars
+=========================================
+# Example Domain
+This domain is for use in documentation examples without needing permission. Avoid use in operations.
+

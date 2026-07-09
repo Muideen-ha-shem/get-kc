@@ -1,22 +1,40 @@
-SOURCE URL: https://ha-shem.com/contact-us
-============================================================
+---
+source_url: "https://ha-shem.com/contact-us"
+title: "Contact Us"
+---
 
-### Contact Us
+# Contact Us
+
 Ha-Shem Limited is your trusted Microsoft certified Information Technology solutions provider that specializes in providing up-to-date technology-based customer solutions and IT procurement services to help your business become more agile and efficient.
-###### Let’s keep in touch
-###  HEAD OFFICE
+
+## Let's Keep in Touch
+
+### Head Office
+
 9, Ibikunle Street, Off University Road, Herbert Macaulay Way, Yaba, Lagos.
-###  EMAIL
+
+### Email
+
 discover@ha-shem.com
-###  PHONE
+
+### Phone
+
 +234 1 4546937, +234 9087393110
-## Contact Form
+
 ## Frequently Asked Questions
-What sort of training do you offer?
-We offer both corporate and individual trainings. For our corporate training, we cover a wide range of IT and non-IT training. To get access to our training calendar, please click here. If you’d like to have a customised training for your team, please send an email to . For our individual training, please visit .
-Can you schedule my exam for me?
+
+### What sort of training do you offer?
+
+We offer both corporate and individual trainings. For our corporate training, we cover a wide range of IT and non-IT training. To get access to our training calendar, please click here. If you'd like to have a customised training for your team, please send an email to . For our individual training, please visit .
+
+### Can you schedule my exam for me?
+
 Yes, we can schedule your exam for you. For us to do this, kindly click here, we will send your booking form via email with further requirements needed to book your exam.
-I want to know the cost of...
+
+### I want to know the cost of...
+
 For your pricing requests, please send an email to .
-What is the cost of Microsoft exams?
-Exam costs differ according to the certification that is to be taken. Kindly click here
+
+### What is the cost of Microsoft exams?
+
+Exam costs differ according to the certification that is to be taken.
