@@ -4,7 +4,7 @@ import json
 from dotenv import load_dotenv
 from sb import get_client
 from langchain_ollama import OllamaEmbeddings
-import httpx
+from groq import Groq
 
 load_dotenv()
 
@@ -54,21 +54,35 @@ def ask_knowledge_base(question: str):
     )
     
     try:
-        print("\n" + "="*40 + "\n💡 LIVE ANSWER STREAM:\n" + "="*40)
+
+        # Initialised Groq client with API key from environment variable
+        groq_api_key = os.getenv("GROQ_API_KEY")
+        if not groq_api_key:
+            print("❌ Error: GROQ_API_KEY is not set in the environment variables.")
+            return
+        
+        groq_client = Groq(api_key=groq_api_key)
+        
+        print("\n" + "="*40 + "\n💡 LIVE ANSWER STREAM(GROQ):\n" + "="*40)
         
         # Open a streaming context block instead of a standard blocking post request
-        with httpx.stream("POST", "http://localhost:11434/api/generate", json={
-            "model": "deepseek-r1:1.5b",
-            "prompt": f"{system_prompt}\n\nQuestion: {question}",
-            "stream": True # Enable live streaming
-        }, timeout=None) as response:
+        completion_stream = groq_client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": question}
+            ],
+            stream=True,
+            temperature=0.1,
+            max_tokens=1024
+        )
             
-            # Read and print tokens immediately as they leave the Docker container
-            for line in response.iter_lines():
-                if line:
-                    json_data = json.loads(line)
-                    token = json_data.get("response", "")
-                    print(token, end="", flush=True)
+            # Read and print tokens immediately as they are streamed down from the cloud
+        for chunk in completion_stream:
+            # Safely catch chunk text deltas
+            token = chunk.choices[0].delta.content
+            if token:
+                print(token, end="", flush=True)
                     
         print("\n" + "="*40)
         print("\n🌐 SOURCES USED:")
@@ -79,5 +93,13 @@ def ask_knowledge_base(question: str):
         print(f"\n❌ Failed to reach chat model endpoint: {e}")
 
 if __name__ == "__main__":
-    user_query = input("💬 What will you like to know about Ha-Shem Limited: ")
-    ask_knowledge_base(user_query)
+    # Continuous conversation loop so the script doesn't exit after one answer
+    print("🤖 Ha-Shem RAG System Initialized. Type 'exit' or 'quit' to close.")
+    while True:
+        user_query = input("\n💬 What will you like to know about Ha-Shem Limited: ").strip()
+        if user_query.lower() in ['exit', 'quit']:
+            print("Goodbye!")
+            break
+        if not user_query:
+            continue
+        ask_knowledge_base(user_query)
