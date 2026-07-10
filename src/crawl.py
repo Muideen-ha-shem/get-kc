@@ -1,19 +1,10 @@
 import asyncio
-
 from crawl4ai import AsyncWebCrawler
-
 from crawl4ai.async_configs import BrowserConfig, CrawlerRunConfig, CacheMode
-
 from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
-
 from sb import get_client  # helper to get the Supabase client
-
-from embed import embed_documents  # Function to embed crawled documents
-
 from supabase import PostgrestAPIError
-
 import os
-
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -23,8 +14,6 @@ load_dotenv()
 async def main():
 
     url = "https://ha-shem.com/"  # Target website for crawling
-
-
 
     # Configuration for the browser used in crawling
 
@@ -169,19 +158,6 @@ def process_result(result):
         except PostgrestAPIError as e:
 
             print(f"Error inserting into Supabase: {e}")
-
-        
-
-        try:
-            # Generate embeddings for the document and store them using the Supabase client
-            embed_documents(result_json, sb_client)
-        except Exception as e:
-            print(f"Error embedding documents: {e}")
-
-
-
-        print("Data inserted and embedded successfully.")
-
     
 
     else:
