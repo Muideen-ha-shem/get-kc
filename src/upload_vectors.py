@@ -3,9 +3,11 @@ import os
 from dotenv import load_dotenv
 from sb import get_client  # Imports your existing Supabase configuration helper
 from chunk import split_into_semantic_chunks
-from langchain_ollama import OllamaEmbeddings
+from google import genai
+from google.genai import types
 
 load_dotenv()
+client = genai.Client()  # Initializes the Google GenAI client using your GOOGLE_API_KEY
 
 def run_vector_pipeline():
     input_dir = "cleaned_output"
@@ -24,12 +26,8 @@ def run_vector_pipeline():
     print("🔌 Connecting to Supabase...")
     sb_client = get_client()
 
-    print("🧠 Initializing local Ollama connection (nomic-embed-text)...")
-    # This targets your running Docker container on port 11434
-    embeddings_client = OllamaEmbeddings(
-        model="nomic-embed-text",
-        base_url="http://localhost:11434"
-    )
+    print("🧠 Initializing Google GenAI embeddings client...")
+    embeddings_client = genai.Client()  # Uses GOOGLE_API_KEY from environment
 
     print(f"🚀 Found {len(files)} files locally. Beginning Vector Generation loop...")
 
@@ -58,9 +56,18 @@ def run_vector_pipeline():
 
         for i, chunk in enumerate(chunks):
             try:
-                # 3. Request Ollama to turn this specific text string into math coordinates
+                # 3. Request embedding vector from Google GenAI for each chunk
                 print(f"   ↳ Generating embedding vector for chunk {i+1}/{len(chunks)}...")
-                vector_embedding = embeddings_client.embed_query(chunk)
+                embedding_response = embeddings_client.models.embed_content(
+                    model="gemini-embedding-001",
+                    contents=chunk,
+                    config=types.EmbedContentConfig(
+                        task_type="RETRIEVAL_DOCUMENT",
+                        output_dimensionality=768
+                    )
+                )
+                vector_embedding = embedding_response.embeddings[0].values
+                assert len(vector_embedding) == 768
                 
                 # 4. Construct payload matching your new Supabase table schema
                 payload = {
@@ -82,7 +89,7 @@ def run_vector_pipeline():
                     continue
                 else:
                     print(f"❌ Failed to vectorise chunk {i+1} for {url}: {e}")
-                    print("💡 Ensure Docker Desktop is active and 'docker start ollama' was run.")
+                    print("💡 Check your GOOGLE_API_KEY and Gemini API quota.")
                     return
 
 
