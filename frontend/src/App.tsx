@@ -22,6 +22,7 @@ type Message = {
   sender: 'user' | 'assistant';
   content: string;
   isTyping?: boolean;
+  sources?: string[];
 };
 
 const navigation = ['Home', 'Products', 'Solutions', 'Support Center', 'Contact'];
@@ -93,6 +94,30 @@ const suggestedPrompts = [
   'Book Appointment',
 ];
 
+const renderFormattedContent = (content: string) => {
+  const lines = content.split('\n');
+
+  return lines.map((line, lineIndex) => {
+    const parts = line.split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
+
+    return (
+      <div key={`${lineIndex}-${line}`} className="whitespace-pre-wrap">
+        {parts.map((part, partIndex) => {
+          if (part.startsWith('**') && part.endsWith('**')) {
+            return (
+              <strong key={`${lineIndex}-${partIndex}`} className="font-semibold text-slate-900">
+                {part.slice(2, -2)}
+              </strong>
+            );
+          }
+
+          return <span key={`${lineIndex}-${partIndex}`}>{part}</span>;
+        })}
+      </div>
+    );
+  });
+};
+
 function App() {
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
@@ -141,10 +166,27 @@ function App() {
 
       const data = await response.json();
       const answer = data.answer || 'I could not generate a response right now.';
+      const sources = Array.isArray(data.sources) ? data.sources : [];
 
-      setMessages((prev) =>
-        prev.map((message) => (message.id === assistantMessageId ? { ...message, content: answer, isTyping: false } : message))
-      );
+      let streamedIndex = 0;
+      const streamSpeed = 18;
+
+      const streamInterval = window.setInterval(() => {
+        streamedIndex += 1;
+        const nextContent = answer.slice(0, streamedIndex);
+
+        setMessages((prev) =>
+          prev.map((message) => (message.id === assistantMessageId ? { ...message, content: nextContent } : message))
+        );
+
+        if (streamedIndex >= answer.length) {
+          window.clearInterval(streamInterval);
+          setMessages((prev) =>
+            prev.map((message) => (message.id === assistantMessageId ? { ...message, isTyping: false, sources } : message))
+          );
+          setIsTyping(false);
+        }
+      }, streamSpeed);
     } catch (error) {
       setMessages((prev) =>
         prev.map((message) =>
@@ -153,7 +195,6 @@ function App() {
             : message
         )
       );
-    } finally {
       setIsTyping(false);
     }
   };
@@ -505,8 +546,20 @@ function App() {
                 {messages.map((message) => (
                   <div key={message.id} className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
                     <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-7 ${message.sender === 'user' ? 'bg-[#0A2540] text-white' : 'bg-white text-slate-700 shadow-sm ring-1 ring-slate-200'}`}>
-                      {message.content}
+                      {message.sender === 'assistant' ? renderFormattedContent(message.content) : message.content}
                       {message.isTyping ? <span className="ml-1 animate-pulse">█</span> : null}
+                      {message.sender === 'assistant' && message.sources && message.sources.length > 0 ? (
+                        <div className="mt-2 border-t border-slate-200 pt-2">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">Sources</p>
+                          <div className="mt-1 flex flex-wrap gap-2">
+                            {message.sources.map((source) => (
+                              <a key={source} href={source} target="_blank" rel="noreferrer" className="text-xs text-cyan-700 underline decoration-cyan-200 underline-offset-2 hover:text-cyan-900">
+                                {source}
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 ))}
