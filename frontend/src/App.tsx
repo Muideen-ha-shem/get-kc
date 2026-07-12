@@ -163,9 +163,11 @@ function App() {
       <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 lg:px-8">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-[#0A2540] via-[#1E40AF] to-[#06B6D4] text-white shadow-lg">
-              <Bot size={20} />
-            </div>
+            
+            {/* To replace the Bot Icon with ha-shem logo in frontend/public/logo */}
+            <img src="/logo/Ha-Shem-Logo-dark.png" alt="Ha-Shem Logo" className="h-10 w-10 rounded-full" />
+            
+
             <div>
               <p className="text-lg font-semibold tracking-tight">Ha-Shem Limited</p>
               <p className="text-xs uppercase tracking-[0.32em] text-slate-500">AI Support Platform</p>
