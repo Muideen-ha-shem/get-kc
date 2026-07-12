@@ -96,7 +96,7 @@ Ha-Shem AI Support Platform
 cd ~/Desktop  # or any preferred location
 
 # Clone the repository
-git clone https://github.com/muideen/get-kc.git
+git clone https://github.com/Muideen-ha-shem/get-kc.git
 cd get-kc
 ```
 
@@ -186,7 +186,7 @@ npm run dev
 cd Desktop  # or any preferred location
 
 # Clone the repository
-git clone https://github.com/muideen/get-kc.git
+git clone https://github.com/Muideen-ha-shem/get-kc.git
 cd get-kc
 ```
 
