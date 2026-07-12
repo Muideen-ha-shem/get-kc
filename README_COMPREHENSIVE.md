@@ -10,8 +10,8 @@ A modern, intelligent customer support platform powered by AI that leverages Ret
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
 - [Installation & Setup](#installation--setup)
-	- [Linux Setup](#linux-setup)
-	- [Windows Setup](#windows-setup)
+  - [Linux Setup](#linux-setup)
+  - [Windows Setup](#windows-setup)
 - [Configuration](#configuration)
 - [Running the Application](#running-the-application)
 - [Usage](#usage)
@@ -56,10 +56,10 @@ Ha-Shem AI Support Platform
 │   ├── LLM Generation (Groq API)
 │   └── Context Retrieval Engine
 └── Frontend (React + TypeScript + Vite)
-		├── Real-time Chat UI
-		├── Message Streaming
-		├── Source Attribution
-		└── Responsive Design
+    ├── Real-time Chat UI
+    ├── Message Streaming
+    ├── Source Attribution
+    └── Responsive Design
 ```
 
 **Data Flow**:
@@ -299,18 +299,18 @@ npm run dev
 **Chat Request Format:**
 ```json
 {
-	"message": "What are Ha-Shem's core services?"
+  "message": "What are Ha-Shem's core services?"
 }
 ```
 
 **Chat Response Format:**
 ```json
 {
-	"answer": "Ha-Shem provides enterprise AI solutions including **support automation**, **cloud services**, and **business process automation**.",
-	"sources": [
-		"https://ha-shem.com/about-us",
-		"https://ha-shem.com/services"
-	]
+  "answer": "Ha-Shem provides enterprise AI solutions including **support automation**, **cloud services**, and **business process automation**.",
+  "sources": [
+    "https://ha-shem.com/about-us",
+    "https://ha-shem.com/services"
+  ]
 }
 ```
 
