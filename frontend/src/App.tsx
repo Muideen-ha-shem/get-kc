@@ -156,7 +156,7 @@ function App() {
     setMessages((prev) => [...prev, { id: assistantMessageId, sender: 'assistant', content: '', isTyping: true }]);
 
     try {
-      const response = await fetch(`${API_BASE_URL || 'http://127.0.0.1:8000'}/chat`, {
+      const response = await fetch(`${API_BASE_URL || 'http://localhost:8000'}/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
