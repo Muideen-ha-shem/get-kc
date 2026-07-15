@@ -177,3 +177,6 @@ LLM Response
 ## Executive Summary
 
 The architecture separates AI reasoning, enterprise tools, business services, and background processing. MCP standardizes tool access, LangGraph orchestrates workflows, RabbitMQ/Kafka manages asynchronous tasks, and workers perform crawling, embedding, and OCR independently, enabling a scalable enterprise AI support platform.
+
+
+
