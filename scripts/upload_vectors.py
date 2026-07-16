@@ -1,45 +1,41 @@
-# filepath: src/upload_vectors.py
+# filepath: scripts/upload_vectors.py
 import os
-
 from dotenv import load_dotenv
-
-from .infrastructure.database.supabase import get_client
-from .chunk import split_into_semantic_chunks
+from src.sb import get_client
+from src.chunk import split_into_semantic_chunks
 from google import genai
 from google.genai import types
 
 load_dotenv()
-client = genai.Client()  # Initializes the Google GenAI client using your GOOGLE_API_KEY
+client = genai.Client()
+
 
 def run_vector_pipeline():
     input_dir = "cleaned_output"
-    
-    # 1. Verify the local source folder is present
+
     if not os.path.exists(input_dir):
         print(f"❌ Error: The folder '{input_dir}' does not exist.")
         return
-        
+
     files = [f for f in os.listdir(input_dir) if f.endswith(".txt")]
     if not files:
         print(f"❌ Error: No text files found inside '{input_dir}'.")
         return
 
-    # 2. Connect to your active services
     print("🔌 Connecting to Supabase...")
     sb_client = get_client()
 
     print("🧠 Initializing Google GenAI embeddings client...")
-    embeddings_client = genai.Client()  # Uses GOOGLE_API_KEY from environment
+    embeddings_client = genai.Client()
 
     print(f"🚀 Found {len(files)} files locally. Beginning Vector Generation loop...")
 
     for filename in files:
         file_path = os.path.join(input_dir, filename)
-        
+
         with open(file_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
-            
-        # Parse out the tracking header URL from the pure text body
+
         url = "Unknown URL"
         content_lines = []
         for line in lines:
@@ -49,43 +45,36 @@ def run_vector_pipeline():
                 continue
             else:
                 content_lines.append(line)
-                
+
         cleaned_text = "".join(content_lines).strip()
-        
-        # Sift text into semantic paragraph chunks
         chunks = split_into_semantic_chunks(cleaned_text)
         print(f"\n📄 Processing '{filename}' -> Generated {len(chunks)} text chunks.")
 
         for i, chunk in enumerate(chunks):
             try:
-                # 3. Request embedding vector from Google GenAI for each chunk
                 print(f"   ↳ Generating embedding vector for chunk {i+1}/{len(chunks)}...")
                 embedding_response = embeddings_client.models.embed_content(
                     model="gemini-embedding-001",
                     contents=chunk,
                     config=types.EmbedContentConfig(
                         task_type="RETRIEVAL_DOCUMENT",
-                        output_dimensionality=768
-                    )
+                        output_dimensionality=768,
+                    ),
                 )
                 vector_embedding = embedding_response.embeddings[0].values
                 assert len(vector_embedding) == 768
-                
-                # 4. Construct payload matching your new Supabase table schema
+
                 payload = {
                     "parent_url": url,
                     "chunk_content": chunk,
-                    "embedding": vector_embedding
+                    "embedding": vector_embedding,
                 }
-                
-                # 5. Insert directly into Supabase. If the chunk already exists, catch it and skip.
+
                 sb_client.table("documentation_chunks").insert(payload).execute()
-                
+
             except Exception as e:
-                # Check if this error is an absolute duplicate key violation (code 23505)
-                # We pull the code attribute safely from Supabase API exceptions
                 err_code = getattr(e, 'code', None) or (isinstance(e, dict) and e.get('code'))
-                
+
                 if err_code == '23505' or 'duplicate key' in str(e).lower():
                     print(f"   ↳ Chunk {i+1} already exists in database. Skipping safely...")
                     continue
@@ -94,8 +83,8 @@ def run_vector_pipeline():
                     print("💡 Check your GOOGLE_API_KEY and Gemini API quota.")
                     return
 
-
     print("\n🎉 Success! Your production RAG database is populated with clean vector coordinates.")
+
 
 if __name__ == "__main__":
     run_vector_pipeline()

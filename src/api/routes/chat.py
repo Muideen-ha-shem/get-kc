@@ -1,8 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
+from ...orchestrator.chat_orchestrator import chat_orchestrator
 from ..schemas import ChatRequest, ChatResponse
-from ..services.generator import generate_answer
-from ..services.retrieval import retrieve_context
 
 router = APIRouter()
 
@@ -10,16 +9,7 @@ router = APIRouter()
 @router.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
     try:
-        matches, _, parent_urls = retrieve_context(request.message)
-        if not matches:
-            return ChatResponse(
-                answer="I couldn’t find enough relevant context in the knowledge base for that question.",
-                sources=[],
-            )
-
-        context_text = "\n".join(match.get("chunk_content", "") for match in matches if match.get("chunk_content"))
-        result = generate_answer(request.message, context_text, parent_urls)
-        return ChatResponse(**result)
+        return chat_orchestrator.process_request_response(request.message)
     except ValueError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:

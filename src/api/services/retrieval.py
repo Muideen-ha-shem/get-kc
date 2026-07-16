@@ -3,9 +3,9 @@ from typing import Any
 from dotenv import load_dotenv
 
 try:
-    from sb import get_client
+    from ...infrastructure.database.supabase import get_client
 except ImportError:  # pragma: no cover - supports package execution
-    from src.sb import get_client
+    from src.infrastructure.database.supabase import get_client
 
 from .embeddings import embed_query
 

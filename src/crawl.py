@@ -1,11 +1,13 @@
 import asyncio
+import os
+
+from dotenv import load_dotenv
 from crawl4ai import AsyncWebCrawler
 from crawl4ai.async_configs import BrowserConfig, CrawlerRunConfig, CacheMode
 from crawl4ai.deep_crawling import BFSDeepCrawlStrategy
-from sb import get_client  # helper to get the Supabase client
 from supabase import PostgrestAPIError
-import os
-from dotenv import load_dotenv
+
+from .infrastructure.database.supabase import get_client
 
 load_dotenv()
 
