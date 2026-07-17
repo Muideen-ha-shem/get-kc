@@ -160,6 +160,29 @@ def check_service_status() -> str:
     return "\n".join(report)
 
 
+
+
+@mcp.tool()
+def live_web_search(query: str, max_results: int = 10) -> str:
+    """Search the live web and return structured results.
+
+    Use this tool when the question requires up-to-date information that is
+    unlikely to be present in the static knowledge base (e.g. recent news,
+    product releases, current prices, live events).
+
+    Args:
+        query:       A natural-language search query.
+        max_results: Maximum number of results to return (1–20, default 10).
+
+    Returns:
+        A Markdown-formatted list of web results containing title, URL,
+        snippet, source domain, and relevance score (where available).
+        Returns a descriptive error message if no provider is configured.
+    """
+    from src.mcp.tools.live_search import live_web_search as _live_web_search
+    return _live_web_search(query=query, max_results=max_results)
+
+
 if __name__ == "__main__":
     # Start the FastMCP server when script is executed directly
     mcp.run()
