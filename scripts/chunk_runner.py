@@ -1,5 +1,5 @@
 import os
-from chunk import split_into_semantic_chunks
+from src.chunk import split_into_semantic_chunks
 
 
 def run_local_file_chunking():
