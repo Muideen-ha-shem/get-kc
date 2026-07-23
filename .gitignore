@@ -52,3 +52,9 @@ logs/
 cleaned_output/
 final_chunks_inspection/
 src/final_chunks_inspection/
+
+# Test artifacts and temporary files
+test_*.txt
+test_sample.py
+*.pyc
+.pytest_cache/
