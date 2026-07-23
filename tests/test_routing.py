@@ -187,11 +187,17 @@ class TestSourceRouterCustomKeywords:
     def test_custom_web_keywords(self):
         from src.services.routing.source_router import SourceRouter
 
-        router = SourceRouter(web_keywords=["weather", "forecast"])
+        # When using custom web_keywords, current_event_keywords also need
+        # to be customised so they don't interfere.
+        router = SourceRouter(
+            web_keywords=["weather", "forecast"],
+            current_event_keywords=[],  # Prevent default current-event keywords from matching
+        )
         assert router.route("weather today").web is True
-        # Time-sensitive words from default shouldn't match
+        # Without current_event_keywords, "latest news" falls through to KB default
         decision = router.route("latest news")
         assert decision.web is False
+        assert decision.knowledge is True  # default fallback
 
     def test_empty_keyword_lists(self):
         from src.services.routing.source_router import SourceRouter

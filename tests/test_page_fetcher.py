@@ -369,7 +369,9 @@ class TestPageFetcherRetryMechanics:
 
 
 class TestPageFetcherContextManager:
-    def test_context_manager_closes_client(self):
+    def test_context_manager_does_not_close_injected_client(self):
+        """PageFetcher only closes clients it owns (created internally).
+        An injected client is the caller's responsibility to manage."""
         from src.services.retrievers import PageFetcher
 
         mock_client = MagicMock(spec=httpx.Client)
@@ -379,7 +381,8 @@ class TestPageFetcherContextManager:
             html = fetcher.fetch("https://example.com")
             assert html == "<html><body>OK</body></html>"
 
-        mock_client.close.assert_called_once()
+        # The injected client should NOT be closed by PageFetcher
+        mock_client.close.assert_not_called()
 
     def test_context_manager_closes_owned_client(self):
         from src.services.retrievers import PageFetcher

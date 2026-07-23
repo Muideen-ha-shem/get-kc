@@ -51,6 +51,27 @@ logger: logging.Logger = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+# Tags that indicate a query is asking for recent/fresh information.
+# Items from live-web sources get a freshness boost when these are present.
+_FRESHNESS_KEYWORDS: frozenset[str] = frozenset({
+    "latest", "recent", "current", "today", "yesterday",
+    "new", "newest", "newly", "breaking", "upcoming",
+    "fresh", "updated", "update", "released", "launch",
+})
+
+# Boost multiplier applied to web-sourced evidence when freshness keywords
+# are detected in the question.
+_FRESHNESS_BOOST: float = 0.15
+
+# Default similarity threshold for confidence-based filtering.
+# Items below this threshold are considered low-confidence.
+_CONFIDENCE_THRESHOLD: float = 0.50
+
+
+# ---------------------------------------------------------------------------
 # Domain model
 # ---------------------------------------------------------------------------
 
@@ -193,6 +214,8 @@ class ContextMerger:
         knowledge: Sequence[Any] | None = None,
         web_search: Sequence[Any] | None = None,
         live_pages: Sequence[Any] | None = None,
+        *,
+        question: str | None = None,
     ) -> list[EvidenceItem]:
         """Merge evidence from up to three retriever outputs.
 
@@ -206,12 +229,18 @@ class ContextMerger:
             live_pages:  Output of an ephemeral RAG retriever; a list of
                          objects with ``text``, ``score``, and optional
                          ``source_idx`` / ``chunk_idx`` attributes.
+            question:    The original user question.  When provided, it is
+                         used to apply freshness-based scoring boosts for
+                         time-sensitive queries.
 
         Returns:
             A list of :class:`EvidenceItem` ordered by score descending
             (most relevant first), capped at ``max_evidence``.
         """
         all_evidence: list[EvidenceItem] = []
+
+        # Detect if the question is time-sensitive (freshness keywords)
+        needs_freshness = self._detect_freshness(question)
 
         # --- Ingest from knowledge base ---
         if knowledge:
@@ -239,12 +268,43 @@ class ContextMerger:
             return []
 
         logger.info(
-            "ContextMerger.merge: %d raw items before dedup.",
+            "ContextMerger.merge: %d raw items before dedup (freshness=%s).",
             len(all_evidence),
+            needs_freshness,
         )
 
         # --- Deduplicate ---
         all_evidence = self._deduplicate(all_evidence)
+
+        # --- Apply freshness boost when query is time-sensitive ---
+        if needs_freshness:
+            boosted: list[EvidenceItem] = []
+            for item in all_evidence:
+                # Web and live-page sources get a freshness boost
+                if item.source_type in ("web", "live_page"):
+                    new_score = min(1.0, item.score + _FRESHNESS_BOOST)
+                    logger.debug(
+                        "ContextMerger: freshness boost applied to %s item "
+                        "(score %.4f → %.4f, url=%s).",
+                        item.source_type,
+                        item.score,
+                        new_score,
+                        item.url or "(no url)",
+                    )
+                    boosted.append(
+                        EvidenceItem(
+                            content=item.content,
+                            score=new_score,
+                            title=item.title,
+                            url=item.url,
+                            source=item.source,
+                            source_type=item.source_type,
+                            metadata=item.metadata,
+                        )
+                    )
+                else:
+                    boosted.append(item)
+            all_evidence = boosted
 
         # --- Sort by score descending ---
         all_evidence.sort(key=lambda e: e.score, reverse=True)
@@ -459,6 +519,51 @@ class ContextMerger:
     # ------------------------------------------------------------------
     # Text similarity (character bigram overlap)
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Freshness detection
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _detect_freshness(question: str | None) -> bool:
+        """Return ``True`` if *question* contains freshness keywords.
+
+        This is used by the merger to boost web-sourced evidence scores
+        when the user is asking for recent or time-sensitive information.
+        """
+        if not question:
+            return False
+        q = question.lower()
+        for kw in _FRESHNESS_KEYWORDS:
+            if kw in q:
+                logger.debug("ContextMerger: freshness keyword %r found in question.", kw)
+                return True
+        return False
+
+    # ------------------------------------------------------------------
+    # Confidence evaluation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def compute_knowledge_confidence(
+        matches: Sequence[dict[str, Any]] | None,
+    ) -> float:
+        """Return a single confidence score in ``[0, 1]`` for knowledge matches.
+
+        The score is the highest similarity among the matches, or ``0.0``
+        if there are no matches.
+
+        This is used by ``SearchManager`` for confidence-based routing:
+        if confidence < threshold, live search is triggered as a fallback.
+        """
+        if not matches:
+            return 0.0
+        best = 0.0
+        for match in matches:
+            sim = match.get("similarity", 0.0)
+            if isinstance(sim, (int, float)):
+                best = max(best, float(sim))
+        return best
 
     @staticmethod
     def _bigram_similarity(a: str, b: str) -> float:

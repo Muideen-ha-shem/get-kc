@@ -31,7 +31,7 @@ from typing import Any, Sequence
 
 from ...shared.logging import get_logger
 from ..routing.source_router import SourceRouter, RoutingDecision
-from ..merger.context_merger import ContextMerger, EvidenceItem
+from ..merger.context_merger import ContextMerger, EvidenceItem, _CONFIDENCE_THRESHOLD
 
 logger: logging.Logger = get_logger(__name__)
 
@@ -148,21 +148,55 @@ class SearchManager:
 
         if actual_decision.knowledge:
             knowledge_evidence = self._retrieve_knowledge(question)
+            # Confidence-based routing: if KB results are low-confidence,
+            # automatically fall back to live search
+            from ..merger.context_merger import ContextMerger
+            kb_confidence = ContextMerger.compute_knowledge_confidence(knowledge_evidence)
+            logger.info(
+                "SearchManager: KB confidence=%.4f (threshold=%.2f).",
+                kb_confidence,
+                _CONFIDENCE_THRESHOLD,
+            )
+            if kb_confidence < _CONFIDENCE_THRESHOLD and not actual_decision.web:
+                logger.info(
+                    "SearchManager: KB confidence %.4f below threshold %.2f — "
+                    "triggering live search fallback.",
+                    kb_confidence,
+                    _CONFIDENCE_THRESHOLD,
+                )
+                actual_decision = RoutingDecision(knowledge=True, web=True)
+                web_search_results = self._retrieve_web_search(question)
+                live_page_chunks = self._retrieve_live_pages(question, web_search_results)
 
         if actual_decision.web:
             web_search_results = self._retrieve_web_search(question)
             live_page_chunks = self._retrieve_live_pages(question, web_search_results)
 
-        # --- Step 3: Merge ---
+        # --- Step 3: Enterprise fallback ---
+        # If the routing didn't include web search but we have no KB evidence,
+        # try web search as a last resort before returning empty.
+        if not knowledge_evidence and not web_search_results and not live_page_chunks:
+            logger.info(
+                "SearchManager: no evidence from any source — attempting live search fallback."
+            )
+            web_search_results = self._retrieve_web_search(question)
+            live_page_chunks = self._retrieve_live_pages(question, web_search_results)
+
+        # --- Step 4: Merge with freshness awareness ---
         evidence = self._context_merger.merge(
             knowledge=knowledge_evidence,
             web_search=web_search_results,
             live_pages=live_page_chunks,
+            question=question,
         )
 
         logger.info(
-            "SearchManager.retrieve: returning %d evidence items.",
+            "SearchManager.retrieve: returning %d evidence items "
+            "(knowledge=%s, web=%s, live_pages=%s).",
             len(evidence),
+            knowledge_evidence is not None,
+            web_search_results is not None,
+            live_page_chunks is not None,
         )
         return evidence
 

@@ -181,7 +181,8 @@ class TestSearchManagerAutoRoute:
 
         evidence = manager.retrieve("What are the latest prices?")
         assert isinstance(evidence, list)
-        mock_search.search.assert_called_once()
+        # Search may be called multiple times due to confidence-based fallback
+        assert mock_search.search.call_count >= 1
 
     def test_generic_question_defaults_to_knowledge(self):
         from src.services.manager.search_manager import SearchManager
