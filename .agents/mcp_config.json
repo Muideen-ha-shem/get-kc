@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "ha-shem-support": {
+      "command": "C:/Users/muideenil/Documents/get-kc/venv/Scripts/python.exe",
+      "args": [
+        "-m",
+        "src.mcp.server"
+      ],
+      "cwd": "C:/Users/muideenil/Documents/get-kc"
+    }
+  }
+}

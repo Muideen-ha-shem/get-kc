@@ -19,6 +19,28 @@ A modern, intelligent customer support platform powered by AI that leverages Ret
 
 ---
 
+## 🧱 Project Structure Overview
+
+The project has been reorganized into a clearer runtime and utility layout:
+
+```text
+project/
+├── frontend/                # React + TypeScript UI
+├── scripts/                 # standalone data and crawl utilities
+├── src/
+│   ├── api/                 # FastAPI routes, schemas, and service adapters
+│   ├── infrastructure/      # external integrations such as Supabase
+│   ├── orchestrator/        # request coordination for the chat flow
+│   ├── services/            # business services for knowledge and support
+│   └── ...                  # existing runtime modules kept for compatibility
+├── tests/                   # regression and validation tests
+└── docs/                    # documentation and architecture notes
+```
+
+Standalone scripts such as crawl, chunking, vector upload, and cleaning utilities now live under the scripts directory rather than inside the production source tree.
+
+---
+
 ## ✨ Features
 
 ### 🤖 Intelligent Chat Interface
