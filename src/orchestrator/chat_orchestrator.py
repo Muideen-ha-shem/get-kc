@@ -285,3 +285,9 @@ class ChatOrchestrator:
         thread = threading.Thread(target=_ingest, daemon=True, name="bg-learn")
         thread.start()
         logger.debug("ChatOrchestrator: background learning thread started.")
+
+
+# Module-level singleton (imported by ``src.api.routes.chat``).
+# Uses the legacy KB-only pipeline by default, which preserves backward
+# compatibility with the existing FastAPI route handler.
+chat_orchestrator = ChatOrchestrator()
