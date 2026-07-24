@@ -58,17 +58,26 @@
       - `search_service.py`, `models.py`
       - providers/
         - `base.py`, `tavily.py`, `brave.py`
+    - rag/
+      - `ephemeral_rag.py` — ranks text chunks extracted from freshly
+        fetched live pages against the question (lexical overlap, no
+        embedding calls); used by `SearchManager` for the live-web path
     - generator/
       - `response_generator.py` — generates cited answers from merged evidence
   - shared/
     - `logging.py`
 
-> **Note:** The `routing/`, `manager/`, `merger/`, `search/`, `retrievers/`, and
-> `generator/` packages implement a multi-source (knowledge base + live web)
-> retrieval pipeline. It is fully implemented and unit-tested but is **not**
-> currently injected into the module-level `chat_orchestrator` singleton used
-> by the API and CLI, so the deployed chat flow still answers from the
-> Supabase knowledge base only.
+> **Note:** The `routing/`, `manager/`, `merger/`, `search/`, `retrievers/`,
+> `rag/`, and `generator/` packages implement a multi-source (knowledge base +
+> live web) retrieval pipeline, and it **is** injected into the module-level
+> `chat_orchestrator` singleton used by the API and CLI. Each question is
+> routed to the knowledge base, live web search, or both; if no search
+> provider key is configured, web search calls fail individually per-request
+> and the pipeline falls back to knowledge-base-only evidence rather than
+> erroring out. `BackgroundLearning` (fire-and-forget ingestion of new URLs
+> after a web-sourced answer) remains referenced by type but unimplemented —
+> it stays inert (`background_learning=None`) until a real implementation is
+> added.
 
 ## Scripts and Utilities
 - scripts/ — standalone tools, run manually, not imported by the API

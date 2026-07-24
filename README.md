@@ -40,10 +40,12 @@ project/
 
 Standalone scripts such as crawl, chunking, vector upload, and cleaning utilities now live under the scripts directory rather than inside the production source tree.
 
-> **Note:** `src/services/` also contains a multi-source retrieval pipeline (source
-> routing, live web search, context merging) that is fully implemented and tested but
-> is **not yet wired into the default `chat_orchestrator` instance** used by the API and
-> CLI. The deployed chat flow currently answers from the Supabase knowledge base only.
+> **Note:** `src/services/` also contains a multi-source retrieval pipeline — source
+> routing, live web search, in-memory page RAG, and context merging — and it **is**
+> wired into the default `chat_orchestrator` instance used by the API and CLI. Each
+> question is routed to the knowledge base, live web search, or both; if
+> `TAVILY_API_KEY`/`BRAVE_SEARCH_API_KEY` are unset, web search calls simply fail
+> individually and the pipeline degrades gracefully to knowledge-base-only answers.
 
 ---
 
@@ -306,7 +308,7 @@ npm run dev
 | `GOOGLE_API_KEY` | API key for Google Gemini embeddings | `AIzaxxxxx` |
 | `SUPABASE_URL` | Supabase project URL | `https://xxxxx.supabase.co` |
 | `SUPABASE_KEY` | Supabase anonymous key | `eyJhbGc...` |
-| `TAVILY_API_KEY` *(optional)* | Live web search provider — used by the multi-source retrieval components (`SourceRouter`, `SearchManager`) and the MCP server's `live_web_search` tool. Not consumed by the default `/chat` flow yet. | `tvly-xxxxx` |
+| `TAVILY_API_KEY` *(optional)* | Live web search provider used by the `/chat` flow's multi-source retrieval (`SourceRouter` → `SearchManager`) and the MCP server's `live_web_search` tool. Without it (and without `BRAVE_SEARCH_API_KEY`), the chat flow falls back to knowledge-base-only answers. | `tvly-xxxxx` |
 | `BRAVE_SEARCH_API_KEY` *(optional)* | Fallback live web search provider, used if `TAVILY_API_KEY` is unset. Same scope as above. | `BSA-xxxxx` |
 
 > Backend host/port are **not** read from environment variables — set them via the

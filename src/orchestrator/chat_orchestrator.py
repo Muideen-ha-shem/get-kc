@@ -34,6 +34,10 @@ from typing import Any
 from ..api.schemas import ChatResponse
 from ..services.knowledge import KnowledgeService
 from ..services.support import SupportService
+from ..services.routing import SourceRouter
+from ..services.manager import SearchManager
+from ..services.merger import ContextMerger
+from ..services.generator import ResponseGenerator
 from ..shared.logging import get_logger
 
 logger: logging.Logger = get_logger(__name__)
@@ -288,6 +292,20 @@ class ChatOrchestrator:
 
 
 # Module-level singleton (imported by ``src.api.routes.chat``).
-# Uses the legacy KB-only pipeline by default, which preserves backward
-# compatibility with the existing FastAPI route handler.
-chat_orchestrator = ChatOrchestrator()
+#
+# Wired to the multi-source pipeline (SourceRouter -> SearchManager ->
+# ContextMerger -> ResponseGenerator). Each component builds its own
+# dependencies lazily from environment settings (Settings.from_environment())
+# on first use, so this is safe to construct at import time even before
+# .env is loaded. If TAVILY_API_KEY/BRAVE_SEARCH_API_KEY are unset, web
+# search calls fail individually and SearchManager falls back to
+# knowledge-base-only evidence — the chat flow degrades gracefully rather
+# than breaking. process_request/process_request_response/chat() all keep
+# their existing signatures and return shapes, preserving backward
+# compatibility with the FastAPI route handler and CLI.
+chat_orchestrator = ChatOrchestrator(
+    source_router=SourceRouter(),
+    search_manager=SearchManager(),
+    context_merger=ContextMerger(),
+    response_generator=ResponseGenerator(),
+)
