@@ -1,3 +1,4 @@
+# Core runtime dependencies (required to run the FastAPI backend)
 fastapi>=0.139.0
 uvicorn>=0.50.2
 pydantic>=2.13.4
@@ -11,3 +12,14 @@ httpx>=0.28.1
 requests>=2.34.2
 PyYAML>=6.0.3
 tavily-python>=0.5.0
+certifi>=2024.2.2
+cryptography>=42.0.0
+
+# MCP server (src/mcp/) — agent/IDE tooling integration
+mcp>=1.9.1
+
+# Data ingestion scripts (scripts/crawl.py, scripts/chunk_runner.py, scripts/upload_vectors.py)
+crawl4ai>=0.9.0
+
+# Test suite (tests/)
+pytest>=8.0.0

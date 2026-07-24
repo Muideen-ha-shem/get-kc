@@ -1,5 +1,11 @@
 # Ha-Shem AI Support Platform Architecture
 
+> **Status: Aspirational / target-state design.** This document describes a
+> future direction (LangGraph orchestration, RabbitMQ/Kafka, Celery workers,
+> OCR, etc.) that is **not** implemented in the current codebase. For the
+> system as it actually runs today, see [README.md](README.md) and
+> [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md).
+
 ## Objective
 Design a scalable AI platform that provides intelligent support across all Ha-Shem solutions and products while remaining modular, secure, and easy to extend.
 

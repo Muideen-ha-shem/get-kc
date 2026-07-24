@@ -2,13 +2,14 @@ import unittest
 from unittest.mock import patch
 
 from src.api.routes.chat import chat
-from src.api.schemas import ChatRequest
+from src.api.schemas import ChatRequest, ChatResponse
 from src.chat import ask_knowledge_base
 
 
 class ChatRouteRefactorTests(unittest.TestCase):
     def test_chat_uses_orchestrator_and_returns_response(self):
-        with patch("src.api.routes.chat.chat_orchestrator.process_request", return_value={"answer": "ok", "sources": ["https://example.com"]}) as mock_process:
+        mocked_response = ChatResponse(answer="ok", sources=["https://example.com"])
+        with patch("src.api.routes.chat.chat_orchestrator.process_request_response", return_value=mocked_response) as mock_process:
             result = chat(ChatRequest(message="hello"))
 
         self.assertEqual(result.answer, "ok")
