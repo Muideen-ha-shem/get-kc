@@ -30,21 +30,27 @@ project/
 ├── src/
 │   ├── api/                 # FastAPI routes, schemas, and service adapters
 │   ├── infrastructure/      # external integrations such as Supabase
+│   ├── mcp/                 # Model Context Protocol server (agent/IDE tooling)
 │   ├── orchestrator/        # request coordination for the chat flow
-│   ├── services/            # business services for knowledge and support
+│   ├── services/            # business services for knowledge, search, and support
 │   └── ...                  # existing runtime modules kept for compatibility
 ├── tests/                   # regression and validation tests
-└── docs/                    # documentation and architecture notes
+└── *.md                     # documentation and architecture notes (repo root)
 ```
 
 Standalone scripts such as crawl, chunking, vector upload, and cleaning utilities now live under the scripts directory rather than inside the production source tree.
+
+> **Note:** `src/services/` also contains a multi-source retrieval pipeline (source
+> routing, live web search, context merging) that is fully implemented and tested but
+> is **not yet wired into the default `chat_orchestrator` instance** used by the API and
+> CLI. The deployed chat flow currently answers from the Supabase knowledge base only.
 
 ---
 
 ## ✨ Features
 
 ### 🤖 Intelligent Chat Interface
-- **Real-time Streaming Responses**: Watch assistant replies appear character-by-character in real-time
+- **Typewriter-Style Response Reveal**: The frontend reveals each answer character-by-character for a live-typing feel (the backend returns the full answer in a single response; this effect is applied client-side)
 - **Markdown Formatting**: Automatically converts markdown bold (`**text**`) to properly styled text
 - **Source Attribution**: Each answer includes clickable links to the knowledge base sources
 - **Context-Aware Responses**: Uses RAG to ground all answers in your company's knowledge base
@@ -152,10 +158,6 @@ GOOGLE_API_KEY=your_google_gemini_api_key_here
 # Supabase Configuration
 SUPABASE_URL=your_supabase_url
 SUPABASE_KEY=your_supabase_anon_key
-
-# FastAPI Server Configuration
-API_HOST=127.0.0.1
-API_PORT=8000
 EOF
 
 # Edit the file and add your actual API keys
@@ -250,8 +252,6 @@ GROQ_API_KEY=your_groq_api_key_here
 GOOGLE_API_KEY=your_google_gemini_api_key_here
 SUPABASE_URL=your_supabase_url
 SUPABASE_KEY=your_supabase_anon_key
-API_HOST=127.0.0.1
-API_PORT=8000
 "@ | Out-File -FilePath .env -Encoding UTF8
 ```
 
@@ -261,8 +261,6 @@ GROQ_API_KEY=your_groq_api_key_here
 GOOGLE_API_KEY=your_google_gemini_api_key_here
 SUPABASE_URL=your_supabase_url
 SUPABASE_KEY=your_supabase_anon_key
-API_HOST=127.0.0.1
-API_PORT=8000
 ```
 
 #### Step 4: Set Up Node.js Frontend
@@ -308,8 +306,11 @@ npm run dev
 | `GOOGLE_API_KEY` | API key for Google Gemini embeddings | `AIzaxxxxx` |
 | `SUPABASE_URL` | Supabase project URL | `https://xxxxx.supabase.co` |
 | `SUPABASE_KEY` | Supabase anonymous key | `eyJhbGc...` |
-| `API_HOST` | Backend server host | `127.0.0.1` |
-| `API_PORT` | Backend server port | `8000` |
+| `TAVILY_API_KEY` *(optional)* | Live web search provider — used by the multi-source retrieval components (`SourceRouter`, `SearchManager`) and the MCP server's `live_web_search` tool. Not consumed by the default `/chat` flow yet. | `tvly-xxxxx` |
+| `BRAVE_SEARCH_API_KEY` *(optional)* | Fallback live web search provider, used if `TAVILY_API_KEY` is unset. Same scope as above. | `BSA-xxxxx` |
+
+> Backend host/port are **not** read from environment variables — set them via the
+> `--host`/`--port` flags on the `uvicorn` command shown below.
 
 ### API Endpoints
 
@@ -402,21 +403,39 @@ gunicorn src.api.app:app
 ```
 get-kc/
 ├── README.md                          # Documentation
+├── PROJECT_STRUCTURE.md               # Detailed file/directory reference
 ├── requirements.txt                   # Python dependencies
 ├── .env                               # Environment variables (create this)
 │
-├── src/                               # Backend source code
+├── src/                                # Backend source code
 │   ├── api/
 │   │   ├── app.py                     # FastAPI application setup
 │   │   ├── schemas.py                 # Request/response schemas
 │   │   ├── routes/
 │   │   │   └── chat.py                # Chat endpoint
 │   │   └── services/
+│   │       ├── embeddings.py          # Gemini embedding calls
 │   │       ├── retrieval.py           # Vector search & retrieval
 │   │       └── generator.py           # LLM response generation
-│   ├── sb.py                          # Supabase client setup
-│   ├── chat.py                        # Standalone chat script
-│   └── [other utility scripts]
+│   ├── orchestrator/
+│   │   └── chat_orchestrator.py       # Coordinates the chat request flow
+│   ├── services/                      # Knowledge, support, and multi-source
+│   │   │                              #   retrieval building blocks (see note above)
+│   │   ├── knowledge/, support/, documents/
+│   │   └── routing/, manager/, merger/, search/, retrievers/, generator/
+│   ├── infrastructure/database/       # Supabase client integration
+│   ├── mcp/                           # MCP server + tools (separate process)
+│   ├── shared/                        # Logging and shared utilities
+│   ├── sb.py                          # Supabase client accessor
+│   ├── chunk.py                       # Semantic chunking helper
+│   ├── intensive_cleaner.py           # Markdown cleaning helper
+│   └── chat.py / chat_cli.py          # CLI entry points
+│
+├── scripts/                           # Standalone crawl/chunk/upload utilities
+│   ├── crawl.py
+│   ├── chunk_runner.py
+│   ├── upload_vectors.py
+│   └── test_clean.py
 │
 ├── frontend/                          # React TypeScript frontend
 │   ├── src/
@@ -429,8 +448,7 @@ get-kc/
 │   ├── tailwind.config.js             # Tailwind CSS config
 │   └── tsconfig.json                  # TypeScript configuration
 │
-├── cleaned_output/                    # Processed knowledge base content
-└── final_chunks_inspection/           # Chunked content for vector DB
+└── tests/                             # pytest suite for orchestrator & services
 ```
 
 ---
@@ -466,13 +484,27 @@ taskkill /PID <PID> /F
 
 ---
 
+## 🧪 Running Tests
+
+```bash
+# From project root, with backend dependencies installed
+pytest
+```
+
+---
+
 ## 📦 Key Dependencies
 
-**Backend:**
+**Backend (runtime):**
 - `fastapi` - Web framework
 - `groq` - LLM API client
 - `google-genai` - Google Gemini embeddings
 - `supabase` - Vector database client
+
+**Backend (scripts / tooling, not required for the API itself):**
+- `mcp` - MCP server (`src/mcp/`) for agent/IDE tool integration
+- `crawl4ai` - web crawling for `scripts/crawl.py`
+- `pytest` - test suite
 
 **Frontend:**
 - `react` - UI framework
