@@ -22,10 +22,12 @@ Design decisions
 from __future__ import annotations
 
 import logging
+import ssl
 import time
 import random
 from urllib.parse import urlparse
 
+import certifi
 import httpx
 
 from ...shared.logging import get_logger
@@ -35,6 +37,11 @@ from .exceptions import (
     FetchTimeoutError,
     InvalidURLError,
     PageFetcherError,
+)
+from .ssl_chain_repair import (
+    build_repaired_ssl_context,
+    find_ssl_verification_error,
+    is_incomplete_chain_error,
 )
 
 logger: logging.Logger = get_logger(__name__)
@@ -115,10 +122,19 @@ class PageFetcher:
         follow_redirects: bool = True,
     ) -> None:
         self._owns_client = client is None
+        # Pin the trust store to certifi's CA bundle explicitly rather than
+        # relying on ambient OS/OpenSSL defaults, which vary across
+        # environments and can be stale (see ssl_chain_repair.py docstring
+        # for why this matters). This is a no-op change in verification
+        # strictness — certifi ships the same well-known Mozilla root set
+        # most platforms already trust — but makes the trust store
+        # consistent, auditable, and independently upgradable.
+        self._cafile: str = certifi.where()
         self._client: httpx.Client = client or httpx.Client(
             timeout=httpx.Timeout(timeout),
             follow_redirects=follow_redirects,
             headers={"User-Agent": user_agent},
+            verify=ssl.create_default_context(cafile=self._cafile),
         )
         self._timeout = timeout
         self._max_retries = max(0, max_retries)
@@ -126,6 +142,10 @@ class PageFetcher:
         self._backoff_max = backoff_max
         self._user_agent = user_agent
         self._follow_redirects = follow_redirects
+        # Per-hostname httpx.Client instances built with an AIA-repaired SSL
+        # context, for servers with an incomplete certificate chain. Only
+        # used (and only ever populated) when this instance owns its client.
+        self._chain_repair_clients: dict[str, httpx.Client] = {}
 
         logger.info(
             "PageFetcher initialised (timeout=%.1fs, max_retries=%d, follow_redirects=%s).",
@@ -162,6 +182,8 @@ class PageFetcher:
 
         last_exc: Exception | None = None
         attempt = 0
+        active_client = self._client
+        chain_repair_attempted = False
 
         while attempt <= self._max_retries:
             if attempt > 0:
@@ -179,7 +201,7 @@ class PageFetcher:
             t_start = time.monotonic()
 
             try:
-                response = self._client.get(url)
+                response = active_client.get(url)
                 elapsed = time.monotonic() - t_start
 
                 # Log redirect chain if any
@@ -252,6 +274,18 @@ class PageFetcher:
                 attempt += 1
 
             except httpx.ConnectError as exc:
+                if self._owns_client and not chain_repair_attempted:
+                    chain_repair_attempted = True
+                    repaired_client = self._try_chain_repair(url, exc)
+                    if repaired_client is not None:
+                        active_client = repaired_client
+                        logger.info(
+                            "PageFetcher: retrying %r with AIA-repaired trust chain "
+                            "(verification remains fully enforced).",
+                            url,
+                        )
+                        continue  # retry immediately — does not consume the retry budget
+
                 logger.warning(
                     "PageFetcher: connection error fetching %r (attempt %d) — %s.",
                     url,
@@ -293,6 +327,8 @@ class PageFetcher:
         """Close the underlying HTTP client if it was created internally."""
         if self._owns_client:
             self._client.close()
+            for repaired_client in self._chain_repair_clients.values():
+                repaired_client.close()
             logger.debug("PageFetcher: HTTP client closed.")
 
     # ------------------------------------------------------------------
@@ -308,6 +344,51 @@ class PageFetcher:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    def _try_chain_repair(self, url: str, exc: httpx.ConnectError) -> httpx.Client | None:
+        """Attempt AIA-based chain repair for an incomplete-certificate-chain error.
+
+        Returns a cached or newly built :class:`httpx.Client` configured with
+        a repaired (still fully verifying) SSL context, or ``None`` if *exc*
+        is not an incomplete-chain error or the repair could not be
+        completed. Never raises — repair failures fall back to the normal
+        error path so verification failures are never silently hidden.
+        """
+        ssl_error = find_ssl_verification_error(exc)
+        if ssl_error is None or not is_incomplete_chain_error(ssl_error):
+            return None
+
+        hostname = urlparse(url).hostname
+        if not hostname:
+            return None
+
+        if hostname in self._chain_repair_clients:
+            return self._chain_repair_clients[hostname]
+
+        logger.warning(
+            "PageFetcher: incomplete certificate chain for %r (%s) — "
+            "attempting AIA-based repair instead of failing immediately.",
+            hostname,
+            ssl_error.verify_message,
+        )
+
+        context = build_repaired_ssl_context(hostname, cafile=self._cafile)
+        if context is None:
+            logger.warning(
+                "PageFetcher: could not repair certificate chain for %r — "
+                "the underlying certificate error will be raised.",
+                hostname,
+            )
+            return None
+
+        repaired_client = httpx.Client(
+            timeout=httpx.Timeout(self._timeout),
+            follow_redirects=self._follow_redirects,
+            headers={"User-Agent": self._user_agent},
+            verify=context,
+        )
+        self._chain_repair_clients[hostname] = repaired_client
+        return repaired_client
 
     @staticmethod
     def _validate_url(url: str) -> None:

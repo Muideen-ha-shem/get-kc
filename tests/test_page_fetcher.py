@@ -15,6 +15,7 @@ covers:
 
 from __future__ import annotations
 
+import ssl
 import time
 from unittest.mock import MagicMock, PropertyMock, patch
 
@@ -322,6 +323,117 @@ class TestPageFetcherConnectionErrors:
             fetcher.fetch("https://example.com")
 
         assert "Protocol error" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# PageFetcher — SSL chain repair integration
+#
+# These simulate an incomplete-chain SSL failure (verify_code=20) the same
+# way real servers like a misconfigured HTTPS host produce it, without any
+# real network access — see tests/test_ssl_chain_repair.py for the pure
+# classification-logic unit tests, and the manual verification against
+# badssl.com's incomplete-chain / expired / self-signed test domains for the
+# end-to-end network behaviour.
+# ---------------------------------------------------------------------------
+
+
+def _make_incomplete_chain_connect_error() -> httpx.ConnectError:
+    ssl_err = ssl.SSLCertVerificationError()
+    ssl_err.verify_code = 20
+    ssl_err.verify_message = "unable to get local issuer certificate"
+    connect_err = httpx.ConnectError("[SSL: CERTIFICATE_VERIFY_FAILED]")
+    connect_err.__cause__ = ssl_err
+    return connect_err
+
+
+class TestPageFetcherChainRepair:
+    def test_incomplete_chain_error_triggers_repair_and_succeeds(self):
+        from src.services.retrievers import page_fetcher as pf_module
+
+        owned_client = MagicMock(spec=httpx.Client)
+        owned_client.get.side_effect = _make_incomplete_chain_connect_error()
+
+        repaired_client = MagicMock(spec=httpx.Client)
+        repaired_client.get.return_value = _make_mock_response(text="<html>Repaired</html>")
+
+        with patch.object(pf_module.httpx, "Client", side_effect=[owned_client, repaired_client]), \
+             patch.object(
+                 pf_module, "build_repaired_ssl_context", return_value=MagicMock(spec=ssl.SSLContext)
+             ) as mock_build:
+            fetcher = pf_module.PageFetcher(max_retries=0)
+            html = fetcher.fetch("https://ha-shem.com")
+
+        assert html == "<html>Repaired</html>"
+        mock_build.assert_called_once()
+        owned_client.get.assert_called_once_with("https://ha-shem.com")
+        repaired_client.get.assert_called_once_with("https://ha-shem.com")
+
+    def test_repair_failure_raises_original_connection_error(self):
+        from src.services.retrievers import page_fetcher as pf_module
+        from src.services.retrievers import FetchConnectionError
+
+        owned_client = MagicMock(spec=httpx.Client)
+        owned_client.get.side_effect = _make_incomplete_chain_connect_error()
+
+        with patch.object(pf_module.httpx, "Client", return_value=owned_client), \
+             patch.object(pf_module, "build_repaired_ssl_context", return_value=None) as mock_build:
+            fetcher = pf_module.PageFetcher(max_retries=0)
+            with pytest.raises(FetchConnectionError):
+                fetcher.fetch("https://ha-shem.com")
+
+        mock_build.assert_called_once()
+
+    def test_repair_not_attempted_when_client_is_injected(self):
+        from src.services.retrievers import page_fetcher as pf_module
+        from src.services.retrievers import FetchConnectionError
+
+        mock_client = MagicMock(spec=httpx.Client)
+        mock_client.get.side_effect = _make_incomplete_chain_connect_error()
+
+        with patch.object(pf_module, "build_repaired_ssl_context") as mock_build:
+            fetcher = pf_module.PageFetcher(client=mock_client, max_retries=0)
+            with pytest.raises(FetchConnectionError):
+                fetcher.fetch("https://ha-shem.com")
+
+        mock_build.assert_not_called()
+
+    def test_repair_attempted_at_most_once_per_fetch_call(self):
+        from src.services.retrievers import page_fetcher as pf_module
+        from src.services.retrievers import FetchConnectionError
+
+        owned_client = MagicMock(spec=httpx.Client)
+        owned_client.get.side_effect = _make_incomplete_chain_connect_error()
+
+        # Even the "repaired" client keeps failing (edge case) — repair must
+        # not be retried a second time within the same fetch() call.
+        repaired_client = MagicMock(spec=httpx.Client)
+        repaired_client.get.side_effect = _make_incomplete_chain_connect_error()
+
+        with patch.object(pf_module.httpx, "Client", side_effect=[owned_client, repaired_client]), \
+             patch.object(
+                 pf_module, "build_repaired_ssl_context", return_value=MagicMock(spec=ssl.SSLContext)
+             ) as mock_build:
+            fetcher = pf_module.PageFetcher(max_retries=1, backoff_base=0.01)
+            with pytest.raises(FetchConnectionError):
+                fetcher.fetch("https://ha-shem.com")
+
+        mock_build.assert_called_once()
+
+    def test_non_ssl_connect_error_does_not_attempt_repair(self):
+        """A plain connection error (no SSL cause chain) must not trigger repair."""
+        from src.services.retrievers import page_fetcher as pf_module
+        from src.services.retrievers import FetchConnectionError
+
+        owned_client = MagicMock(spec=httpx.Client)
+        owned_client.get.side_effect = httpx.ConnectError("Connection refused")
+
+        with patch.object(pf_module.httpx, "Client", return_value=owned_client), \
+             patch.object(pf_module, "build_repaired_ssl_context") as mock_build:
+            fetcher = pf_module.PageFetcher(max_retries=0)
+            with pytest.raises(FetchConnectionError):
+                fetcher.fetch("https://example.com")
+
+        mock_build.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

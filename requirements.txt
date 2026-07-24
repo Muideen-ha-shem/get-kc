@@ -12,6 +12,8 @@ httpx>=0.28.1
 requests>=2.34.2
 PyYAML>=6.0.3
 tavily-python>=0.5.0
+certifi>=2024.2.2
+cryptography>=42.0.0
 
 # MCP server (src/mcp/) — agent/IDE tooling integration
 mcp>=1.9.1

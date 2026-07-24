@@ -54,6 +54,9 @@
       - `context_merger.py` — dedupes/ranks evidence from multiple sources
     - retrievers/
       - `page_fetcher.py`, `exceptions.py`
+      - `ssl_chain_repair.py` — repairs incomplete TLS certificate chains
+        (missing intermediate CA) via AIA chasing, without disabling
+        verification; used automatically by `PageFetcher`
     - search/
       - `search_service.py`, `models.py`
       - providers/
