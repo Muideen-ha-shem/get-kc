@@ -1,106 +1,116 @@
 # Project Structure
 
 ## Repository Root
-- .env
+- .env (create locally; not committed)
 - .gitignore
-- package.json
-- package-lock.json
 - requirements.txt
 - README.md
-- README_COMPREHENSIVE.md
 - PROJECT_STRUCTURE.md
-- Ha-Shem_AI_Support_Platform_Architecture.md
-- infracstructure.md
-- node_modules/
-- venv/
+- Ha-Shem_AI_Support_Platform_Architecture.md (aspirational roadmap — see note in file)
+- rules.md (engineering spec behind the multi-source retrieval pipeline)
+- .agents/mcp_config.json (sample MCP client config)
 
 ## Application Source
 - src/
-  - __init__.py
-  - chat.py
-  - chat_cli.py
-  - chunk.py
-  - chunk_runner.py
-  - crawl.py
-  - intensive_cleaner.py
-  - test_clean.py
-  - upload_vectors.py
+  - `__init__.py`
+  - `chat.py` — module entry point (`python -m src.chat`)
+  - `chat_cli.py` — interactive CLI wrapping the knowledge base
+  - `chunk.py` — semantic chunking helper used by ingestion scripts
+  - `intensive_cleaner.py` — markdown/content cleaning helper used by ingestion scripts
+  - `sb.py` — Supabase client accessor
   - api/
-    - __init__.py
-    - app.py
-    - schemas.py
+    - `app.py` — FastAPI app setup, CORS, router registration
+    - `schemas.py` — `ChatRequest` / `ChatResponse` models
     - routes/
-      - __init__.py
-      - chat.py
+      - `chat.py` — `POST /chat` endpoint
     - services/
-      - __init__.py
-      - embeddings.py
-      - generator.py
-      - retrieval.py
+      - `embeddings.py` — Gemini embedding calls
+      - `generator.py` — Groq LLM generation
+      - `retrieval.py` — vector search & context retrieval
   - config/
-    - __init__.py
-    - settings.py
+    - `settings.py` — `Settings` dataclass (env-driven configuration)
   - infrastructure/
-    - __init__.py
     - database/
-      - __init__.py
-      - supabase.py
+      - `supabase.py` — Supabase client + `match_documents` RPC call
+  - mcp/
+    - `server.py` — MCP server exposing knowledge base / live-search tools
+    - tools/
+      - `live_search.py`
   - orchestrator/
-    - __init__.py
-    - chat_orchestrator.py
+    - `chat_orchestrator.py` — coordinates the chat request flow; runs the
+      legacy KB-only path by default (see note below)
   - services/
-    - __init__.py
     - documents/
-      - __init__.py
-      - document_service.py
+      - `document_service.py`
     - knowledge/
-      - __init__.py
-      - knowledge_service.py
+      - `knowledge_service.py`
     - support/
-      - __init__.py
-      - support_service.py
+      - `support_service.py`
+    - routing/
+      - `source_router.py` — keyword-based KB-vs-web routing decision
+    - manager/
+      - `search_manager.py` — executes routing decisions across retrievers
+    - merger/
+      - `context_merger.py` — dedupes/ranks evidence from multiple sources
+    - retrievers/
+      - `page_fetcher.py`, `exceptions.py`
+    - search/
+      - `search_service.py`, `models.py`
+      - providers/
+        - `base.py`, `tavily.py`, `brave.py`
+    - generator/
+      - `response_generator.py` — generates cited answers from merged evidence
   - shared/
-    - __init__.py
-    - logging.py
-  - final_chunks_inspection/
+    - `logging.py`
+
+> **Note:** The `routing/`, `manager/`, `merger/`, `search/`, `retrievers/`, and
+> `generator/` packages implement a multi-source (knowledge base + live web)
+> retrieval pipeline. It is fully implemented and unit-tested but is **not**
+> currently injected into the module-level `chat_orchestrator` singleton used
+> by the API and CLI, so the deployed chat flow still answers from the
+> Supabase knowledge base only.
 
 ## Scripts and Utilities
-- scripts/
-  - __init__.py
-  - chunk_runner.py
-  - crawl.py
-  - data/
-  - test_clean.py
-  - upload_vectors.py
+- scripts/ — standalone tools, run manually, not imported by the API
+  - `__init__.py`
+  - `crawl.py` — crawls ha-shem.com via crawl4ai
+  - `chunk_runner.py` — chunks cleaned content
+  - `upload_vectors.py` — embeds and uploads chunks to Supabase
+  - `test_clean.py` — exercises `intensive_cleaner`
 
 ## Frontend
 - frontend/
-  - index.html
-  - package.json
-  - package-lock.json
-  - postcss.config.js
+  - `index.html`
+  - `package.json`, `package-lock.json`
+  - `postcss.config.js`, `tailwind.config.js`
+  - `vite.config.ts`
+  - `tsconfig.json`, `tsconfig.app.json`, `tsconfig.node.json`
   - public/
+    - logo/
   - src/
-    - App.tsx
-    - main.tsx
-    - styles.css
-    - vite-env.d.ts
-  - tailwind.config.js
-  - tsconfig.app.json
-  - tsconfig.json
-  - tsconfig.node.json
-  - vite.config.js
-  - vite.config.ts
-
-## Data and Output Folders
-- cleaned_output/
-- final_chunks_inspection/
-- scripts/data/
+    - `App.tsx` — main chat application (includes client-side typewriter
+      reveal of responses)
+    - `main.tsx`
+    - `styles.css`
+    - `vite-env.d.ts`
 
 ## Tests
 - tests/
-  - test_chat_refactor.py
+  - `test_chat_refactor.py`
+  - `test_routing.py`
+  - `test_search_manager.py`
+  - `test_search_service.py`
+  - `test_context_merger.py`
+  - `test_response_generator.py`
+  - `test_page_fetcher.py`
+  - `test_mcp_server.py`
 
 ## Notes
-- The backend now follows a layered structure with API, orchestrator, services, infrastructure, shared utilities, and configuration modules.
-- Legacy compatibility modules remain in place for now, but the preferred execution path is the orchestrator and service-based flow.
+- The backend follows a layered structure: API, orchestrator, services,
+  infrastructure, shared utilities, and configuration modules.
+- Legacy compatibility modules (`src/chat.py`, `src/sb.py`, `src/chunk.py`,
+  `src/intensive_cleaner.py`) remain in place and are actively used by
+  `scripts/` and the CLI; they are not dead code.
+- Data output directories (`cleaned_output/`, `final_chunks_inspection/`) are
+  generated locally by the ingestion scripts and are gitignored — they will
+  not exist in a fresh checkout until you run the scripts.
