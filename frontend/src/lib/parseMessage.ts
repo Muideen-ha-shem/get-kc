@@ -268,5 +268,13 @@ export function parseMessageContent(raw: string): MessageBlock[] {
     blocks.push({ type: 'paragraph', text: lines.join(' ').trim() });
   }
 
-  return blocks;
+  // The model often appends its own numbered "Sources" section — the
+  // dedicated SourceChips row (built from the API's separate `sources`
+  // array, with real domain/title chips) already covers this and reads far
+  // better, so drop everything from that heading onward to avoid a
+  // duplicate, uglier list of raw citation text + parenthetical URLs.
+  const sourcesHeadingIndex = blocks.findIndex(
+    (block) => block.type === 'heading' && /^sources?$/i.test(block.text.trim())
+  );
+  return sourcesHeadingIndex === -1 ? blocks : blocks.slice(0, sourcesHeadingIndex);
 }
