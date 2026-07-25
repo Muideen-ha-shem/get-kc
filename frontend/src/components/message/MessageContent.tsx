@@ -8,6 +8,7 @@ import {
   FileCheck2,
   Gauge,
   Headphones,
+  type LucideIcon,
   MessagesSquare,
   Plug,
   ShieldCheck,
@@ -16,7 +17,6 @@ import {
   Target,
   Zap,
 } from 'lucide-react';
-import type { ComponentType } from 'react';
 import { detectProductHeader } from '../../lib/detectProduct';
 import {
   type FeatureItem,
@@ -30,7 +30,7 @@ import { solutions } from '../../solutions';
 // Generic keyword -> icon lookup for feature cards. Purely heuristic on the
 // feature title text, so it works for any future solution's feature set
 // without hardcoding a product name anywhere.
-const FEATURE_ICON_RULES: [RegExp, ComponentType<{ size?: number; className?: string }>][] = [
+const FEATURE_ICON_RULES: [RegExp, LucideIcon][] = [
   [/secur|complian|risk|kyc|verif/i, ShieldCheck],
   [/ai|smart|intelligent|adaptive/i, Sparkles],
   [/interview|chat|convers|message/i, MessagesSquare],
@@ -130,7 +130,7 @@ function FeatureCards({ items }: { items: FeatureItem[] }) {
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gold-50 text-gold-700">
                 <Icon size={14} />
               </span>
-              <p className="text-[13px] font-semibold text-ink">{item.title}</p>
+              <p className="text-[13px] font-semibold text-ink">{renderInlineText(item.title, `ft-${index}`)}</p>
             </div>
             {item.body ? <p className="mt-1.5 text-[13px] leading-6 text-ink/65">{renderInlineText(item.body, `fb-${index}`)}</p> : null}
           </div>
