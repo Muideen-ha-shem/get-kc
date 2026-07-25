@@ -48,6 +48,10 @@
       - `support_service.py`
     - routing/
       - `source_router.py` — keyword-based KB-vs-web routing decision
+      - `product_router.py` — classifies a question against named products
+        (SPIDIFY, ZivaAIRA) so knowledge-base retrieval can be scoped to
+        one of them; built and unit-tested but **not** wired into the
+        default `chat_orchestrator` singleton yet (see note below)
     - manager/
       - `search_manager.py` — executes routing decisions across retrievers
     - merger/
@@ -123,13 +127,53 @@
 > — it stays inert (`background_learning=None`) until a real
 > implementation is added.
 
+> **Multi-product knowledge base (SPIDIFY, ZivaAIRA):** `ProductRouter`
+> and the `product_filter` plumbing through `KnowledgeService` /
+> `retrieve_context()` / the new `match_documents_by_product` RPC are
+> fully built and tested, but **not** wired into the default
+> `chat_orchestrator` singleton, and the SQL migration that adds the
+> required columns/function (`scripts/sql/002_product_knowledge_schema.sql`)
+> has **not** been run against production. Wiring `ProductRouter` in before
+> that migration is applied would break knowledge retrieval for the
+> now-recognised product questions. See **Scripts and Utilities** below for
+> the ingestion order; once the migration is applied and
+> `scripts/crawl_spidify.py` / `scripts/crawl_zivaaira.py` have populated
+> the knowledge base, pass `product_router=ProductRouter()` to the
+> `SearchManager(...)` construction in `chat_orchestrator.py` to go live.
+
 ## Scripts and Utilities
 - scripts/ — standalone tools, run manually, not imported by the API
   - `__init__.py`
-  - `crawl.py` — crawls ha-shem.com via crawl4ai
+  - `crawl.py` — crawls ha-shem.com via crawl4ai; also exposes a reusable
+    `crawl_site(url, max_depth=2)` used by the product crawl scripts below
+  - `crawl_spidify.py` — crawls https://havisspidify.com/ into `crawled_pages`
+  - `crawl_zivaaira.py` — crawls https://aira.havis360.com/ into `crawled_pages`
+  - `product_metadata.py` — maps a crawled URL's domain to product metadata
+    (`product`, `category`, `source_type`); single source of truth for the
+    SPIDIFY/ZivaAIRA site URLs, used by the crawl scripts and `upload_vectors.py`
   - `chunk_runner.py` — chunks cleaned content
-  - `upload_vectors.py` — embeds and uploads chunks to Supabase
+  - `upload_vectors.py` — embeds and uploads chunks to Supabase; attaches
+    product metadata automatically via `product_metadata.py` when the
+    chunk's source URL matches a known product domain (no-op for
+    general ha-shem.com content, so this is a backward-compatible change)
   - `test_clean.py` — exercises `intensive_cleaner`
+  - sql/
+    - `002_product_knowledge_schema.sql` — **not executed by any script.**
+      Adds `product`/`category`/`source_type` columns to
+      `documentation_chunks`, adds a new `match_documents_by_product` RPC
+      function (additive — does not touch the existing `match_documents`),
+      and creates a `demo_requests` table for future lead-capture use. Run
+      this yourself (e.g. via the Supabase SQL editor) before running the
+      product crawl scripts or wiring `ProductRouter` into `chat_orchestrator`.
+
+**Multi-product ingestion order** (SPIDIFY / ZivaAIRA), each step manual:
+1. Run `scripts/sql/002_product_knowledge_schema.sql` in Supabase.
+2. `python -m scripts.crawl_spidify` and `python -m scripts.crawl_zivaaira`
+   (each populates `crawled_pages`, same as `crawl.py` does for ha-shem.com).
+3. `python -m scripts.test_clean` (cleans all rows in `crawled_pages`,
+   including the new product pages, into `cleaned_output/`).
+4. `python -m scripts.upload_vectors` (chunks, embeds, and uploads
+   everything in `cleaned_output/` — product metadata attached automatically).
 
 ## Frontend
 - frontend/
@@ -164,6 +208,10 @@
   - `test_domain_filter.py`
   - `test_citation_validator.py`
   - `test_cache.py`
+  - `test_product_router.py`
+  - `test_product_metadata.py`
+  - `test_retrieval.py`
+  - `test_knowledge_service.py`
   - `test_mcp_server.py`
 
 ## Notes

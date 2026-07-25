@@ -110,6 +110,14 @@ class SearchManager:
             shared across all three keyspaces via key prefixes.
         fetch_concurrency: Max concurrent page fetches (default 3). Only
             relevant when more than one live-page URL is being downloaded.
+        product_router: An object with a ``classify(question) -> ProductMatch``
+            method (see ``services.routing.ProductRouter``). When given and
+            it identifies a product with ``"high"`` confidence, knowledge-base
+            retrieval is scoped to that product via ``product_filter``
+            (requires ``scripts/sql/002_product_knowledge_schema.sql`` to
+            have been applied — see that file's docstring). When ``None``
+            (the default) or confidence isn't ``"high"``, knowledge
+            retrieval is unscoped — unchanged from prior behaviour.
         live_search_max_results: Max results per live search call (default 5).
         live_page_max_fetch: Max live pages to download for RAG (default 3).
 
@@ -140,6 +148,7 @@ class SearchManager:
         domain_filter: Any = None,
         response_cache: Any = None,
         fetch_concurrency: int = _DEFAULT_FETCH_CONCURRENCY,
+        product_router: Any = None,
         live_search_max_results: int = 5,
         live_page_max_fetch: int = 3,
     ) -> None:
@@ -159,10 +168,12 @@ class SearchManager:
         self._query_rewriter: Any = query_rewriter
         self._domain_filter: Any = domain_filter
         self._response_cache: Any = response_cache
+        self._product_router: Any = product_router
 
         logger.info(
             "SearchManager ready (router=%s, merger=%s, semantic_reranker=%s, source_ranker=%s, "
-            "query_rewriter=%s, domain_filter=%s, response_cache=%s, fetch_concurrency=%d).",
+            "query_rewriter=%s, domain_filter=%s, response_cache=%s, fetch_concurrency=%d, "
+            "product_router=%s).",
             type(self._source_router).__name__,
             type(self._context_merger).__name__,
             type(self._semantic_reranker).__name__ if self._semantic_reranker else "None",
@@ -171,6 +182,7 @@ class SearchManager:
             type(self._domain_filter).__name__ if self._domain_filter else "None",
             type(self._response_cache).__name__ if self._response_cache else "None",
             self._fetch_concurrency,
+            type(self._product_router).__name__ if self._product_router else "None",
         )
 
     # ------------------------------------------------------------------
@@ -287,7 +299,10 @@ class SearchManager:
         """Query the internal knowledge base (Supabase vector search)."""
         try:
             svc = self._get_knowledge_service()
-            matches, _similarities, _urls = svc.retrieve_context(question)
+            product_filter = self._classify_product(question)
+            matches, _similarities, _urls = svc.retrieve_context(
+                question, product_filter=product_filter
+            )
             if matches:
                 logger.info(
                     "SearchManager: knowledge base returned %d matches.", len(matches)
@@ -300,6 +315,27 @@ class SearchManager:
                 "SearchManager: knowledge retrieval failed — %s", exc, exc_info=True
             )
             return None
+
+    def _classify_product(self, question: str) -> list[str] | None:
+        """Return a product filter for *question*, if the router is confident.
+
+        Only scopes retrieval when exactly one product is identified
+        (``confidence == "high"``) — an ambiguous match (multiple products,
+        e.g. both named in one question) intentionally does *not* filter,
+        so retrieval stays unscoped and returns evidence for all of them
+        rather than guessing wrong and hiding relevant results.
+        """
+        if self._product_router is None:
+            return None
+        try:
+            match = self._product_router.classify(question)
+        except Exception as exc:
+            logger.warning("SearchManager: product classification failed — %s.", exc)
+            return None
+        if match.confidence == "high" and match.products:
+            logger.info("SearchManager: scoping knowledge retrieval to product %s.", match.products)
+            return list(match.products)
+        return None
 
     def _retrieve_web_search(self, question: str) -> list[Any] | None:
         """Perform a live web search."""

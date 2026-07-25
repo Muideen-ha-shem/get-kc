@@ -51,6 +51,13 @@ Standalone scripts such as crawl, chunking, vector upload, and cleaning utilitie
 > results/fetched pages/embeddings are cached in-memory for the process's uptime —
 > see [Retrieval Quality & Performance](#-retrieval-quality--performance) below.
 
+> **Multi-product knowledge base (SPIDIFY, ZivaAIRA):** `ProductRouter`
+> (question → product classification) and product-scoped retrieval are built
+> and tested but **not yet live** — they require a one-time SQL migration and
+> a crawl/ingestion run that haven't been executed against production. See
+> `PROJECT_STRUCTURE.md`'s "Multi-product ingestion order" for the exact
+> steps and current status.
+
 ---
 
 ## ✨ Features
