@@ -81,9 +81,19 @@ const splitTitleBody = (text: string): FeatureItem | null => {
   return { title: title.trim(), body: body.trim() };
 };
 
+/** Strips Markdown emphasis markers to plain text — for short label-like
+ * fields (a plan name, a table header, a row label) that render outside
+ * `renderInlineText` and would otherwise leak literal "**" characters. */
+function cleanInlineMarkup(text: string): string {
+  return text
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '$1')
+    .trim();
+}
+
 function parseMarkdownTable(lines: string[]): { headers: string[]; rows: string[][] } | null {
   if (lines.length < 2 || !isSeparatorRow(lines[1])) return null;
-  const headers = splitTableRow(lines[0]);
+  const headers = splitTableRow(lines[0]).map(cleanInlineMarkup);
   const rows = lines
     .slice(2)
     .map(splitTableRow)
@@ -105,10 +115,10 @@ function tableToPricingBlock(headers: string[], rows: string[][]): MessageBlock 
   const priceColIndex = headers.findIndex((h) => PRICE_ROW_LABEL_REGEX.test(h) || CURRENCY_REGEX.test(h));
   if (priceColIndex > 0) {
     const plans = rows.map((row) => ({
-      name: row[0] ?? '',
-      price: row[priceColIndex],
+      name: cleanInlineMarkup(row[0] ?? ''),
+      price: row[priceColIndex] ? cleanInlineMarkup(row[priceColIndex]) : undefined,
       rows: headers
-        .map((label, i) => ({ label, value: row[i] ?? '' }))
+        .map((label, i) => ({ label, value: row[i] ? cleanInlineMarkup(row[i]) : '' }))
         .filter((_, i) => i !== 0 && i !== priceColIndex && row[i]),
     }));
     if (plans.every((p) => p.name)) return { type: 'pricing', plans };
@@ -120,10 +130,10 @@ function tableToPricingBlock(headers: string[], rows: string[][]): MessageBlock 
     const priceRow = rows.find((row) => PRICE_ROW_LABEL_REGEX.test(row[0] ?? '') || CURRENCY_REGEX.test(row[0] ?? ''));
     const plans = headers.slice(1).map((name, colIdx) => ({
       name,
-      price: priceRow ? priceRow[colIdx + 1] : undefined,
+      price: priceRow?.[colIdx + 1] ? cleanInlineMarkup(priceRow[colIdx + 1]) : undefined,
       rows: rows
         .filter((row) => row !== priceRow)
-        .map((row) => ({ label: row[0] ?? '', value: row[colIdx + 1] ?? '' }))
+        .map((row) => ({ label: cleanInlineMarkup(row[0] ?? ''), value: row[colIdx + 1] ? cleanInlineMarkup(row[colIdx + 1]) : '' }))
         .filter((r) => r.value),
     }));
     if (plans.every((p) => p.name)) return { type: 'pricing', plans };
@@ -268,13 +278,16 @@ export function parseMessageContent(raw: string): MessageBlock[] {
     blocks.push({ type: 'paragraph', text: lines.join(' ').trim() });
   }
 
-  // The model often appends its own numbered "Sources" section — the
-  // dedicated SourceChips row (built from the API's separate `sources`
-  // array, with real domain/title chips) already covers this and reads far
-  // better, so drop everything from that heading onward to avoid a
+  // The model often appends its own "Sources" section — either as a
+  // standalone heading, or as a paragraph led by a bold "**Sources**"
+  // prefix. The dedicated SourceChips row (built from the API's separate
+  // `sources` array, with real domain/title chips) already covers this and
+  // reads far better, so drop everything from that point onward to avoid a
   // duplicate, uglier list of raw citation text + parenthetical URLs.
-  const sourcesHeadingIndex = blocks.findIndex(
-    (block) => block.type === 'heading' && /^sources?$/i.test(block.text.trim())
-  );
-  return sourcesHeadingIndex === -1 ? blocks : blocks.slice(0, sourcesHeadingIndex);
+  const sourcesSectionIndex = blocks.findIndex((block) => {
+    if (block.type === 'heading') return /^sources?$/i.test(block.text.trim());
+    if (block.type === 'paragraph') return /^\*\*sources?\*\*\s*[:\-–—]?/i.test(block.text.trim());
+    return false;
+  });
+  return sourcesSectionIndex === -1 ? blocks : blocks.slice(0, sourcesSectionIndex);
 }
