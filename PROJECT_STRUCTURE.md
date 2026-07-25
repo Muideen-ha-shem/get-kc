@@ -20,13 +20,19 @@
   - `sb.py` — Supabase client accessor
   - api/
     - `app.py` — FastAPI app setup, CORS, router registration
-    - `schemas.py` — `ChatRequest` / `ChatResponse` models
+    - `schemas.py` — `ChatRequest`/`ChatResponse` and `DemoRequest`/`DemoRequestResponse` models
     - routes/
       - `chat.py` — `POST /chat` endpoint
+      - `demo_request.py` — `POST /demo-request` endpoint (backs every
+        "Request a demo"/"Contact sales"/"Talk to an expert" CTA in the
+        frontend); returns 503 with a friendly message if the
+        `demo_requests` table hasn't been created yet, rather than leaking
+        a raw database error
     - services/
       - `embeddings.py` — Gemini embedding calls
       - `generator.py` — Groq LLM generation
       - `retrieval.py` — vector search & context retrieval
+      - `demo_requests.py` — persists demo/contact-sales leads to Supabase
   - config/
     - `settings.py` — `Settings` dataclass (env-driven configuration)
   - infrastructure/
@@ -48,10 +54,11 @@
       - `support_service.py`
     - routing/
       - `source_router.py` — keyword-based KB-vs-web routing decision
-      - `product_router.py` — classifies a question against named products
-        (SPIDIFY, ZivaAIRA) so knowledge-base retrieval can be scoped to
-        one of them; built and unit-tested but **not** wired into the
-        default `chat_orchestrator` singleton yet (see note below)
+      - `product_router.py` — classifies a question against named
+        solutions in the catalog (SPIDIFY, ZivaAIRA, and any future
+        additions) so knowledge-base retrieval can be scoped to one of
+        them; built and unit-tested but **not** wired into the default
+        `chat_orchestrator` singleton yet (see note below)
     - manager/
       - `search_manager.py` — executes routing decisions across retrievers
     - merger/
@@ -160,36 +167,75 @@
   - sql/
     - `002_product_knowledge_schema.sql` — **not executed by any script.**
       Adds `product`/`category`/`source_type` columns to
-      `documentation_chunks`, adds a new `match_documents_by_product` RPC
-      function (additive — does not touch the existing `match_documents`),
-      and creates a `demo_requests` table for future lead-capture use. Run
-      this yourself (e.g. via the Supabase SQL editor) before running the
-      product crawl scripts or wiring `ProductRouter` into `chat_orchestrator`.
+      `documentation_chunks` and a new `match_documents_by_product` RPC
+      function (additive — does not touch the existing `match_documents`).
+      Run this yourself (e.g. via the Supabase SQL editor) before running
+      the solution crawl scripts or wiring `ProductRouter` into
+      `chat_orchestrator`. Also includes the `demo_requests` table (see
+      003 below — that file is a standalone extract of the same table for
+      when you only want demo requests working).
+    - `003_demo_requests.sql` — **not executed by any script or by Claude**
+      (no DDL access with the credentials in `.env` — only PostgREST via
+      `SUPABASE_URL`/`SUPABASE_KEY`, which can't run `CREATE TABLE`). A
+      standalone extract of just the `demo_requests` table, independent of
+      002. Once this exists, `POST /demo-request` works immediately with
+      no code changes.
 
-**Multi-product ingestion order** (SPIDIFY / ZivaAIRA), each step manual:
+**Multi-solution ingestion order** (SPIDIFY / ZivaAIRA), each step manual:
 1. Run `scripts/sql/002_product_knowledge_schema.sql` in Supabase.
 2. `python -m scripts.crawl_spidify` and `python -m scripts.crawl_zivaaira`
    (each populates `crawled_pages`, same as `crawl.py` does for ha-shem.com).
 3. `python -m scripts.test_clean` (cleans all rows in `crawled_pages`,
-   including the new product pages, into `cleaned_output/`).
+   including the new solution pages, into `cleaned_output/`).
 4. `python -m scripts.upload_vectors` (chunks, embeds, and uploads
-   everything in `cleaned_output/` — product metadata attached automatically).
+   everything in `cleaned_output/` — solution metadata attached automatically).
+
+**Demo requests**, independent of the above: run
+`scripts/sql/003_demo_requests.sql` in Supabase — `POST /demo-request`
+starts working immediately, no other steps needed.
 
 ## Frontend
+HavisIQ — "AI Solutions Advisor for the Ha-Shem ecosystem." The UI is
+organised around a scalable **solution catalog**, not individual products:
+SPIDIFY and ZivaAIRA are the first two entries (`status: 'live'`, each with
+its own knowledge base and site), alongside advisory categories
+(cybersecurity, cloud services, software development, managed services,
+training) that Ha-Shem already delivers on without a dedicated product yet
+(`status: 'advisory'`). Adding a new solution — including promoting an
+advisory category to "live" once it has its own site — is a one-line
+addition to `src/solutions.ts`; no other file needs to change.
+
 - frontend/
   - `index.html`
   - `package.json`, `package-lock.json`
-  - `postcss.config.js`, `tailwind.config.js`
+  - `postcss.config.js`, `tailwind.config.js` — `ink`/`paper`/`gold` brand
+    tokens and the `font-display` (Georgia-based serif) type family
   - `vite.config.ts`
   - `tsconfig.json`, `tsconfig.app.json`, `tsconfig.node.json`
   - public/
-    - logo/
+    - logo/ (legacy Ha-Shem PNG logo — unused; the HavisIQ mark is now an
+      inline SVG component, not a static asset)
   - src/
-    - `App.tsx` — main chat application (includes client-side typewriter
-      reveal of responses)
+    - `App.tsx` — main application: hero, solution catalog grid, chat
+      widget (client-side typewriter reveal of `/chat` responses),
+      support/appointment sections
+    - `solutions.ts` — the solution catalog data (single source of truth
+      for the catalog grid, the compare view, and demo-request context)
     - `main.tsx`
     - `styles.css`
     - `vite-env.d.ts`
+    - components/
+      - `HavisIQMark.tsx` — the brand mark (H monogram, broken crossbar,
+        gold node). Colors are set inline, not via Tailwind utility
+        classes — this is a small, fixed-identity element that must never
+        depend on the Tailwind build picking up a config change
+      - `DemoRequestModal.tsx` — the shared form behind every "Request a
+        demo"/"Contact sales"/"Talk to an expert" CTA; posts to
+        `POST /demo-request`, pre-fills solution context when opened from
+        a specific catalog card, and shows a friendly inline error (not a
+        raw fetch failure) if the backend returns one
+      - `CompareSolutionsModal.tsx` — read-only side-by-side view of the
+        full catalog, each card also opening `DemoRequestModal`
 
 ## Tests
 - tests/
@@ -212,6 +258,7 @@
   - `test_product_metadata.py`
   - `test_retrieval.py`
   - `test_knowledge_service.py`
+  - `test_demo_requests.py`
   - `test_mcp_server.py`
 
 ## Notes
