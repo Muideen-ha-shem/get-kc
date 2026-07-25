@@ -63,24 +63,65 @@
         - `base.py`, `tavily.py`, `brave.py`
     - rag/
       - `ephemeral_rag.py` — ranks text chunks extracted from freshly
-        fetched live pages against the question (lexical overlap, no
-        embedding calls); used by `SearchManager` for the live-web path
+        fetched live pages against the question. Lexical word-overlap by
+        default; if a `semantic_reranker` is injected, the top lexical
+        candidates are re-scored by embedding cosine similarity, falling
+        back to lexical ranking if that fails
+      - `semantic_reranker.py` — embedding-based (Gemini) cosine-similarity
+        reranking of a text shortlist; returns `None` on any failure
+        (missing credentials, network error) so callers can fall back
+    - ranking/
+      - `source_ranker.py` — re-scores and trims `ContextMerger`'s merged
+        evidence using relevance, source-authority tier (official site >
+        docs > trusted news > social media), freshness, and a near-duplicate
+        penalty; optional, injected into `SearchManager`
+    - query/
+      - `query_rewriter.py` — deterministic (no LLM) rewriting of a
+        question into a concise search-engine query: strips filler words,
+        canonicalises the configured company name, appends a freshness
+        date token and a `site:` hint when relevant. Falls back to the
+        original question on any error
+    - filtering/
+      - `domain_filter.py` — drops low-quality domains (generic
+        dictionaries, Quora, etc.) and prioritises the rest by the same
+        authority tier as `SourceRanker`, *before* `PageFetcher` downloads
+        anything
+    - validation/
+      - `citation_validator.py` — removes duplicate and placeholder-URL
+        (`"Unknown URL"`) citations from `ResponseGenerator`'s output;
+        never touches the LLM's answer text, only the returned
+        citations/sources metadata
     - generator/
       - `response_generator.py` — generates cited answers from merged evidence
   - shared/
     - `logging.py`
+    - `cache.py` — `TTLCache`, a generic thread-safe time-to-live cache
+      used for `SearchManager`'s response cache (rewritten queries, search
+      results, fetched pages) and `SemanticReranker`'s embedding cache
+    - `domain_classifier.py` — shared domain-authority/quality tier
+      classification (official / vendor docs / trusted news / social
+      media / low-quality), used by both `SourceRanker` and
+      `DomainQualityFilter` so the tier lists exist in exactly one place
 
 > **Note:** The `routing/`, `manager/`, `merger/`, `search/`, `retrievers/`,
-> `rag/`, and `generator/` packages implement a multi-source (knowledge base +
-> live web) retrieval pipeline, and it **is** injected into the module-level
-> `chat_orchestrator` singleton used by the API and CLI. Each question is
-> routed to the knowledge base, live web search, or both; if no search
-> provider key is configured, web search calls fail individually per-request
-> and the pipeline falls back to knowledge-base-only evidence rather than
-> erroring out. `BackgroundLearning` (fire-and-forget ingestion of new URLs
-> after a web-sourced answer) remains referenced by type but unimplemented —
-> it stays inert (`background_learning=None`) until a real implementation is
-> added.
+> `rag/`, `ranking/`, `query/`, `filtering/`, `validation/`, and
+> `generator/` packages implement a multi-source (knowledge base + live
+> web) retrieval pipeline with several optional quality and performance
+> refinements — query rewriting, domain-quality filtering, semantic
+> reranking of live-page chunks, intelligent source ranking, citation
+> validation, concurrent page fetching, and TTL-based response/embedding
+> caching — and it **is** injected into the module-level `chat_orchestrator`
+> singleton used by the API and CLI. Each question is routed to the
+> knowledge base, live web search, or both; if no search provider key is
+> configured, web search calls fail individually per-request and the
+> pipeline falls back to knowledge-base-only evidence rather than erroring
+> out. Every refinement stage degrades gracefully on its own failure
+> (falls back to lexical ranking, unranked/unfiltered evidence, the
+> original question, sequential fetching, etc.) rather than breaking the
+> response. `BackgroundLearning` (fire-and-forget ingestion of new URLs
+> after a web-sourced answer) remains referenced by type but unimplemented
+> — it stays inert (`background_learning=None`) until a real
+> implementation is added.
 
 ## Scripts and Utilities
 - scripts/ — standalone tools, run manually, not imported by the API
@@ -115,6 +156,14 @@
   - `test_context_merger.py`
   - `test_response_generator.py`
   - `test_page_fetcher.py`
+  - `test_ssl_chain_repair.py`
+  - `test_ephemeral_rag.py`
+  - `test_semantic_reranker.py`
+  - `test_source_ranker.py`
+  - `test_query_rewriter.py`
+  - `test_domain_filter.py`
+  - `test_citation_validator.py`
+  - `test_cache.py`
   - `test_mcp_server.py`
 
 ## Notes

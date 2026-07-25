@@ -41,11 +41,15 @@ project/
 Standalone scripts such as crawl, chunking, vector upload, and cleaning utilities now live under the scripts directory rather than inside the production source tree.
 
 > **Note:** `src/services/` also contains a multi-source retrieval pipeline — source
-> routing, live web search, in-memory page RAG, and context merging — and it **is**
-> wired into the default `chat_orchestrator` instance used by the API and CLI. Each
-> question is routed to the knowledge base, live web search, or both; if
-> `TAVILY_API_KEY`/`BRAVE_SEARCH_API_KEY` are unset, web search calls simply fail
-> individually and the pipeline degrades gracefully to knowledge-base-only answers.
+> routing, query rewriting, live web search, domain-quality filtering, in-memory page
+> RAG, semantic reranking, intelligent source ranking, citation validation, and
+> context merging — and it **is** wired into the default `chat_orchestrator` instance
+> used by the API and CLI. Each question is routed to the knowledge base, live web
+> search, or both; if `TAVILY_API_KEY`/`BRAVE_SEARCH_API_KEY` are unset, web search
+> calls simply fail individually and the pipeline degrades gracefully to
+> knowledge-base-only answers. Live-page downloads run concurrently, and search
+> results/fetched pages/embeddings are cached in-memory for the process's uptime —
+> see [Retrieval Quality & Performance](#-retrieval-quality--performance) below.
 
 ---
 
@@ -73,6 +77,31 @@ Standalone scripts such as crawl, chunking, vector upload, and cleaning utilitie
 - **CORS Support**: Secure cross-origin communication
 - **API Rate Limiting**: Efficient request handling
 - **Error Handling**: Graceful fallbacks for unavailable services
+
+### 🎯 Retrieval Quality & Performance
+
+All of the following are optional pipeline refinements — each degrades gracefully
+to prior behaviour on its own failure (see [Project Structure Overview](#-project-structure-overview)
+for exactly where each one sits in the pipeline):
+
+- **Query Rewriting**: Deterministic (no LLM) rewriting of natural-language questions
+  into concise search-engine queries — strips filler words, canonicalises the
+  company name, adds a freshness date token and a `site:` hint when relevant
+- **Domain-Quality Filtering**: Drops low-quality domains (generic dictionaries,
+  Quora, etc.) and prioritises official/documentation/news sources before any page
+  is fetched
+- **Semantic Reranking**: Embedding-based (Gemini) cosine-similarity reranking of
+  live-page chunks, falling back to lexical word-overlap ranking if embeddings are
+  unavailable
+- **Intelligent Source Ranking**: Multi-signal ranking of merged evidence —
+  relevance, source authority, freshness, near-duplicate penalty
+- **Citation Validation**: Removes duplicate and placeholder-URL (`"Unknown URL"`)
+  citations before they reach the API response
+- **Concurrent Page Fetching**: Live pages download in parallel (bounded by a
+  configurable concurrency limit) instead of one at a time
+- **Response & Embedding Caching**: In-memory TTL caches for rewritten queries,
+  search results, fetched pages, and embeddings, so repeated questions within the
+  cache window skip redundant network/API calls
 
 ---
 
@@ -310,6 +339,9 @@ npm run dev
 | `SUPABASE_KEY` | Supabase anonymous key | `eyJhbGc...` |
 | `TAVILY_API_KEY` *(optional)* | Live web search provider used by the `/chat` flow's multi-source retrieval (`SourceRouter` → `SearchManager`) and the MCP server's `live_web_search` tool. Without it (and without `BRAVE_SEARCH_API_KEY`), the chat flow falls back to knowledge-base-only answers. | `tvly-xxxxx` |
 | `BRAVE_SEARCH_API_KEY` *(optional)* | Fallback live web search provider, used if `TAVILY_API_KEY` is unset. Same scope as above. | `BSA-xxxxx` |
+| `OFFICIAL_DOMAINS` *(optional)* | Comma-separated domains `SourceRanker` and `DomainQualityFilter` treat as this deployment's own "official website" authority tier (ranked above generic web results); also used by `QueryRewriter` as its default `site:` hint domain. | `ha-shem.com,ha-shemacademy.com` |
+| `COMPANY_NAME` *(optional)* | Short company name `QueryRewriter` detects in questions (case-insensitive) to trigger name canonicalisation and the `site:` hint. | `ha-shem` |
+| `COMPANY_FULL_NAME` *(optional)* | Canonical company name `QueryRewriter` substitutes in when `COMPANY_NAME` is detected. | `Ha-Shem Limited` |
 
 > Backend host/port are **not** read from environment variables — set them via the
 > `--host`/`--port` flags on the `uvicorn` command shown below.
