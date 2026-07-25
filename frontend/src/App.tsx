@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from 'react';
 import {
   CalendarDays,
   CheckCircle2,
@@ -9,6 +9,7 @@ import {
   Headphones,
   MessageCircleMore,
   Sparkles,
+  Square,
   Ticket,
   SendHorizonal,
   Zap,
@@ -38,6 +39,11 @@ const supportWidgets = [
 ];
 
 const appointmentSlots = ['09:00', '10:30', '13:00', '15:30'];
+
+const CHAT_PANEL_DEFAULT_WIDTH = 420;
+const CHAT_PANEL_DEFAULT_LEFT = 16;
+const CHAT_PANEL_MIN_WIDTH = 320;
+const CHAT_PANEL_MAX_WIDTH = 640;
 
 const suggestedPrompts = [
   'What does SPIDIFY do?',
@@ -83,12 +89,62 @@ function App() {
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const streamIntervalRef = useRef<number | null>(null);
+  const activeAssistantIdRef = useRef<number | null>(null);
 
   const [demoModal, setDemoModal] = useState<{ open: boolean; solution?: Solution }>({ open: false });
   const [isCompareOpen, setIsCompareOpen] = useState(false);
 
   const openDemoModal = (solution?: Solution) => setDemoModal({ open: true, solution });
   const closeDemoModal = () => setDemoModal((prev) => ({ ...prev, open: false }));
+
+  const [chatWidth, setChatWidth] = useState(CHAT_PANEL_DEFAULT_WIDTH);
+  const [chatLeft, setChatLeft] = useState(CHAT_PANEL_DEFAULT_LEFT);
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeStateRef = useRef<{ startX: number; startWidth: number; startLeft: number } | null>(null);
+
+  useEffect(() => {
+    const handleMouseMove = (event: MouseEvent) => {
+      const state = resizeStateRef.current;
+      if (!state) return;
+
+      const delta = event.clientX - state.startX;
+      const rightEdge = state.startLeft + state.startWidth;
+      const maxWidth = Math.min(CHAT_PANEL_MAX_WIDTH, window.innerWidth - 32);
+
+      let nextWidth = state.startWidth - delta;
+      nextWidth = Math.min(maxWidth, Math.max(CHAT_PANEL_MIN_WIDTH, nextWidth));
+
+      const nextLeft = Math.max(16, rightEdge - nextWidth);
+
+      setChatWidth(nextWidth);
+      setChatLeft(nextLeft);
+    };
+
+    const handleMouseUp = () => {
+      if (!resizeStateRef.current) return;
+      resizeStateRef.current = null;
+      setIsResizing(false);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
+
+  const handleResizeStart = (event: ReactMouseEvent) => {
+    event.preventDefault();
+    resizeStateRef.current = { startX: event.clientX, startWidth: chatWidth, startLeft: chatLeft };
+    setIsResizing(true);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+  };
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -107,12 +163,16 @@ function App() {
 
     const userMessage: Message = { id: Date.now(), sender: 'user', content: trimmed };
     const assistantMessageId = Date.now() + 1;
+    activeAssistantIdRef.current = assistantMessageId;
 
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
     setIsAssistantOpen(true);
     setIsTyping(true);
     setMessages((prev) => [...prev, { id: assistantMessageId, sender: 'assistant', content: '', isTyping: true }]);
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     try {
       const response = await fetch(`${API_BASE_URL || 'http://localhost:8000'}/chat`, {
@@ -121,6 +181,7 @@ function App() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ message: trimmed }),
+        signal: controller.signal,
       });
 
       const data = await response.json();
@@ -140,13 +201,20 @@ function App() {
 
         if (streamedIndex >= answer.length) {
           window.clearInterval(streamInterval);
+          streamIntervalRef.current = null;
+          abortControllerRef.current = null;
+          activeAssistantIdRef.current = null;
           setMessages((prev) =>
             prev.map((message) => (message.id === assistantMessageId ? { ...message, isTyping: false, sources } : message))
           );
           setIsTyping(false);
         }
       }, streamSpeed);
+      streamIntervalRef.current = streamInterval;
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
       setMessages((prev) =>
         prev.map((message) =>
           message.id === assistantMessageId
@@ -155,7 +223,32 @@ function App() {
         )
       );
       setIsTyping(false);
+      abortControllerRef.current = null;
+      activeAssistantIdRef.current = null;
     }
+  };
+
+  const handleStopGenerating = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    if (streamIntervalRef.current !== null) {
+      window.clearInterval(streamIntervalRef.current);
+      streamIntervalRef.current = null;
+    }
+    const targetId = activeAssistantIdRef.current;
+    if (targetId !== null) {
+      setMessages((prev) =>
+        prev
+          .map((message) => (message.id === targetId ? { ...message, isTyping: false } : message))
+          // Nothing had streamed in yet (stopped while still awaiting the
+          // response) — drop the empty bubble rather than leaving it stranded.
+          .filter((message) => message.id !== targetId || message.content.trim().length > 0)
+      );
+    }
+    activeAssistantIdRef.current = null;
+    setIsTyping(false);
   };
 
   const quickActions = [
@@ -270,33 +363,88 @@ function App() {
                     </div>
                   </div>
 
-                  <div className="mt-4 space-y-3 rounded-2xl border border-white/10 bg-black/20 p-4">
-                    <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-paper/85">
+                  <div className="relative mt-4 space-y-3 overflow-hidden rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <motion.div
+                      aria-hidden
+                      className="pointer-events-none absolute -left-10 -top-12 h-32 w-32 rounded-full bg-gold-400/20 blur-3xl"
+                      animate={{ x: [0, 16, 0], y: [0, 12, 0], opacity: [0.45, 0.75, 0.45] }}
+                      transition={{ duration: 7, repeat: Infinity, ease: 'easeInOut' }}
+                    />
+                    <motion.div
+                      aria-hidden
+                      className="pointer-events-none absolute -bottom-14 -right-10 h-36 w-36 rounded-full bg-emerald-400/10 blur-3xl"
+                      animate={{ x: [0, -14, 0], y: [0, -10, 0], opacity: [0.35, 0.65, 0.35] }}
+                      transition={{ duration: 9, repeat: Infinity, ease: 'easeInOut', delay: 1 }}
+                    />
+
+                    <motion.div
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.5, delay: 0.2 }}
+                      className="relative rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-paper/85"
+                    >
                       Hello! Tell me what you're trying to solve and I'll match you to the right Ha-Shem solution.
-                    </div>
-                    <div className="flex justify-end">
+                    </motion.div>
+
+                    <motion.div
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.5, delay: 0.5 }}
+                      className="relative flex justify-end"
+                    >
                       <div className="max-w-[80%] rounded-2xl bg-gold-500/20 p-3 text-sm text-gold-100">
                         What cybersecurity support do you offer?
                       </div>
-                    </div>
-                    <div className="rounded-2xl border border-gold-400/25 bg-gold-500/10 p-3">
-                      <div className="flex items-center gap-2 text-sm font-medium text-gold-200">
+                    </motion.div>
+
+                    <motion.div
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.5, delay: 0.8 }}
+                      className="relative overflow-hidden rounded-2xl border border-gold-400/25 bg-gold-500/10 p-3"
+                    >
+                      <motion.div
+                        aria-hidden
+                        className="pointer-events-none absolute inset-0 rounded-2xl"
+                        animate={{
+                          boxShadow: [
+                            '0 0 0 0 rgba(200,154,62,0)',
+                            '0 0 0 3px rgba(200,154,62,0.18)',
+                            '0 0 0 0 rgba(200,154,62,0)',
+                          ],
+                        }}
+                        transition={{ duration: 2.6, repeat: Infinity, ease: 'easeInOut' }}
+                      />
+                      <div className="relative flex items-center gap-2 text-sm font-medium text-gold-200">
                         <Sparkles size={16} />
                         Recommended: Cybersecurity
                       </div>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {suggestedPrompts.map((prompt) => (
-                          <button key={prompt} onClick={() => handlePrompt(prompt)} className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs text-paper/85 transition hover:bg-white/20">
+                      <div className="relative mt-3 flex flex-wrap gap-2">
+                        {suggestedPrompts.map((prompt, index) => (
+                          <motion.button
+                            key={prompt}
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.4, delay: 1 + index * 0.08 }}
+                            onClick={() => handlePrompt(prompt)}
+                            className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs text-paper/85 transition hover:bg-white/20"
+                          >
                             {prompt}
-                          </button>
+                          </motion.button>
                         ))}
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm text-paper/60">
+                    </motion.div>
+
+                    <div className="relative flex items-center gap-2 text-sm text-paper/60">
                       <div className="flex gap-1">
-                        <span className="h-2 w-2 rounded-full bg-gold-400" />
-                        <span className="h-2 w-2 rounded-full bg-gold-400/70" />
-                        <span className="h-2 w-2 rounded-full bg-gold-400/40" />
+                        {[0, 1, 2].map((dot) => (
+                          <motion.span
+                            key={dot}
+                            className="h-2 w-2 rounded-full bg-gold-400"
+                            animate={{ opacity: [0.3, 1, 0.3], scale: [0.85, 1, 0.85] }}
+                            transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut', delay: dot * 0.2 }}
+                          />
+                        ))}
                       </div>
                       {isTyping ? 'HavisIQ is thinking...' : 'Ready to assist'}
                     </div>
@@ -570,7 +718,25 @@ function App() {
 
       <AnimatePresence>
         {isAssistantOpen ? (
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="fixed bottom-4 left-4 z-[60] w-[min(92vw,420px)] overflow-hidden rounded-[1.75rem] border border-ink/10 bg-white shadow-[0_20px_80px_rgba(20,23,29,0.2)]">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            style={{ left: chatLeft, width: chatWidth, maxWidth: '92vw' }}
+            className={`fixed bottom-4 z-[60] overflow-hidden rounded-[1.75rem] border border-ink/10 bg-white shadow-[0_20px_80px_rgba(20,23,29,0.2)] ${
+              isResizing ? '' : 'transition-[left,width] duration-150 ease-out'
+            }`}
+          >
+            <div
+              onMouseDown={handleResizeStart}
+              className="group absolute inset-y-0 left-0 z-[70] flex w-3 cursor-col-resize items-center justify-center touch-none"
+            >
+              <span
+                className={`h-12 w-1 rounded-full transition-colors ${
+                  isResizing ? 'bg-gold-400' : 'bg-ink/15 group-hover:bg-gold-400/70'
+                }`}
+              />
+            </div>
             <div className="bg-ink px-4 py-4 text-paper">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -623,17 +789,35 @@ function App() {
             </div>
 
             <div className="border-t border-ink/10 bg-white p-3">
-              <div className="mb-3 flex flex-wrap gap-2">
-                {suggestedPrompts.map((prompt) => (
-                  <button key={prompt} type="button" onClick={() => handlePrompt(prompt)} className="rounded-full border border-ink/10 bg-paper px-3 py-1.5 text-xs font-medium text-ink/70 transition hover:border-gold-400 hover:text-gold-700">
-                    {prompt}
+              {isTyping ? (
+                <div className="mb-3 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={handleStopGenerating}
+                    className="flex items-center gap-1.5 rounded-full border border-ink/15 bg-white px-3.5 py-1.5 text-xs font-semibold text-ink/70 shadow-sm transition hover:border-ink/30 hover:text-ink"
+                  >
+                    <Square size={11} fill="currentColor" />
+                    Stop generating
                   </button>
-                ))}
-              </div>
+                </div>
+              ) : (
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {suggestedPrompts.map((prompt) => (
+                    <button key={prompt} type="button" onClick={() => handlePrompt(prompt)} className="rounded-full border border-ink/10 bg-paper px-3 py-1.5 text-xs font-medium text-ink/70 transition hover:border-gold-400 hover:text-gold-700">
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              )}
               <form onSubmit={handleSubmit} className="flex items-center gap-2 rounded-full border border-ink/10 bg-paper px-3 py-2">
                 <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask HavisIQ..." className="flex-1 bg-transparent text-sm outline-none" />
-                <button type="submit" disabled={isTyping} className="rounded-full bg-ink p-2 text-paper transition hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-60">
-                  <SendHorizonal size={16} />
+                <button
+                  type={isTyping ? 'button' : 'submit'}
+                  onClick={isTyping ? handleStopGenerating : undefined}
+                  aria-label={isTyping ? 'Stop generating' : 'Send message'}
+                  className="rounded-full bg-ink p-2 text-paper transition hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isTyping ? <Square size={14} fill="currentColor" /> : <SendHorizonal size={16} />}
                 </button>
               </form>
             </div>
@@ -649,7 +833,7 @@ function App() {
         onClick={() => setIsAssistantOpen(true)}
         className="fixed bottom-4 left-4 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-ink text-paper shadow-[0_16px_45px_rgba(20,23,29,0.35)]"
       >
-        <HavisIQMark size={56} transparent />
+        <HavisIQMark size={40} />
       </motion.button>
 
       <footer className="border-t border-ink/10 bg-white/80 px-6 py-8 text-sm text-ink/55 lg:px-8">
