@@ -112,12 +112,12 @@ class SearchManager:
             relevant when more than one live-page URL is being downloaded.
         product_router: An object with a ``classify(question) -> ProductMatch``
             method (see ``services.routing.ProductRouter``). When given and
-            it identifies a product with ``"high"`` confidence, knowledge-base
-            retrieval is scoped to that product via ``product_filter``
-            (requires ``scripts/sql/002_product_knowledge_schema.sql`` to
-            have been applied — see that file's docstring). When ``None``
-            (the default) or confidence isn't ``"high"``, knowledge
-            retrieval is unscoped — unchanged from prior behaviour.
+            it identifies one or more products, knowledge-base retrieval is
+            scoped to exactly that set via ``product_filter`` (requires
+            ``scripts/sql/002_product_knowledge_schema.sql`` to have been
+            applied — see that file's docstring). When ``None`` (the
+            default) or no product is identified, knowledge retrieval is
+            unscoped — unchanged from prior behaviour.
         live_search_max_results: Max results per live search call (default 5).
         live_page_max_fetch: Max live pages to download for RAG (default 3).
 
@@ -300,9 +300,21 @@ class SearchManager:
         try:
             svc = self._get_knowledge_service()
             product_filter = self._classify_product(question)
-            matches, _similarities, _urls = svc.retrieve_context(
-                question, product_filter=product_filter
-            )
+
+            if product_filter and len(product_filter) > 1:
+                # Multiple products matched (e.g. "compare SPIDIFY and
+                # ZivaAIRA") — query each separately and merge, rather than
+                # one combined ranked list. A single similarity ranking
+                # across products can starve one of them entirely (whichever
+                # embeds marginally closer to the question takes every
+                # match_count slot); querying per-product guarantees each
+                # gets a fair share of the results.
+                matches = self._retrieve_knowledge_per_product(svc, question, product_filter)
+            else:
+                matches, _similarities, _urls = svc.retrieve_context(
+                    question, product_filter=product_filter
+                )
+
             if matches:
                 logger.info(
                     "SearchManager: knowledge base returned %d matches.", len(matches)
@@ -316,14 +328,39 @@ class SearchManager:
             )
             return None
 
-    def _classify_product(self, question: str) -> list[str] | None:
-        """Return a product filter for *question*, if the router is confident.
+    @staticmethod
+    def _retrieve_knowledge_per_product(
+        svc: Any, question: str, products: list[str]
+    ) -> list[dict[str, Any]]:
+        """Query each product in *products* separately and concatenate matches."""
+        matches: list[dict[str, Any]] = []
+        for product in products:
+            try:
+                product_matches, _similarities, _urls = svc.retrieve_context(
+                    question, product_filter=[product]
+                )
+                matches.extend(product_matches)
+            except Exception as exc:
+                logger.warning(
+                    "SearchManager: per-product knowledge retrieval failed for %s — %s.",
+                    product,
+                    exc,
+                )
+        return matches
 
-        Only scopes retrieval when exactly one product is identified
-        (``confidence == "high"``) — an ambiguous match (multiple products,
-        e.g. both named in one question) intentionally does *not* filter,
-        so retrieval stays unscoped and returns evidence for all of them
-        rather than guessing wrong and hiding relevant results.
+    def _classify_product(self, question: str) -> list[str] | None:
+        """Return a product filter for *question*, if the router found any match.
+
+        Scopes retrieval to every product the router identified — one for a
+        "high" confidence match, several for "ambiguous" (e.g. "compare
+        SPIDIFY and ZivaAIRA" names both). Narrowing to the matched set
+        rather than only ever narrowing to a single product matters for
+        comparison-style questions: an unscoped search has to rank a
+        multi-product question's chunks against the *entire* knowledge
+        base, which can starve one of the mentioned products of any
+        top-`match_count` slot; scoping to just the mentioned products
+        removes that competition. Only a question with zero product signal
+        (``confidence == "none"``) stays fully unscoped.
         """
         if self._product_router is None:
             return None
@@ -332,8 +369,12 @@ class SearchManager:
         except Exception as exc:
             logger.warning("SearchManager: product classification failed — %s.", exc)
             return None
-        if match.confidence == "high" and match.products:
-            logger.info("SearchManager: scoping knowledge retrieval to product %s.", match.products)
+        if match.products:
+            logger.info(
+                "SearchManager: scoping knowledge retrieval to product(s) %s (%s).",
+                match.products,
+                match.confidence,
+            )
             return list(match.products)
         return None
 

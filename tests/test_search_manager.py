@@ -955,12 +955,25 @@ class TestSearchManagerProductRouter:
             "Tell me about SPIDIFY", product_filter=["SPIDIFY"]
         )
 
-    def test_ambiguous_match_does_not_scope_retrieval(self):
+    def test_ambiguous_match_queries_each_matched_product_separately(self):
+        """An ambiguous match (e.g. both SPIDIFY and ZivaAIRA named in a
+        "compare" question) queries each product separately and merges the
+        results — a single combined ranked list can starve one product of
+        any top-match_count slot (whichever embeds marginally closer to the
+        question wins every slot); per-product queries guarantee each gets
+        a fair share. Only zero product signal stays fully unscoped."""
         from src.services.manager.search_manager import SearchManager
         from src.services.routing.source_router import RoutingDecision
         from src.services.routing.product_router import ProductMatch
 
-        mock_kb = _make_mock_knowledge_service(matches=[])
+        spidify_match = {"chunk_content": "SPIDIFY info", "similarity": 0.7, "parent_url": "https://havisspidify.com/"}
+        ziva_match = {"chunk_content": "ZivaAIRA info", "similarity": 0.73, "parent_url": "https://aira.havis360.com/"}
+
+        mock_kb = MagicMock()
+        mock_kb.retrieve_context.side_effect = [
+            ([spidify_match], [0.7], ["https://havisspidify.com/"]),
+            ([ziva_match], [0.73], ["https://aira.havis360.com/"]),
+        ]
         mock_product_router = MagicMock()
         mock_product_router.classify.return_value = ProductMatch(
             products=("SPIDIFY", "ZivaAIRA"), confidence="ambiguous"
@@ -974,10 +987,65 @@ class TestSearchManagerProductRouter:
             product_router=mock_product_router,
         )
 
-        manager.retrieve("Compare SPIDIFY and ZivaAIRA", decision=RoutingDecision(knowledge=True, web=False))
-        mock_kb.retrieve_context.assert_called_once_with(
-            "Compare SPIDIFY and ZivaAIRA", product_filter=None
+        evidence = manager.retrieve("Compare SPIDIFY and ZivaAIRA", decision=RoutingDecision(knowledge=True, web=False))
+
+        assert mock_kb.retrieve_context.call_count == 2
+        mock_kb.retrieve_context.assert_any_call("Compare SPIDIFY and ZivaAIRA", product_filter=["SPIDIFY"])
+        mock_kb.retrieve_context.assert_any_call("Compare SPIDIFY and ZivaAIRA", product_filter=["ZivaAIRA"])
+        # Both products' evidence made it through — neither was starved out
+        urls = {e.url for e in evidence}
+        assert "https://havisspidify.com/" in urls
+        assert "https://aira.havis360.com/" in urls
+
+    def test_high_confidence_single_product_still_uses_one_call(self):
+        """The common case (one product matched) is unaffected by the
+        per-product merge path — still exactly one retrieve_context call."""
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+        from src.services.routing.product_router import ProductMatch
+
+        mock_kb = _make_mock_knowledge_service(matches=[])
+        mock_product_router = MagicMock()
+        mock_product_router.classify.return_value = ProductMatch(products=("SPIDIFY",), confidence="high")
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=_make_mock_search_service(),
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+            product_router=mock_product_router,
         )
+
+        manager.retrieve("Tell me about SPIDIFY", decision=RoutingDecision(knowledge=True, web=False))
+        mock_kb.retrieve_context.assert_called_once_with("Tell me about SPIDIFY", product_filter=["SPIDIFY"])
+
+    def test_per_product_retrieval_failure_for_one_product_does_not_break_the_other(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+        from src.services.routing.product_router import ProductMatch
+
+        ziva_match = {"chunk_content": "ZivaAIRA info", "similarity": 0.73, "parent_url": "https://aira.havis360.com/"}
+        mock_kb = MagicMock()
+        mock_kb.retrieve_context.side_effect = [
+            RuntimeError("SPIDIFY query failed"),
+            ([ziva_match], [0.73], ["https://aira.havis360.com/"]),
+        ]
+        mock_product_router = MagicMock()
+        mock_product_router.classify.return_value = ProductMatch(
+            products=("SPIDIFY", "ZivaAIRA"), confidence="ambiguous"
+        )
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=_make_mock_search_service(),
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+            product_router=mock_product_router,
+        )
+
+        evidence = manager.retrieve("Compare SPIDIFY and ZivaAIRA", decision=RoutingDecision(knowledge=True, web=False))
+        urls = {e.url for e in evidence}
+        assert "https://aira.havis360.com/" in urls
 
     def test_no_match_does_not_scope_retrieval(self):
         from src.services.manager.search_manager import SearchManager

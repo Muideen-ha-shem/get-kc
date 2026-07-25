@@ -14,21 +14,42 @@ async def main():
     await crawl_site("https://ha-shem.com/")
 
 
-async def crawl_site(url: str, max_depth: int = 2):
+async def crawl_site(
+    url: str,
+    max_depth: int = 2,
+    *,
+    headless: bool = False,
+    wait_until: str = "domcontentloaded",
+    delay_before_return_html: float = 2.0,
+    page_timeout: int = 60000,
+):
     """Crawl *url* (BFS, up to *max_depth*) and store each page in Supabase.
 
     Extracted so other entry-point scripts (crawl_spidify.py,
     crawl_zivaaira.py) can reuse the exact same crawl configuration for a
     different target site, instead of duplicating it.
+
+    Args:
+        headless, wait_until, delay_before_return_html, page_timeout:
+            All default to exactly what this function used before these
+            parameters existed, so ``crawl_site(url)`` — what ``main()``
+            below still calls — behaves identically to before. Product
+            sites that are client-rendered SPAs (confirmed for both
+            SPIDIFY and ZivaAIRA — ``domcontentloaded`` fires before their
+            JS finishes rendering and returns near-empty markdown) need
+            ``wait_until="load"`` and a longer delay; see crawl_spidify.py
+            / crawl_zivaaira.py.
     """
     browser_cfg = BrowserConfig(
-        headless=False,
+        headless=headless,
         user_agent_mode="random",
         text_mode=False,
     )
 
     run_cfg = CrawlerRunConfig(
-        delay_before_return_html=2.0,
+        wait_until=wait_until,
+        delay_before_return_html=delay_before_return_html,
+        page_timeout=page_timeout,
         js_code=None,
         excluded_tags=["script", "style", "form", "header", "footer", "nav"],
         excluded_selector="#nexer-navbar",
