@@ -96,6 +96,14 @@ _KNOWLEDGE_KEYWORDS: tuple[str, ...] = (
     # Marketing
     "case study", "case studies", "whitepaper", "whitepapers",
     "testimonial", "testimonials", "customer", "customers",
+    # Named solutions in the catalog — matching a name directly is a strong
+    # signal the question is answerable from our own knowledge base, and
+    # matters most for mixed queries like "compare SPIDIFY and ZivaAIRA":
+    # without these, "compare" alone routes to web-only, and a live search
+    # for a brand name that looks like a common word (confirmed live:
+    # "spidify" gets corrected to "Spotify" by the search provider) returns
+    # entirely unrelated results instead of our own product content.
+    "spidify", "zivaaira",
 )
 
 # Keywords that strongly suggest current-event / external knowledge.

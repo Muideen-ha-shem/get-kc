@@ -34,7 +34,7 @@ from typing import Any
 from ..api.schemas import ChatResponse
 from ..services.knowledge import KnowledgeService
 from ..services.support import SupportService
-from ..services.routing import SourceRouter
+from ..services.routing import SourceRouter, ProductRouter
 from ..services.manager import SearchManager
 from ..services.merger import ContextMerger
 from ..services.generator import ResponseGenerator
@@ -337,6 +337,19 @@ _embedding_cache = TTLCache(ttl_seconds=3600.0, maxsize=1024)
 #     * embedding_cache       — TTL cache for SemanticReranker's embedding
 #                               calls, keyed by content hash.
 #
+#   Product knowledge (Phase 15):
+#     * ProductRouter          — classifies a question against the solution
+#                               catalog (SPIDIFY, ZivaAIRA). Only scopes
+#                               knowledge retrieval when confidence is
+#                               "high" (exactly one solution matched, or
+#                               named explicitly); ambiguous/no-match
+#                               questions fall through to the existing
+#                               unscoped hybrid retrieval unchanged. Live as
+#                               of the scripts/sql/002_product_knowledge_schema.sql
+#                               migration + scripts/crawl_spidify.py /
+#                               scripts/crawl_zivaaira.py ingestion — see
+#                               PROJECT_STRUCTURE.md for the verified state.
+#
 # Each component builds its own dependencies lazily from environment
 # settings (Settings.from_environment()) on first use, so this is safe to
 # construct at import time even before .env is loaded. If TAVILY_API_KEY/
@@ -353,6 +366,7 @@ chat_orchestrator = ChatOrchestrator(
         query_rewriter=QueryRewriter(),
         domain_filter=DomainQualityFilter(),
         response_cache=_response_cache,
+        product_router=ProductRouter(),
     ),
     context_merger=ContextMerger(),
     response_generator=ResponseGenerator(citation_validator=CitationValidator()),
