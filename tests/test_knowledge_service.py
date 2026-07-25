@@ -15,7 +15,9 @@ class TestKnowledgeServiceRetrieveContext:
         ) as mock_retrieve:
             KnowledgeService().retrieve_context("test question")
 
-        mock_retrieve.assert_called_once_with("test question", product_filter=None)
+        mock_retrieve.assert_called_once_with(
+            "test question", product_filter=None, match_count=3
+        )
 
     def test_passes_product_filter_through(self):
         from src.services.knowledge.knowledge_service import KnowledgeService
@@ -26,7 +28,9 @@ class TestKnowledgeServiceRetrieveContext:
         ) as mock_retrieve:
             KnowledgeService().retrieve_context("test question", product_filter=["SPIDIFY"])
 
-        mock_retrieve.assert_called_once_with("test question", product_filter=["SPIDIFY"])
+        mock_retrieve.assert_called_once_with(
+            "test question", product_filter=["SPIDIFY"], match_count=3
+        )
 
     def test_returns_underlying_result_unchanged(self):
         from src.services.knowledge.knowledge_service import KnowledgeService
