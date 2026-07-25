@@ -22,10 +22,30 @@ Design decisions
   gathered evidence.
 * The search provider (Tavily/Brave) is configured externally and passed in
   via ``SearchService``.
+* Two optional refinement stages sit after ``ContextMerger.merge()``: a
+  ``semantic_reranker`` (passed through to the lazily-built ``EphemeralRAG``
+  for live-page chunks) and a ``source_ranker`` (applied to the final merged
+  evidence). Both default to ``None``, which preserves the exact prior
+  behaviour — ``retrieve()``'s signature and return type are unchanged.
+* Three more optional stages, all also ``None``-by-default: a
+  ``query_rewriter`` (turns the question into a search-engine-friendly
+  query before it's sent to Tavily/Brave), a ``domain_filter`` (drops/
+  reorders candidate live-page URLs by domain quality before they're
+  fetched), and a ``response_cache`` (a ``TTLCache`` shared across
+  rewritten queries, search results, and fetched pages, so repeated
+  questions within the cache TTL skip redundant network calls).
+* Live-page downloads run concurrently (bounded by ``fetch_concurrency``)
+  via ``asyncio.to_thread`` over the same synchronous ``PageFetcher.fetch``
+  used before — this reuses its retry/SSL/timeout/logging behaviour
+  unchanged, it just runs several fetches at once instead of one at a time.
+  If a caller invokes ``retrieve()`` from inside a thread that already has
+  a running asyncio event loop, this falls back to sequential fetching
+  rather than raising.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Sequence
 
@@ -34,6 +54,8 @@ from ..routing.source_router import SourceRouter, RoutingDecision
 from ..merger.context_merger import ContextMerger, EvidenceItem, _CONFIDENCE_THRESHOLD
 
 logger: logging.Logger = get_logger(__name__)
+
+_DEFAULT_FETCH_CONCURRENCY: int = 3
 
 
 # ---------------------------------------------------------------------------
@@ -60,7 +82,34 @@ class SearchManager:
         page_fetcher: An object with a ``fetch(url) -> str`` method.  When
             omitted, the real ``PageFetcher`` is used.
         ephemeral_rag: An object with a ``retrieve(question, pages) -> list``
-            method.  When omitted, the real ``EphemeralRAG`` is used.
+            method.  When omitted, the real ``EphemeralRAG`` is used (built
+            with ``semantic_reranker`` below, if one was given).
+        semantic_reranker: An object with a
+            ``rank(question, chunks, top_k=...) -> list | None`` method
+            (see ``services.rag.SemanticReranker``). Only used when this
+            manager builds its own default ``EphemeralRAG`` — ignored if an
+            ``ephemeral_rag`` instance is injected directly, since that
+            instance owns its own configuration.
+        source_ranker: An object with a
+            ``rank(evidence, question=...) -> list[EvidenceItem]`` method
+            (see ``services.ranking.SourceRanker``). When given, it re-scores
+            and trims ``ContextMerger``'s merged evidence before it's
+            returned. When ``None`` (the default), the merged evidence is
+            returned as-is — unchanged from prior behaviour.
+        query_rewriter: An object with a ``rewrite(question) -> str`` method
+            (see ``services.query.QueryRewriter``). When given, its output
+            is sent to the search provider instead of the raw question.
+        domain_filter: An object with a ``filter(urls) -> list[str]`` method
+            (see ``services.filtering.DomainQualityFilter``). When given,
+            it runs on live-search URLs before ``PageFetcher`` downloads
+            them, dropping/reordering by domain quality.
+        response_cache: A ``TTLCache``-like object with ``get(key, default)``
+            and ``set(key, value)`` methods (see ``shared.cache.TTLCache``).
+            When given, it's checked before rewriting a query, calling the
+            search provider, or fetching a page, and populated after —
+            shared across all three keyspaces via key prefixes.
+        fetch_concurrency: Max concurrent page fetches (default 3). Only
+            relevant when more than one live-page URL is being downloaded.
         live_search_max_results: Max results per live search call (default 5).
         live_page_max_fetch: Max live pages to download for RAG (default 3).
 
@@ -85,6 +134,12 @@ class SearchManager:
         search_service: Any = None,
         page_fetcher: Any = None,
         ephemeral_rag: Any = None,
+        semantic_reranker: Any = None,
+        source_ranker: Any = None,
+        query_rewriter: Any = None,
+        domain_filter: Any = None,
+        response_cache: Any = None,
+        fetch_concurrency: int = _DEFAULT_FETCH_CONCURRENCY,
         live_search_max_results: int = 5,
         live_page_max_fetch: int = 3,
     ) -> None:
@@ -92,17 +147,30 @@ class SearchManager:
         self._context_merger = context_merger or ContextMerger()
         self._live_search_max_results = live_search_max_results
         self._live_page_max_fetch = live_page_max_fetch
+        self._fetch_concurrency = max(1, fetch_concurrency)
 
         # Lazy-import real services only when needed
         self._knowledge_service: Any = knowledge_service
         self._search_service: Any = search_service
         self._page_fetcher: Any = page_fetcher
         self._ephemeral_rag: Any = ephemeral_rag
+        self._semantic_reranker: Any = semantic_reranker
+        self._source_ranker: Any = source_ranker
+        self._query_rewriter: Any = query_rewriter
+        self._domain_filter: Any = domain_filter
+        self._response_cache: Any = response_cache
 
         logger.info(
-            "SearchManager ready (router=%s, merger=%s).",
+            "SearchManager ready (router=%s, merger=%s, semantic_reranker=%s, source_ranker=%s, "
+            "query_rewriter=%s, domain_filter=%s, response_cache=%s, fetch_concurrency=%d).",
             type(self._source_router).__name__,
             type(self._context_merger).__name__,
+            type(self._semantic_reranker).__name__ if self._semantic_reranker else "None",
+            type(self._source_ranker).__name__ if self._source_ranker else "None",
+            type(self._query_rewriter).__name__ if self._query_rewriter else "None",
+            type(self._domain_filter).__name__ if self._domain_filter else "None",
+            type(self._response_cache).__name__ if self._response_cache else "None",
+            self._fetch_concurrency,
         )
 
     # ------------------------------------------------------------------
@@ -190,6 +258,17 @@ class SearchManager:
             question=question,
         )
 
+        # --- Step 5: Intelligent source ranking (optional refinement) ---
+        if self._source_ranker is not None and evidence:
+            try:
+                evidence = self._source_ranker.rank(evidence, question=question)
+            except Exception as exc:
+                logger.error(
+                    "SearchManager: source ranking failed — %s. Using merged evidence as-is.",
+                    exc,
+                    exc_info=True,
+                )
+
         logger.info(
             "SearchManager.retrieve: returning %d evidence items "
             "(knowledge=%s, web=%s, live_pages=%s).",
@@ -224,21 +303,55 @@ class SearchManager:
 
     def _retrieve_web_search(self, question: str) -> list[Any] | None:
         """Perform a live web search."""
+        search_query = self._rewrite_query(question)
+
+        cache_key = f"search:{search_query}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            logger.info("SearchManager: web search cache hit for %r.", search_query)
+            return cached
+
         try:
             svc = self._get_search_service()
-            results = svc.search(question, max_results=self._live_search_max_results)
+            results = svc.search(search_query, max_results=self._live_search_max_results)
             if results:
                 logger.info(
                     "SearchManager: web search returned %d results.", len(results)
                 )
             else:
                 logger.info("SearchManager: web search returned no results.")
+            # Cache the real (possibly empty) result list — caching only
+            # "results or None" would collapse a legitimate "no results for
+            # this query" answer into a permanent cache miss, defeating the
+            # cache for exactly the queries that are cheapest to remember.
+            self._cache_set(cache_key, results)
             return results or None
         except Exception as exc:
             logger.error(
                 "SearchManager: web search failed — %s", exc, exc_info=True
             )
             return None
+
+    def _rewrite_query(self, question: str) -> str:
+        """Rewrite *question* into a search-engine query, if a rewriter is set."""
+        if self._query_rewriter is None:
+            return question
+
+        cache_key = f"rewrite:{question}"
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            rewritten = self._query_rewriter.rewrite(question)
+        except Exception as exc:
+            logger.warning(
+                "SearchManager: query rewriting failed — %s. Using original question.", exc
+            )
+            return question
+
+        self._cache_set(cache_key, rewritten)
+        return rewritten
 
     def _retrieve_live_pages(
         self,
@@ -261,19 +374,21 @@ class SearchManager:
         if not urls:
             return None
 
-        # Download pages (up to the configured limit)
-        fetcher = self._get_page_fetcher()
-        pages: list[str] = []
-        for url in urls[: self._live_page_max_fetch]:
+        # Drop/reorder by domain quality before spending a fetch on them
+        if self._domain_filter is not None:
             try:
-                html = fetcher.fetch(url)
-                pages.append(html)
-                logger.info("SearchManager: fetched %d bytes from %s.", len(html), url)
+                urls = self._domain_filter.filter(urls)
             except Exception as exc:
                 logger.warning(
-                    "SearchManager: failed to fetch %s — %s", url, exc
+                    "SearchManager: domain filtering failed — %s. Using unfiltered URLs.", exc
                 )
 
+        urls = urls[: self._live_page_max_fetch]
+        if not urls:
+            logger.info("SearchManager: no URLs survived domain filtering.")
+            return None
+
+        pages = self._fetch_pages(urls)
         if not pages:
             logger.info("SearchManager: no live pages could be fetched.")
             return None
@@ -293,6 +408,121 @@ class SearchManager:
                 "SearchManager: ephemeral RAG failed — %s", exc, exc_info=True
             )
             return None
+
+    # ------------------------------------------------------------------
+    # Page fetching (concurrent, with caching)
+    # ------------------------------------------------------------------
+
+    def _fetch_pages(self, urls: list[str]) -> list[str]:
+        """Fetch *urls*, concurrently when possible, using the cache first.
+
+        Falls back to sequential fetching if this is called from a thread
+        that already has a running asyncio event loop (``asyncio.run()``
+        cannot be nested) — degradation, never an error.
+        """
+        fetcher = self._get_page_fetcher()
+
+        # Serve whatever we can from cache first; only the misses need a
+        # network round-trip (concurrent or not).
+        to_fetch: list[str] = []
+        cached_pages: dict[str, str] = {}
+        for url in urls:
+            cached = self._cache_get(f"page:{url}")
+            if cached is not None:
+                cached_pages[url] = cached
+            else:
+                to_fetch.append(url)
+
+        fetched_pages: dict[str, str] = {}
+        if to_fetch:
+            if len(to_fetch) == 1 or self._event_loop_already_running():
+                fetched_pages = self._fetch_pages_sequential(fetcher, to_fetch)
+            else:
+                try:
+                    fetched_pages = asyncio.run(self._fetch_pages_concurrently(fetcher, to_fetch))
+                except RuntimeError:
+                    logger.warning(
+                        "SearchManager: asyncio.run() unavailable — "
+                        "falling back to sequential page fetching."
+                    )
+                    fetched_pages = self._fetch_pages_sequential(fetcher, to_fetch)
+
+            for url, html in fetched_pages.items():
+                self._cache_set(f"page:{url}", html)
+
+        # Preserve the original URL order in the returned page list.
+        pages: list[str] = []
+        for url in urls:
+            if url in cached_pages:
+                pages.append(cached_pages[url])
+            elif url in fetched_pages:
+                pages.append(fetched_pages[url])
+        return pages
+
+    @staticmethod
+    def _event_loop_already_running() -> bool:
+        """True if called from a thread with a running asyncio event loop.
+
+        ``asyncio.run()`` cannot be nested inside a running loop — checking
+        this upfront avoids ever constructing (and then abandoning
+        un-awaited) the concurrent-fetch coroutine in that case, rather than
+        finding out via a caught ``RuntimeError`` after the fact.
+        """
+        try:
+            asyncio.get_running_loop()
+            return True
+        except RuntimeError:
+            return False
+
+    async def _fetch_pages_concurrently(self, fetcher: Any, urls: list[str]) -> dict[str, str]:
+        semaphore = asyncio.Semaphore(self._fetch_concurrency)
+
+        async def _fetch_one(url: str) -> tuple[str, str | None]:
+            async with semaphore:
+                try:
+                    html = await asyncio.to_thread(fetcher.fetch, url)
+                    logger.info("SearchManager: fetched %d bytes from %s.", len(html), url)
+                    return url, html
+                except Exception as exc:
+                    logger.warning("SearchManager: failed to fetch %s — %s", url, exc)
+                    return url, None
+
+        results = await asyncio.gather(*(_fetch_one(url) for url in urls))
+        # Only exclude genuine failures (None) — matches the sequential
+        # path's behaviour of keeping whatever PageFetcher.fetch() returned.
+        return {url: html for url, html in results if html is not None}
+
+    def _fetch_pages_sequential(self, fetcher: Any, urls: list[str]) -> dict[str, str]:
+        pages: dict[str, str] = {}
+        for url in urls:
+            try:
+                html = fetcher.fetch(url)
+                pages[url] = html
+                logger.info("SearchManager: fetched %d bytes from %s.", len(html), url)
+            except Exception as exc:
+                logger.warning("SearchManager: failed to fetch %s — %s", url, exc)
+        return pages
+
+    # ------------------------------------------------------------------
+    # Cache helpers
+    # ------------------------------------------------------------------
+
+    def _cache_get(self, key: str) -> Any:
+        if self._response_cache is None:
+            return None
+        try:
+            return self._response_cache.get(key)
+        except Exception as exc:
+            logger.warning("SearchManager: cache get failed for %r — %s.", key, exc)
+            return None
+
+    def _cache_set(self, key: str, value: Any) -> None:
+        if self._response_cache is None or value is None:
+            return
+        try:
+            self._response_cache.set(key, value)
+        except Exception as exc:
+            logger.warning("SearchManager: cache set failed for %r — %s.", key, exc)
 
     # ------------------------------------------------------------------
     # Lazy service accessors
@@ -321,5 +551,5 @@ class SearchManager:
     def _get_ephemeral_rag(self) -> Any:
         if self._ephemeral_rag is None:
             from ..rag.ephemeral_rag import EphemeralRAG  # type: ignore[import]
-            self._ephemeral_rag = EphemeralRAG()
+            self._ephemeral_rag = EphemeralRAG(semantic_reranker=self._semantic_reranker)
         return self._ephemeral_rag

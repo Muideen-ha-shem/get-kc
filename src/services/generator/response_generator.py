@@ -67,6 +67,14 @@ class ResponseGenerator:
                        Defaults to ``1024``.
         api_key:       Groq API key.  If ``None``, read from the
                        ``GROQ_API_KEY`` environment variable.
+        citation_validator: An object with a
+                       ``validate(citations) -> list[dict]`` method (see
+                       ``services.validation.CitationValidator``). When
+                       given, it cleans up the citation list (removing
+                       duplicates and placeholder URLs such as
+                       ``"Unknown URL"``) before it's returned. ``None``
+                       (the default) returns citations exactly as built —
+                       unchanged from prior behaviour.
 
     Typical usage::
 
@@ -87,11 +95,13 @@ class ResponseGenerator:
         temperature: float = 0.1,
         max_tokens: int = 1024,
         api_key: str | None = None,
+        citation_validator: Any = None,
     ) -> None:
         self._model = model
         self._temperature = temperature
         self._max_tokens = max_tokens
         self._api_key = api_key or os.getenv("GROQ_API_KEY")
+        self._citation_validator = citation_validator
 
         if not self._api_key:
             logger.warning(
@@ -99,10 +109,11 @@ class ResponseGenerator:
             )
 
         logger.info(
-            "ResponseGenerator ready (model=%s, temperature=%.1f, max_tokens=%d).",
+            "ResponseGenerator ready (model=%s, temperature=%.1f, max_tokens=%d, citation_validator=%s).",
             model,
             temperature,
             max_tokens,
+            type(self._citation_validator).__name__ if self._citation_validator else "None",
         )
 
     # ------------------------------------------------------------------
@@ -147,6 +158,7 @@ class ResponseGenerator:
         # --- Build evidence block and citations ---
         evidence_list = list(context) if context else []
         evidence_block, citations = self._format_evidence(evidence_list)
+        citations = self._validate_citations(citations)
 
         if not evidence_block:
             logger.info("ResponseGenerator: no evidence provided.")
@@ -210,6 +222,23 @@ class ResponseGenerator:
     # ------------------------------------------------------------------
     # Formatting helpers
     # ------------------------------------------------------------------
+
+    def _validate_citations(self, citations: list[dict[str, object]]) -> list[dict[str, object]]:
+        """Run the injected citation validator, if any.
+
+        Applied to the ``citations``/``sources`` metadata returned to
+        callers only — never to the LLM's own answer text, which the model
+        writes independently (including its own "Sources" section) from the
+        original, unfiltered evidence block. A validator failure falls back
+        to the unfiltered citations rather than dropping them.
+        """
+        if self._citation_validator is None or not citations:
+            return citations
+        try:
+            return self._citation_validator.validate(citations)
+        except Exception as exc:
+            logger.warning("ResponseGenerator: citation validation failed — %s. Using unfiltered citations.", exc)
+            return citations
 
     @staticmethod
     def _format_evidence(

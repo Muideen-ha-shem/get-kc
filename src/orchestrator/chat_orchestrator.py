@@ -38,6 +38,12 @@ from ..services.routing import SourceRouter
 from ..services.manager import SearchManager
 from ..services.merger import ContextMerger
 from ..services.generator import ResponseGenerator
+from ..services.rag import SemanticReranker
+from ..services.ranking import SourceRanker
+from ..services.query import QueryRewriter
+from ..services.filtering import DomainQualityFilter
+from ..services.validation import CitationValidator
+from ..shared.cache import TTLCache
 from ..shared.logging import get_logger
 
 logger: logging.Logger = get_logger(__name__)
@@ -291,21 +297,63 @@ class ChatOrchestrator:
         logger.debug("ChatOrchestrator: background learning thread started.")
 
 
+# Shared caches for the module-level singleton below. Two separate
+# instances (not one shared cache) since they hold unrelated keyspaces —
+# search/page/query-rewrite results (short-lived, per-request-ish) versus
+# embedding vectors (larger, worth keeping longer since the same live page
+# can resurface across many different questions).
+_response_cache = TTLCache(ttl_seconds=300.0, maxsize=256)
+_embedding_cache = TTLCache(ttl_seconds=3600.0, maxsize=1024)
+
 # Module-level singleton (imported by ``src.api.routes.chat``).
 #
 # Wired to the multi-source pipeline (SourceRouter -> SearchManager ->
-# ContextMerger -> ResponseGenerator). Each component builds its own
-# dependencies lazily from environment settings (Settings.from_environment())
-# on first use, so this is safe to construct at import time even before
-# .env is loaded. If TAVILY_API_KEY/BRAVE_SEARCH_API_KEY are unset, web
-# search calls fail individually and SearchManager falls back to
-# knowledge-base-only evidence — the chat flow degrades gracefully rather
-# than breaking. process_request/process_request_response/chat() all keep
-# their existing signatures and return shapes, preserving backward
-# compatibility with the FastAPI route handler and CLI.
+# ContextMerger -> ResponseGenerator), with quality-refinement and
+# performance stages layered in as optional, individually-injected
+# components — every one of them degrades gracefully to the pre-existing
+# behaviour on failure rather than breaking the response:
+#
+#   Retrieval quality (Phase 13):
+#     * QueryRewriter        — rewrites the question into a search-engine
+#                               query before it's sent to Tavily/Brave.
+#     * DomainQualityFilter   — drops/reorders live-page URLs by domain
+#                               authority before PageFetcher downloads them.
+#     * SemanticReranker      — embedding-based reranking of live-page
+#                               chunks (falls back to lexical ranking).
+#     * SourceRanker          — multi-signal ranking (relevance, source
+#                               authority, freshness, near-duplicate
+#                               penalty) applied to the final merged
+#                               evidence.
+#     * CitationValidator     — removes duplicate/placeholder-URL
+#                               ("Unknown URL") citations before they reach
+#                               the API response's `sources` field.
+#
+#   Performance (Phase 14):
+#     * Concurrent page fetching inside SearchManager (asyncio, bounded by
+#       fetch_concurrency), reusing PageFetcher's existing retry/SSL/
+#       timeout/logging behaviour unchanged.
+#     * response_cache        — TTL cache shared across rewritten queries,
+#                               search results, and fetched pages.
+#     * embedding_cache       — TTL cache for SemanticReranker's embedding
+#                               calls, keyed by content hash.
+#
+# Each component builds its own dependencies lazily from environment
+# settings (Settings.from_environment()) on first use, so this is safe to
+# construct at import time even before .env is loaded. If TAVILY_API_KEY/
+# BRAVE_SEARCH_API_KEY are unset, web search calls fail individually and
+# SearchManager falls back to knowledge-base-only evidence. process_request/
+# process_request_response/chat() all keep their existing signatures and
+# return shapes, preserving backward compatibility with the FastAPI route
+# handler and CLI.
 chat_orchestrator = ChatOrchestrator(
     source_router=SourceRouter(),
-    search_manager=SearchManager(),
+    search_manager=SearchManager(
+        semantic_reranker=SemanticReranker(cache=_embedding_cache),
+        source_ranker=SourceRanker(),
+        query_rewriter=QueryRewriter(),
+        domain_filter=DomainQualityFilter(),
+        response_cache=_response_cache,
+    ),
     context_merger=ContextMerger(),
-    response_generator=ResponseGenerator(),
+    response_generator=ResponseGenerator(citation_validator=CitationValidator()),
 )
