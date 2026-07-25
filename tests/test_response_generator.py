@@ -176,6 +176,113 @@ class TestResponseGeneratorGenerate:
 
 
 # ---------------------------------------------------------------------------
+# ResponseGenerator — citation_validator integration
+# ---------------------------------------------------------------------------
+
+
+class TestResponseGeneratorCitationValidator:
+    def test_no_validator_injected_returns_citations_unchanged(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = "Answer [1]."
+
+        with patch("groq.Groq") as mock_groq:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_completion
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key")  # citation_validator=None
+            result = gen.generate(
+                question="test",
+                context=[_make_evidence(url="Unknown URL")],
+            )
+
+        assert result["citations"][0]["url"] == "Unknown URL"
+
+    def test_validator_applied_to_returned_citations(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = "Answer [1][2]."
+
+        mock_validator = MagicMock()
+        mock_validator.validate.return_value = [{"url": "https://kept.example.com"}]
+
+        with patch("groq.Groq") as mock_groq:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_completion
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key", citation_validator=mock_validator)
+            result = gen.generate(
+                question="test",
+                context=[
+                    _make_evidence(url="Unknown URL"),
+                    _make_evidence(url="https://kept.example.com"),
+                ],
+            )
+
+        assert result["citations"] == [{"url": "https://kept.example.com"}]
+        mock_validator.validate.assert_called_once()
+
+    def test_answer_text_untouched_by_citation_validation(self):
+        """The validator only cleans the returned citation list — never the LLM's answer text."""
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = "The full answer with [1] inline."
+
+        mock_validator = MagicMock()
+        mock_validator.validate.return_value = []  # drop everything
+
+        with patch("groq.Groq") as mock_groq:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_completion
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key", citation_validator=mock_validator)
+            result = gen.generate(question="test", context=[_make_evidence()])
+
+        assert result["answer"] == "The full answer with [1] inline."
+        assert result["citations"] == []
+
+    def test_validator_failure_falls_back_to_unfiltered_citations(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = "Answer [1]."
+
+        mock_validator = MagicMock()
+        mock_validator.validate.side_effect = RuntimeError("validator exploded")
+
+        with patch("groq.Groq") as mock_groq:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_completion
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key", citation_validator=mock_validator)
+            result = gen.generate(
+                question="test",
+                context=[_make_evidence(url="https://example.com")],
+            )
+
+        # Falls back to the unfiltered citation rather than raising/dropping it
+        assert len(result["citations"]) == 1
+        assert result["citations"][0]["url"] == "https://example.com"
+
+    def test_empty_context_never_calls_validator(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_validator = MagicMock()
+        gen = ResponseGenerator(api_key="test-key", citation_validator=mock_validator)
+        result = gen.generate(question="test", context=[])
+
+        assert result["citations"] == []
+        mock_validator.validate.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # ResponseGenerator — evidence formatting
 # ---------------------------------------------------------------------------
 
