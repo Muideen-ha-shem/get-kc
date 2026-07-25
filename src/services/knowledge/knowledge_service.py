@@ -13,8 +13,11 @@ class KnowledgeService:
         self,
         question: str,
         product_filter: Sequence[str] | None = None,
+        match_count: int = 3,
     ) -> tuple[list[dict[str, Any]], list[float], list[str]]:
-        return legacy_retrieve_context(question, product_filter=product_filter)
+        return legacy_retrieve_context(
+            question, product_filter=product_filter, match_count=match_count
+        )
 
     def embed_query(self, question: str) -> list[float]:
         return embed_query(question)

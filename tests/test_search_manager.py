@@ -990,8 +990,12 @@ class TestSearchManagerProductRouter:
         evidence = manager.retrieve("Compare SPIDIFY and ZivaAIRA", decision=RoutingDecision(knowledge=True, web=False))
 
         assert mock_kb.retrieve_context.call_count == 2
-        mock_kb.retrieve_context.assert_any_call("Compare SPIDIFY and ZivaAIRA", product_filter=["SPIDIFY"])
-        mock_kb.retrieve_context.assert_any_call("Compare SPIDIFY and ZivaAIRA", product_filter=["ZivaAIRA"])
+        mock_kb.retrieve_context.assert_any_call(
+            "Compare SPIDIFY and ZivaAIRA", product_filter=["SPIDIFY"], match_count=6
+        )
+        mock_kb.retrieve_context.assert_any_call(
+            "Compare SPIDIFY and ZivaAIRA", product_filter=["ZivaAIRA"], match_count=6
+        )
         # Both products' evidence made it through — neither was starved out
         urls = {e.url for e in evidence}
         assert "https://havisspidify.com/" in urls
