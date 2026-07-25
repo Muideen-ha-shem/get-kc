@@ -17,6 +17,8 @@ import {
 import { HavisIQMark } from './components/HavisIQMark';
 import { DemoRequestModal } from './components/DemoRequestModal';
 import { CompareSolutionsModal } from './components/CompareSolutionsModal';
+import { MessageContent } from './components/message/MessageContent';
+import { SourceChips } from './components/message/SourceChips';
 import { solutions, type Solution } from './solutions';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
@@ -41,9 +43,18 @@ const supportWidgets = [
 const appointmentSlots = ['09:00', '10:30', '13:00', '15:30'];
 
 const CHAT_PANEL_DEFAULT_WIDTH = 420;
+const CHAT_PANEL_DEFAULT_HEIGHT = 640;
 const CHAT_PANEL_DEFAULT_LEFT = 16;
+const CHAT_PANEL_DEFAULT_BOTTOM = 16;
 const CHAT_PANEL_MIN_WIDTH = 320;
 const CHAT_PANEL_MAX_WIDTH = 640;
+const CHAT_PANEL_MIN_HEIGHT = 380;
+const CHAT_PANEL_MAX_HEIGHT = 860;
+const CHAT_PANEL_VIEWPORT_MARGIN = 16;
+
+type ChatResizeEdge = 'left' | 'right' | 'top' | 'bottom';
+
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 const suggestedPrompts = [
   'What does SPIDIFY do?',
@@ -100,26 +111,61 @@ function App() {
   const closeDemoModal = () => setDemoModal((prev) => ({ ...prev, open: false }));
 
   const [chatWidth, setChatWidth] = useState(CHAT_PANEL_DEFAULT_WIDTH);
+  const [chatHeight, setChatHeight] = useState(CHAT_PANEL_DEFAULT_HEIGHT);
   const [chatLeft, setChatLeft] = useState(CHAT_PANEL_DEFAULT_LEFT);
+  const [chatBottom, setChatBottom] = useState(CHAT_PANEL_DEFAULT_BOTTOM);
   const [isResizing, setIsResizing] = useState(false);
-  const resizeStateRef = useRef<{ startX: number; startWidth: number; startLeft: number } | null>(null);
+  const resizeStateRef = useRef<{
+    edge: ChatResizeEdge;
+    startX: number;
+    startY: number;
+    startWidth: number;
+    startHeight: number;
+    startLeft: number;
+    startBottom: number;
+  } | null>(null);
 
   useEffect(() => {
     const handleMouseMove = (event: MouseEvent) => {
       const state = resizeStateRef.current;
       if (!state) return;
 
-      const delta = event.clientX - state.startX;
-      const rightEdge = state.startLeft + state.startWidth;
-      const maxWidth = Math.min(CHAT_PANEL_MAX_WIDTH, window.innerWidth - 32);
+      const dx = event.clientX - state.startX;
+      const dy = event.clientY - state.startY;
 
-      let nextWidth = state.startWidth - delta;
-      nextWidth = Math.min(maxWidth, Math.max(CHAT_PANEL_MIN_WIDTH, nextWidth));
-
-      const nextLeft = Math.max(16, rightEdge - nextWidth);
-
-      setChatWidth(nextWidth);
-      setChatLeft(nextLeft);
+      if (state.edge === 'left') {
+        const rightEdge = state.startLeft + state.startWidth;
+        const maxWidth = Math.min(CHAT_PANEL_MAX_WIDTH, window.innerWidth - 2 * CHAT_PANEL_VIEWPORT_MARGIN);
+        const nextWidth = clamp(state.startWidth - dx, CHAT_PANEL_MIN_WIDTH, maxWidth);
+        const nextLeft = Math.max(CHAT_PANEL_VIEWPORT_MARGIN, rightEdge - nextWidth);
+        setChatWidth(nextWidth);
+        setChatLeft(nextLeft);
+      } else if (state.edge === 'right') {
+        const maxWidth = Math.min(
+          CHAT_PANEL_MAX_WIDTH,
+          window.innerWidth - state.startLeft - CHAT_PANEL_VIEWPORT_MARGIN
+        );
+        const nextWidth = clamp(state.startWidth + dx, CHAT_PANEL_MIN_WIDTH, maxWidth);
+        setChatWidth(nextWidth);
+      } else if (state.edge === 'top') {
+        // Dragging the top border up grows the panel while the bottom edge
+        // (its anchor point) stays put.
+        const maxHeight = Math.min(
+          CHAT_PANEL_MAX_HEIGHT,
+          window.innerHeight - state.startBottom - CHAT_PANEL_VIEWPORT_MARGIN
+        );
+        const nextHeight = clamp(state.startHeight - dy, CHAT_PANEL_MIN_HEIGHT, maxHeight);
+        setChatHeight(nextHeight);
+      } else if (state.edge === 'bottom') {
+        // Dragging the bottom border down grows the panel while the top
+        // edge stays put — recompute `bottom` so the top position holds.
+        const topPx = window.innerHeight - state.startBottom - state.startHeight;
+        const maxHeight = Math.min(CHAT_PANEL_MAX_HEIGHT, window.innerHeight - topPx - CHAT_PANEL_VIEWPORT_MARGIN);
+        const nextHeight = clamp(state.startHeight + dy, CHAT_PANEL_MIN_HEIGHT, maxHeight);
+        const nextBottom = Math.max(CHAT_PANEL_VIEWPORT_MARGIN, window.innerHeight - topPx - nextHeight);
+        setChatHeight(nextHeight);
+        setChatBottom(nextBottom);
+      }
     };
 
     const handleMouseUp = () => {
@@ -138,12 +184,20 @@ function App() {
     };
   }, []);
 
-  const handleResizeStart = (event: ReactMouseEvent) => {
+  const handleResizeStart = (edge: ChatResizeEdge) => (event: ReactMouseEvent) => {
     event.preventDefault();
-    resizeStateRef.current = { startX: event.clientX, startWidth: chatWidth, startLeft: chatLeft };
+    resizeStateRef.current = {
+      edge,
+      startX: event.clientX,
+      startY: event.clientY,
+      startWidth: chatWidth,
+      startHeight: chatHeight,
+      startLeft: chatLeft,
+      startBottom: chatBottom,
+    };
     setIsResizing(true);
     document.body.style.userSelect = 'none';
-    document.body.style.cursor = 'col-resize';
+    document.body.style.cursor = edge === 'left' || edge === 'right' ? 'col-resize' : 'row-resize';
   };
 
   useEffect(() => {
@@ -722,22 +776,38 @@ function App() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}
-            style={{ left: chatLeft, width: chatWidth, maxWidth: '92vw' }}
-            className={`fixed bottom-4 z-[60] overflow-hidden rounded-[1.75rem] border border-ink/10 bg-white shadow-[0_20px_80px_rgba(20,23,29,0.2)] ${
-              isResizing ? '' : 'transition-[left,width] duration-150 ease-out'
+            style={{ left: chatLeft, bottom: chatBottom, width: chatWidth, height: chatHeight, maxWidth: '92vw', maxHeight: '90vh' }}
+            className={`fixed z-[60] flex flex-col overflow-hidden rounded-[1.75rem] border border-ink/10 bg-white shadow-[0_20px_80px_rgba(20,23,29,0.2)] ${
+              isResizing ? '' : 'transition-[left,bottom,width,height] duration-150 ease-out'
             }`}
           >
+            {/* Resize handles — one per edge, each keeps the opposite edge anchored. */}
             <div
-              onMouseDown={handleResizeStart}
+              onMouseDown={handleResizeStart('left')}
               className="group absolute inset-y-0 left-0 z-[70] flex w-3 cursor-col-resize items-center justify-center touch-none"
             >
-              <span
-                className={`h-12 w-1 rounded-full transition-colors ${
-                  isResizing ? 'bg-gold-400' : 'bg-ink/15 group-hover:bg-gold-400/70'
-                }`}
-              />
+              <span className="h-12 w-1 rounded-full bg-ink/15 transition-colors group-hover:bg-gold-400/70" />
             </div>
-            <div className="bg-ink px-4 py-4 text-paper">
+            <div
+              onMouseDown={handleResizeStart('right')}
+              className="group absolute inset-y-0 right-0 z-[70] flex w-3 cursor-col-resize items-center justify-center touch-none"
+            >
+              <span className="h-12 w-1 rounded-full bg-ink/15 transition-colors group-hover:bg-gold-400/70" />
+            </div>
+            <div
+              onMouseDown={handleResizeStart('top')}
+              className="group absolute inset-x-0 top-0 z-[70] flex h-3 cursor-row-resize items-center justify-center touch-none"
+            >
+              <span className="h-1 w-12 rounded-full bg-ink/15 transition-colors group-hover:bg-gold-400/70" />
+            </div>
+            <div
+              onMouseDown={handleResizeStart('bottom')}
+              className="group absolute inset-x-0 bottom-0 z-[70] flex h-3 cursor-row-resize items-center justify-center touch-none"
+            >
+              <span className="h-1 w-12 rounded-full bg-ink/15 transition-colors group-hover:bg-gold-400/70" />
+            </div>
+
+            <div className="shrink-0 bg-ink px-4 py-4 text-paper">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <HavisIQMark size={40} />
@@ -756,24 +826,29 @@ function App() {
               </div>
             </div>
 
-            <div ref={scrollRef} className="max-h-[420px] overflow-y-auto bg-paper p-4">
+            <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto bg-paper p-4">
               <div className="space-y-3">
                 {messages.map((message) => (
                   <div key={message.id} className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-7 ${message.sender === 'user' ? 'bg-ink text-paper' : 'bg-white text-ink/85 shadow-sm ring-1 ring-ink/10'}`}>
-                      {message.sender === 'assistant' ? renderFormattedContent(message.content) : message.content}
+                    <div
+                      className={`rounded-2xl px-3 py-2 text-sm leading-7 ${
+                        message.sender === 'user'
+                          ? 'max-w-[85%] bg-ink text-paper'
+                          : 'max-w-[95%] bg-white text-ink/85 shadow-sm ring-1 ring-ink/10'
+                      }`}
+                    >
+                      {message.sender === 'assistant' ? (
+                        message.isTyping ? (
+                          renderFormattedContent(message.content)
+                        ) : (
+                          <MessageContent content={message.content} />
+                        )
+                      ) : (
+                        message.content
+                      )}
                       {message.isTyping ? <span className="ml-1 animate-pulse">█</span> : null}
-                      {message.sender === 'assistant' && message.sources && message.sources.length > 0 ? (
-                        <div className="mt-2 border-t border-ink/10 pt-2">
-                          <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-ink/40">Sources</p>
-                          <div className="mt-1 flex flex-wrap gap-2">
-                            {message.sources.map((source) => (
-                              <a key={source} href={source} target="_blank" rel="noreferrer" className="text-xs text-gold-700 underline decoration-gold-300 underline-offset-2 hover:text-gold-800">
-                                {source}
-                              </a>
-                            ))}
-                          </div>
-                        </div>
+                      {message.sender === 'assistant' && !message.isTyping && message.sources && message.sources.length > 0 ? (
+                        <SourceChips sources={message.sources} />
                       ) : null}
                     </div>
                   </div>
@@ -788,7 +863,7 @@ function App() {
               </div>
             </div>
 
-            <div className="border-t border-ink/10 bg-white p-3">
+            <div className="shrink-0 border-t border-ink/10 bg-white p-3">
               {isTyping ? (
                 <div className="mb-3 flex justify-center">
                   <button
