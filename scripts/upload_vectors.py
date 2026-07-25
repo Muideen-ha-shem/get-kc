@@ -6,6 +6,8 @@ from src.chunk import split_into_semantic_chunks
 from google import genai
 from google.genai import types
 
+from scripts.product_metadata import product_metadata_for_url
+
 load_dotenv()
 client = genai.Client()
 
@@ -50,6 +52,15 @@ def run_vector_pipeline():
         chunks = split_into_semantic_chunks(cleaned_text)
         print(f"\n📄 Processing '{filename}' -> Generated {len(chunks)} text chunks.")
 
+        # Only attaches product/category/source_type when the URL matches a
+        # known product domain (see product_metadata.py) — for anything
+        # else (e.g. general ha-shem.com content) this is an empty dict, so
+        # the insert payload below is byte-identical to before this change
+        # unless you're actually uploading SPIDIFY/ZivaAIRA content AND have
+        # run scripts/sql/002_product_knowledge_schema.sql first.
+        metadata = product_metadata_for_url(url)
+        product_fields = {k: v for k, v in metadata.items() if v is not None}
+
         for i, chunk in enumerate(chunks):
             try:
                 print(f"   ↳ Generating embedding vector for chunk {i+1}/{len(chunks)}...")
@@ -68,6 +79,7 @@ def run_vector_pipeline():
                     "parent_url": url,
                     "chunk_content": chunk,
                     "embedding": vector_embedding,
+                    **product_fields,
                 }
 
                 sb_client.table("documentation_chunks").insert(payload).execute()

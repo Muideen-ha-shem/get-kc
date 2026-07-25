@@ -103,7 +103,7 @@ class TestSearchManagerWithDecision:
         evidence = manager.retrieve("test question", decision=decision)
 
         assert len(evidence) >= 1
-        mock_kb.retrieve_context.assert_called_once_with("test question")
+        mock_kb.retrieve_context.assert_called_once_with("test question", product_filter=None)
 
     def test_web_only(self):
         from src.services.manager.search_manager import SearchManager
@@ -908,3 +908,114 @@ class TestSearchManagerConcurrentFetching:
             manager.retrieve("test", decision=RoutingDecision(knowledge=False, web=True))
 
         assert mock_fetcher.fetch.call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# SearchManager — product_router integration
+# ---------------------------------------------------------------------------
+
+
+class TestSearchManagerProductRouter:
+    def test_no_product_router_passes_none_filter(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+
+        mock_kb = _make_mock_knowledge_service(matches=[])
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=_make_mock_search_service(),
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+        )  # product_router=None
+
+        manager.retrieve("test question", decision=RoutingDecision(knowledge=True, web=False))
+        mock_kb.retrieve_context.assert_called_once_with("test question", product_filter=None)
+
+    def test_high_confidence_match_scopes_retrieval(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+        from src.services.routing.product_router import ProductMatch
+
+        mock_kb = _make_mock_knowledge_service(matches=[])
+        mock_product_router = MagicMock()
+        mock_product_router.classify.return_value = ProductMatch(products=("SPIDIFY",), confidence="high")
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=_make_mock_search_service(),
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+            product_router=mock_product_router,
+        )
+
+        manager.retrieve("Tell me about SPIDIFY", decision=RoutingDecision(knowledge=True, web=False))
+
+        mock_product_router.classify.assert_called_once_with("Tell me about SPIDIFY")
+        mock_kb.retrieve_context.assert_called_once_with(
+            "Tell me about SPIDIFY", product_filter=["SPIDIFY"]
+        )
+
+    def test_ambiguous_match_does_not_scope_retrieval(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+        from src.services.routing.product_router import ProductMatch
+
+        mock_kb = _make_mock_knowledge_service(matches=[])
+        mock_product_router = MagicMock()
+        mock_product_router.classify.return_value = ProductMatch(
+            products=("SPIDIFY", "ZivaAIRA"), confidence="ambiguous"
+        )
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=_make_mock_search_service(),
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+            product_router=mock_product_router,
+        )
+
+        manager.retrieve("Compare SPIDIFY and ZivaAIRA", decision=RoutingDecision(knowledge=True, web=False))
+        mock_kb.retrieve_context.assert_called_once_with(
+            "Compare SPIDIFY and ZivaAIRA", product_filter=None
+        )
+
+    def test_no_match_does_not_scope_retrieval(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+        from src.services.routing.product_router import ProductMatch
+
+        mock_kb = _make_mock_knowledge_service(matches=[])
+        mock_product_router = MagicMock()
+        mock_product_router.classify.return_value = ProductMatch()  # no product, "none"
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=_make_mock_search_service(),
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+            product_router=mock_product_router,
+        )
+
+        manager.retrieve("What are your business hours?", decision=RoutingDecision(knowledge=True, web=False))
+        mock_kb.retrieve_context.assert_called_once_with(
+            "What are your business hours?", product_filter=None
+        )
+
+    def test_product_router_failure_falls_back_to_unscoped(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+
+        mock_kb = _make_mock_knowledge_service(matches=[])
+        mock_product_router = MagicMock()
+        mock_product_router.classify.side_effect = RuntimeError("classifier exploded")
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=_make_mock_search_service(),
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+            product_router=mock_product_router,
+        )
+
+        manager.retrieve("test question", decision=RoutingDecision(knowledge=True, web=False))
+        mock_kb.retrieve_context.assert_called_once_with("test question", product_filter=None)

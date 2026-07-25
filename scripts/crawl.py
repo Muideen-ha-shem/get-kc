@@ -11,8 +11,16 @@ load_dotenv()
 
 
 async def main():
-    url = "https://ha-shem.com/"
+    await crawl_site("https://ha-shem.com/")
 
+
+async def crawl_site(url: str, max_depth: int = 2):
+    """Crawl *url* (BFS, up to *max_depth*) and store each page in Supabase.
+
+    Extracted so other entry-point scripts (crawl_spidify.py,
+    crawl_zivaaira.py) can reuse the exact same crawl configuration for a
+    different target site, instead of duplicating it.
+    """
     browser_cfg = BrowserConfig(
         headless=False,
         user_agent_mode="random",
@@ -35,7 +43,7 @@ async def main():
         cache_mode=CacheMode.DISABLED,
         stream=True,
         deep_crawl_strategy=BFSDeepCrawlStrategy(
-            max_depth=2,
+            max_depth=max_depth,
             include_external=False,
         ),
     )
