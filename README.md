@@ -1,6 +1,6 @@
-# Ha-Shem AI Support Platform
+# HavisIQ — Ha-Shem AI Business Solutions Platform
 
-A modern, intelligent customer support platform powered by AI that leverages Retrieval-Augmented Generation (RAG) to provide real-time, knowledge-grounded responses. Built with a React/TypeScript frontend and Python FastAPI backend.
+HavisIQ is the AI Solutions Advisor for the whole Ha-Shem ecosystem — not a chatbot for a single product. Ask it about a business need (identity verification, recruitment, cybersecurity, cloud, software development, managed services, training) and it matches you to the right Ha-Shem solution, grounded in Retrieval-Augmented Generation (RAG) with cited sources. SPIDIFY and ZivaAIRA are the first two entries in a growing solution catalog (`frontend/src/solutions.ts`), not the platform's focus. Built with a React/TypeScript frontend and Python FastAPI backend.
 
 ---
 
@@ -50,6 +50,20 @@ Standalone scripts such as crawl, chunking, vector upload, and cleaning utilitie
 > knowledge-base-only answers. Live-page downloads run concurrently, and search
 > results/fetched pages/embeddings are cached in-memory for the process's uptime —
 > see [Retrieval Quality & Performance](#-retrieval-quality--performance) below.
+
+> **Multi-solution knowledge base (SPIDIFY, ZivaAIRA):** `ProductRouter`
+> (question → solution classification) and solution-scoped retrieval are built
+> and tested but **not yet live** — they require a one-time SQL migration and
+> a crawl/ingestion run that haven't been executed against production. See
+> `PROJECT_STRUCTURE.md`'s "Multi-solution ingestion order" for the exact
+> steps and current status.
+>
+> **Demo requests:** `POST /demo-request` backs every "Request a demo" /
+> "Contact sales" / "Talk to an expert" button in the frontend, but the
+> `demo_requests` Supabase table doesn't exist yet either — submissions
+> currently return a clean `503` with a friendly message rather than a raw
+> error. Run `scripts/sql/003_demo_requests.sql` to activate it; no code
+> changes needed once that table exists.
 
 ---
 
@@ -352,6 +366,7 @@ npm run dev
 |----------|--------|-------------|
 | `/health` | GET | Server health check |
 | `/chat` | POST | Send a message and get AI response |
+| `/demo-request` | POST | Submit a "Request a demo" / "Contact sales" / "Talk to an expert" lead |
 
 **Chat Request Format:**
 ```json
@@ -370,6 +385,21 @@ npm run dev
 	]
 }
 ```
+
+**Demo Request Format:**
+```json
+{
+	"name": "Ada Lovelace",
+	"email": "ada@example.com",
+	"company": "Acme Ltd",
+	"use_case": "Identity verification for customer onboarding",
+	"product": "SPIDIFY"
+}
+```
+`company`, `use_case`, and `product` are optional. Returns `503` with a
+friendly message until `scripts/sql/003_demo_requests.sql` has been run
+(see the note above) — this is expected until that migration is applied,
+not a bug.
 
 ---
 

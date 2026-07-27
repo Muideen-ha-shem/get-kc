@@ -20,13 +20,19 @@
   - `sb.py` — Supabase client accessor
   - api/
     - `app.py` — FastAPI app setup, CORS, router registration
-    - `schemas.py` — `ChatRequest` / `ChatResponse` models
+    - `schemas.py` — `ChatRequest`/`ChatResponse` and `DemoRequest`/`DemoRequestResponse` models
     - routes/
       - `chat.py` — `POST /chat` endpoint
+      - `demo_request.py` — `POST /demo-request` endpoint (backs every
+        "Request a demo"/"Contact sales"/"Talk to an expert" CTA in the
+        frontend); returns 503 with a friendly message if the
+        `demo_requests` table hasn't been created yet, rather than leaking
+        a raw database error
     - services/
       - `embeddings.py` — Gemini embedding calls
       - `generator.py` — Groq LLM generation
       - `retrieval.py` — vector search & context retrieval
+      - `demo_requests.py` — persists demo/contact-sales leads to Supabase
   - config/
     - `settings.py` — `Settings` dataclass (env-driven configuration)
   - infrastructure/
@@ -48,6 +54,11 @@
       - `support_service.py`
     - routing/
       - `source_router.py` — keyword-based KB-vs-web routing decision
+      - `product_router.py` — classifies a question against named
+        solutions in the catalog (SPIDIFY, ZivaAIRA, and any future
+        additions) so knowledge-base retrieval can be scoped to one of
+        them; built and unit-tested but **not** wired into the default
+        `chat_orchestrator` singleton yet (see note below)
     - manager/
       - `search_manager.py` — executes routing decisions across retrievers
     - merger/
@@ -123,29 +134,131 @@
 > — it stays inert (`background_learning=None`) until a real
 > implementation is added.
 
+> **Multi-product knowledge base:** `ProductRouter` **is** wired into the
+> default `chat_orchestrator` singleton (`product_router=ProductRouter()`
+> passed to `SearchManager(...)`), and
+> `scripts/sql/002_product_knowledge_schema.sql` has been applied. Product
+> identity, aliases, and intent keywords for every product — SPIDIFY,
+> ZivaAIRA, and the 11-product HAVIS-360 catalog — live in
+> `src/shared/product_registry.py`, the single source of truth `ProductRouter`,
+> `SourceRouter`, and `product_metadata.py` all derive from. A product whose
+> pages haven't been crawled/uploaded yet (see **Scripts and Utilities**
+> below for the ingestion order) simply won't have any chunks to retrieve —
+> nothing breaks, the question just falls through to general knowledge/web
+> search same as before that product existed.
+
 ## Scripts and Utilities
 - scripts/ — standalone tools, run manually, not imported by the API
   - `__init__.py`
-  - `crawl.py` — crawls ha-shem.com via crawl4ai
+  - `crawl.py` — crawls ha-shem.com via crawl4ai; also exposes a reusable
+    `crawl_site(url, max_depth=2)` used by the product crawl scripts below
+  - `crawl_spidify.py` / `crawl_zivaaira.py` — crawl SPIDIFY/ZivaAIRA's own
+    dedicated product sites (deep-crawled, `max_depth` unset)
+  - `crawl_vlogin.py`, `crawl_staas.py`, `crawl_wecare.py`,
+    `crawl_havis_xpend.py`, `crawl_havis_vacay.py`, `crawl_havis_ireport.py`,
+    `crawl_havis_rema.py`, `crawl_havis_ecertify.py`, `crawl_kwikalert.py`,
+    `crawl_appmanage.py`, `crawl_paycheq.py` — each crawls one HAVIS-360
+    product's single page on ha-shem.com (`max_depth=0`, no link-following —
+    these aren't dedicated multi-page sites like SPIDIFY/ZivaAIRA)
+  - `product_metadata.py` — maps a crawled URL to product metadata
+    (`product`, `category`, `source_type`) for `upload_vectors.py`; matches
+    by domain (SPIDIFY/ZivaAIRA, each on their own domain) or by domain +
+    path prefix (the HAVIS-360 catalog, all sharing ha-shem.com). Sources
+    its data from `src/shared/product_registry.py` — **that** is the actual
+    single source of truth (also used by `ProductRouter`); this module is
+    just the URL-matching layer on top of it
   - `chunk_runner.py` — chunks cleaned content
-  - `upload_vectors.py` — embeds and uploads chunks to Supabase
+  - `upload_vectors.py` — embeds and uploads chunks to Supabase; attaches
+    product metadata automatically via `product_metadata.py` when the
+    chunk's source URL matches a known product domain (no-op for
+    general ha-shem.com content, so this is a backward-compatible change)
   - `test_clean.py` — exercises `intensive_cleaner`
+  - sql/
+    - `002_product_knowledge_schema.sql` — **not executed by any script.**
+      Adds `product`/`category`/`source_type` columns to
+      `documentation_chunks` and a new `match_documents_by_product` RPC
+      function (additive — does not touch the existing `match_documents`).
+      Run this yourself (e.g. via the Supabase SQL editor) before running
+      the solution crawl scripts or wiring `ProductRouter` into
+      `chat_orchestrator`. Also includes the `demo_requests` table (see
+      003 below — that file is a standalone extract of the same table for
+      when you only want demo requests working).
+    - `003_demo_requests.sql` — **not executed by any script or by Claude**
+      (no DDL access with the credentials in `.env` — only PostgREST via
+      `SUPABASE_URL`/`SUPABASE_KEY`, which can't run `CREATE TABLE`). A
+      standalone extract of just the `demo_requests` table, independent of
+      002. Once this exists, `POST /demo-request` works immediately with
+      no code changes.
+
+**Multi-solution ingestion order** (13 products: SPIDIFY, ZivaAIRA, and the
+11-product HAVIS-360 catalog — V-Login, STAAS, WeCare, Havis Xpend, Havis
+Vacay, Havis iReport, Havis REMA, Havis eCertify, KwikAlert, AppManage,
+PayCheq), each step manual:
+1. Run `scripts/sql/002_product_knowledge_schema.sql` in Supabase (only
+   needed once — the `product` column is free-text, so no migration is
+   needed when adding new products, only the first time this schema is set up).
+2. Run each `python -m scripts.crawl_<product>` script (e.g.
+   `scripts.crawl_vlogin`, `scripts.crawl_staas`, ...) — each populates
+   `crawled_pages`, same as `crawl.py` does for ha-shem.com.
+3. `python -m scripts.test_clean` (cleans all rows in `crawled_pages`,
+   including the new solution pages, into `cleaned_output/`).
+4. `python -m scripts.upload_vectors` (chunks, embeds, and uploads
+   everything in `cleaned_output/` — solution metadata attached automatically).
+
+**Adding product #14 and beyond:** add one entry to
+`src/shared/product_registry.py` (`PRODUCT_REGISTRY`) with its URL, domain,
+optional path prefix, category, aliases, and intent keywords, then create
+one `crawl_<product>.py` script mirroring the pattern above. No changes are
+needed to `ProductRouter`, `SourceRouter`, `product_metadata.py`, or any
+retrieval code — they all derive their product-specific behavior from the
+registry.
+
+**Demo requests**, independent of the above: run
+`scripts/sql/003_demo_requests.sql` in Supabase — `POST /demo-request`
+starts working immediately, no other steps needed.
 
 ## Frontend
+HavisIQ — "AI Solutions Advisor for the Ha-Shem ecosystem." The UI is
+organised around a scalable **solution catalog**, not individual products:
+SPIDIFY and ZivaAIRA are the first two entries (`status: 'live'`, each with
+its own knowledge base and site), alongside advisory categories
+(cybersecurity, cloud services, software development, managed services,
+training) that Ha-Shem already delivers on without a dedicated product yet
+(`status: 'advisory'`). Adding a new solution — including promoting an
+advisory category to "live" once it has its own site — is a one-line
+addition to `src/solutions.ts`; no other file needs to change.
+
 - frontend/
   - `index.html`
   - `package.json`, `package-lock.json`
-  - `postcss.config.js`, `tailwind.config.js`
+  - `postcss.config.js`, `tailwind.config.js` — `ink`/`paper`/`gold` brand
+    tokens and the `font-display` (Georgia-based serif) type family
   - `vite.config.ts`
   - `tsconfig.json`, `tsconfig.app.json`, `tsconfig.node.json`
   - public/
-    - logo/
+    - logo/ (legacy Ha-Shem PNG logo — unused; the HavisIQ mark is now an
+      inline SVG component, not a static asset)
   - src/
-    - `App.tsx` — main chat application (includes client-side typewriter
-      reveal of responses)
+    - `App.tsx` — main application: hero, solution catalog grid, chat
+      widget (client-side typewriter reveal of `/chat` responses),
+      support/appointment sections
+    - `solutions.ts` — the solution catalog data (single source of truth
+      for the catalog grid, the compare view, and demo-request context)
     - `main.tsx`
     - `styles.css`
     - `vite-env.d.ts`
+    - components/
+      - `HavisIQMark.tsx` — the brand mark (H monogram, broken crossbar,
+        gold node). Colors are set inline, not via Tailwind utility
+        classes — this is a small, fixed-identity element that must never
+        depend on the Tailwind build picking up a config change
+      - `DemoRequestModal.tsx` — the shared form behind every "Request a
+        demo"/"Contact sales"/"Talk to an expert" CTA; posts to
+        `POST /demo-request`, pre-fills solution context when opened from
+        a specific catalog card, and shows a friendly inline error (not a
+        raw fetch failure) if the backend returns one
+      - `CompareSolutionsModal.tsx` — read-only side-by-side view of the
+        full catalog, each card also opening `DemoRequestModal`
 
 ## Tests
 - tests/
@@ -164,6 +277,11 @@
   - `test_domain_filter.py`
   - `test_citation_validator.py`
   - `test_cache.py`
+  - `test_product_router.py`
+  - `test_product_metadata.py`
+  - `test_retrieval.py`
+  - `test_knowledge_service.py`
+  - `test_demo_requests.py`
   - `test_mcp_server.py`
 
 ## Notes

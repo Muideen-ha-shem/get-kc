@@ -110,6 +110,14 @@ class SearchManager:
             shared across all three keyspaces via key prefixes.
         fetch_concurrency: Max concurrent page fetches (default 3). Only
             relevant when more than one live-page URL is being downloaded.
+        product_router: An object with a ``classify(question) -> ProductMatch``
+            method (see ``services.routing.ProductRouter``). When given and
+            it identifies one or more products, knowledge-base retrieval is
+            scoped to exactly that set via ``product_filter`` (requires
+            ``scripts/sql/002_product_knowledge_schema.sql`` to have been
+            applied — see that file's docstring). When ``None`` (the
+            default) or no product is identified, knowledge retrieval is
+            unscoped — unchanged from prior behaviour.
         live_search_max_results: Max results per live search call (default 5).
         live_page_max_fetch: Max live pages to download for RAG (default 3).
 
@@ -140,6 +148,7 @@ class SearchManager:
         domain_filter: Any = None,
         response_cache: Any = None,
         fetch_concurrency: int = _DEFAULT_FETCH_CONCURRENCY,
+        product_router: Any = None,
         live_search_max_results: int = 5,
         live_page_max_fetch: int = 3,
     ) -> None:
@@ -159,10 +168,12 @@ class SearchManager:
         self._query_rewriter: Any = query_rewriter
         self._domain_filter: Any = domain_filter
         self._response_cache: Any = response_cache
+        self._product_router: Any = product_router
 
         logger.info(
             "SearchManager ready (router=%s, merger=%s, semantic_reranker=%s, source_ranker=%s, "
-            "query_rewriter=%s, domain_filter=%s, response_cache=%s, fetch_concurrency=%d).",
+            "query_rewriter=%s, domain_filter=%s, response_cache=%s, fetch_concurrency=%d, "
+            "product_router=%s).",
             type(self._source_router).__name__,
             type(self._context_merger).__name__,
             type(self._semantic_reranker).__name__ if self._semantic_reranker else "None",
@@ -171,6 +182,7 @@ class SearchManager:
             type(self._domain_filter).__name__ if self._domain_filter else "None",
             type(self._response_cache).__name__ if self._response_cache else "None",
             self._fetch_concurrency,
+            type(self._product_router).__name__ if self._product_router else "None",
         )
 
     # ------------------------------------------------------------------
@@ -287,7 +299,22 @@ class SearchManager:
         """Query the internal knowledge base (Supabase vector search)."""
         try:
             svc = self._get_knowledge_service()
-            matches, _similarities, _urls = svc.retrieve_context(question)
+            product_filter = self._classify_product(question)
+
+            if product_filter and len(product_filter) > 1:
+                # Multiple products matched (e.g. "compare SPIDIFY and
+                # ZivaAIRA") — query each separately and merge, rather than
+                # one combined ranked list. A single similarity ranking
+                # across products can starve one of them entirely (whichever
+                # embeds marginally closer to the question takes every
+                # match_count slot); querying per-product guarantees each
+                # gets a fair share of the results.
+                matches = self._retrieve_knowledge_per_product(svc, question, product_filter)
+            else:
+                matches, _similarities, _urls = svc.retrieve_context(
+                    question, product_filter=product_filter
+                )
+
             if matches:
                 logger.info(
                     "SearchManager: knowledge base returned %d matches.", len(matches)
@@ -300,6 +327,100 @@ class SearchManager:
                 "SearchManager: knowledge retrieval failed — %s", exc, exc_info=True
             )
             return None
+
+    # Per-product retrieval requests more candidates than the single-source
+    # default (3). Short, boilerplate-heavy chunks (nav text, security
+    # badges) from one product can look like a near-duplicate of an
+    # unrelated short chunk from a *different* product to ContextMerger's
+    # bigram dedup pass; a larger candidate pool makes it far more likely
+    # at least one substantive, genuinely distinct chunk per product
+    # survives that pass.
+    _PER_PRODUCT_MATCH_COUNT = 6
+
+    @staticmethod
+    def _retrieve_knowledge_per_product(
+        svc: Any, question: str, products: list[str]
+    ) -> list[dict[str, Any]]:
+        """Query each product in *products* separately and concatenate matches."""
+        matches: list[dict[str, Any]] = []
+        for product in products:
+            try:
+                product_matches, _similarities, _urls = svc.retrieve_context(
+                    question,
+                    product_filter=[product],
+                    match_count=SearchManager._PER_PRODUCT_MATCH_COUNT,
+                )
+                matches.extend(SearchManager._dedupe_by_url_prefer_longest(product_matches))
+            except Exception as exc:
+                logger.warning(
+                    "SearchManager: per-product knowledge retrieval failed for %s — %s.",
+                    product,
+                    exc,
+                )
+        return matches
+
+    @staticmethod
+    def _dedupe_by_url_prefer_longest(
+        matches: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Collapse *matches* to one per ``parent_url``, keeping the longest chunk.
+
+        ContextMerger also dedupes by URL, but it keeps whichever chunk has
+        the higher similarity score — and a short, boilerplate-heavy chunk
+        (nav text, security badges) can score marginally higher than a
+        longer, substantive chunk from the same page purely by chance. That
+        short survivor then has a much higher risk of tripping ContextMerger's
+        bigram near-duplicate check against an unrelated product's equally
+        short boilerplate. Doing our own URL dedup first — preferring the
+        longest chunk, which best represents the page and is least likely to
+        false-positive on bigram overlap — avoids ceding that choice to score
+        alone.
+        """
+        best_by_url: dict[str, dict[str, Any]] = {}
+        order: list[str] = []
+        no_url: list[dict[str, Any]] = []
+        for match in matches:
+            url = match.get("parent_url") or ""
+            if not url:
+                no_url.append(match)
+                continue
+            existing = best_by_url.get(url)
+            if existing is None:
+                order.append(url)
+                best_by_url[url] = match
+            elif len(match.get("chunk_content", "")) > len(existing.get("chunk_content", "")):
+                best_by_url[url] = match
+        return [best_by_url[url] for url in order] + no_url
+
+    def _classify_product(self, question: str) -> list[str] | None:
+        """Return a product filter for *question*, if the router found any match.
+
+        Scopes retrieval to every product the router identified — one for a
+        "high" confidence match, several for "ambiguous" (e.g. "compare
+        SPIDIFY and ZivaAIRA" names both). Narrowing to the matched set
+        rather than only ever narrowing to a single product matters for
+        comparison-style questions: an unscoped search has to rank a
+        multi-product question's chunks against the *entire* knowledge
+        base, which can starve one of the mentioned products of any
+        top-`match_count` slot; scoping to just the mentioned products
+        removes that competition. Only a question with zero product signal
+        (``confidence == "none"``) stays fully unscoped.
+        """
+        if self._product_router is None:
+            return None
+        try:
+            match = self._product_router.classify(question)
+        except Exception as exc:
+            logger.warning("SearchManager: product classification failed — %s.", exc)
+            return None
+        if match.products:
+            logger.info(
+                "SearchManager: scoping knowledge retrieval to product(s) %s (%s).",
+                match.products,
+                match.confidence,
+            )
+            return list(match.products)
+        return None
 
     def _retrieve_web_search(self, question: str) -> list[Any] | None:
         """Perform a live web search."""
