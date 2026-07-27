@@ -234,9 +234,24 @@ class ChatOrchestrator:
 
         # --- Step 3: Generate answer (ResponseGenerator) ---
         if self._response_generator:
+            # A business-theme match (see SearchManager.product_match) means
+            # this is a genuine business-need question spanning several
+            # products ("we're digitizing our company"), not just an
+            # ordinary "compare X and Y" naming two products — only then do
+            # we ask ResponseGenerator to frame the answer as a primary/
+            # complementary (or parallel) recommendation.
+            match = getattr(self._search_manager, "product_match", None)
+            primary_product = None
+            complementary_products = None
+            if match is not None and getattr(match, "via_theme", False):
+                primary_product = match.primary
+                complementary_products = [p for p in match.products if p != match.primary]
+
             result = self._response_generator.generate(
                 question=message,
                 context=evidence,
+                primary_product=primary_product,
+                complementary_products=complementary_products,
             )
             answer = result.get("answer", "")
             citations = result.get("citations", [])
@@ -350,6 +365,33 @@ _embedding_cache = TTLCache(ttl_seconds=3600.0, maxsize=1024)
 #                               scripts/crawl_zivaaira.py ingestion — see
 #                               PROJECT_STRUCTURE.md for the verified state.
 #
+#   Catalog expansion + business advisory (Phases 16-17):
+#     * ProductRouter now derives its product/keyword data from
+#       src.shared.product_registry (13 products) and falls back to
+#       src.shared.business_themes for broad business-need questions that
+#       don't name any single product ("we're digitizing our company"),
+#       returning a product cluster with an optional primary recommendation.
+#     * SearchManager skips web search for a confidently-named product
+#       match (see _named_product_with_adequate_confidence) — confirmed
+#       live that a short product name can collide with an unrelated
+#       real-world entity of the same name (e.g. "WeCare" also names an
+#       unrelated adult-care service), and the resulting web content
+#       competed with our own correct KB chunk.
+#     * ngram_threshold=0.75 below (default 0.35): the 11 newer HAVIS-360
+#       products are single, short pages built from the same site template,
+#       so two *different* products' chunks share enough boilerplate
+#       ("Talk to an Expert", "Download Datasheet", nav text) to trip the
+#       default near-duplicate check — confirmed live at similarity
+#       0.50-0.59 between genuinely distinct products, comfortably below
+#       genuine near-duplicate text (0.87-1.0 measured). This uses
+#       ContextMerger's own existing constructor parameter — no change to
+#       its code/logic — chosen with a wide margin on both sides.
+#     * ResponseGenerator.generate() accepts optional primary_product /
+#       complementary_products (from ChatOrchestrator, only set when
+#       SearchManager.product_match.via_theme is True) to frame the answer
+#       as a primary + complementary (or parallel) business recommendation,
+#       grounded only in the retrieved evidence.
+#
 # Each component builds its own dependencies lazily from environment
 # settings (Settings.from_environment()) on first use, so this is safe to
 # construct at import time even before .env is loaded. If TAVILY_API_KEY/
@@ -358,9 +400,12 @@ _embedding_cache = TTLCache(ttl_seconds=3600.0, maxsize=1024)
 # process_request_response/chat() all keep their existing signatures and
 # return shapes, preserving backward compatibility with the FastAPI route
 # handler and CLI.
+_context_merger = ContextMerger(ngram_threshold=0.75)
+
 chat_orchestrator = ChatOrchestrator(
     source_router=SourceRouter(),
     search_manager=SearchManager(
+        context_merger=_context_merger,
         semantic_reranker=SemanticReranker(cache=_embedding_cache),
         source_ranker=SourceRanker(),
         query_rewriter=QueryRewriter(),
@@ -368,6 +413,6 @@ chat_orchestrator = ChatOrchestrator(
         response_cache=_response_cache,
         product_router=ProductRouter(),
     ),
-    context_merger=ContextMerger(),
+    context_merger=_context_merger,
     response_generator=ResponseGenerator(citation_validator=CitationValidator()),
 )
