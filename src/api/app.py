@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .routes.chat import router as chat_router
 from .routes.demo_request import router as demo_request_router
+from .routes.solutions import router as solutions_router
 
 load_dotenv()
 
@@ -24,6 +25,7 @@ app.add_middleware(
 
 app.include_router(chat_router)
 app.include_router(demo_request_router)
+app.include_router(solutions_router)
 
 
 @app.get("/health")

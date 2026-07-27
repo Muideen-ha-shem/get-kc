@@ -43,6 +43,7 @@ from ..services.ranking import SourceRanker
 from ..services.query import QueryRewriter
 from ..services.filtering import DomainQualityFilter
 from ..services.validation import CitationValidator
+from ..services.advisory import AdvisoryResponseLayer, AnalyticsService
 from ..shared.cache import TTLCache
 from ..shared.logging import get_logger
 
@@ -99,6 +100,7 @@ class ChatOrchestrator:
         response_generator: Any = None,
         background_learning: Any = None,
         enable_background_learning: bool | None = None,
+        advisory_layer: Any = None,
     ) -> None:
         # Legacy services
         self._knowledge_service = knowledge_service or KnowledgeService()
@@ -111,6 +113,12 @@ class ChatOrchestrator:
         self._context_merger = context_merger
         self._response_generator = response_generator
         self._background_learning = background_learning
+        # Phase 19 — optional business-advisor enrichment (intent,
+        # recommendations, clarification, next actions). None preserves
+        # exact prior behaviour: primary/complementary framing falls back
+        # to the Phase 17 via_theme-only logic, and no next_actions are
+        # ever attached to the response.
+        self._advisory_layer = advisory_layer
 
         # Whether to trigger background learning after responses
         if enable_background_learning is None:
@@ -183,9 +191,11 @@ class ChatOrchestrator:
             A :class:`~api.schemas.ChatResponse` instance.
         """
         result = self.chat(message)
+        next_actions = result.get("next_actions") or None
         return ChatResponse(
             answer=result["answer"],
             sources=result.get("sources", []),
+            next_actions=next_actions,
         )
 
     # ------------------------------------------------------------------
@@ -232,21 +242,44 @@ class ChatOrchestrator:
             else:
                 evidence = []
 
+        # --- Step 2.5: Advisory enrichment (Phase 19, optional) ---
+        # A business-theme match (see SearchManager.product_match) means
+        # this is a genuine business-need question spanning several
+        # products ("we're digitizing our company"), not just an ordinary
+        # "compare X and Y" naming two products — only then (or via a
+        # single high-confidence advisory recommendation) do we ask
+        # ResponseGenerator to frame the answer as a primary/complementary
+        # (or parallel) recommendation.
+        match = getattr(self._search_manager, "product_match", None)
+        primary_product = None
+        complementary_products = None
+        next_actions: list[dict[str, Any]] = []
+
+        if self._advisory_layer is not None:
+            advisory = self._advisory_layer.build(message, evidence, product_match=match)
+            if advisory.needs_clarification:
+                # Deterministic, zero-LLM-call short circuit — a clarifying
+                # question is never at risk of hallucinating since it's
+                # built entirely from registry text (see ClarificationEngine).
+                return {
+                    "answer": advisory.clarification,
+                    "sources": [],
+                    "citations": [],
+                    "next_actions": [],
+                }
+            primary_product = advisory.primary_product
+            complementary_products = advisory.complementary_products
+            next_actions = [
+                {"label": a.label, "action_type": a.action_type, "target": a.target}
+                for a in advisory.next_actions
+            ]
+        elif match is not None and getattr(match, "via_theme", False):
+            # No advisory layer configured — exact Phase 17 behaviour.
+            primary_product = match.primary
+            complementary_products = [p for p in match.products if p != match.primary]
+
         # --- Step 3: Generate answer (ResponseGenerator) ---
         if self._response_generator:
-            # A business-theme match (see SearchManager.product_match) means
-            # this is a genuine business-need question spanning several
-            # products ("we're digitizing our company"), not just an
-            # ordinary "compare X and Y" naming two products — only then do
-            # we ask ResponseGenerator to frame the answer as a primary/
-            # complementary (or parallel) recommendation.
-            match = getattr(self._search_manager, "product_match", None)
-            primary_product = None
-            complementary_products = None
-            if match is not None and getattr(match, "via_theme", False):
-                primary_product = match.primary
-                complementary_products = [p for p in match.products if p != match.primary]
-
             result = self._response_generator.generate(
                 question=message,
                 context=evidence,
@@ -281,6 +314,7 @@ class ChatOrchestrator:
             "answer": answer,
             "sources": sources,
             "citations": citations,
+            "next_actions": next_actions,
         }
 
     # ------------------------------------------------------------------
@@ -392,6 +426,27 @@ _embedding_cache = TTLCache(ttl_seconds=3600.0, maxsize=1024)
 #       as a primary + complementary (or parallel) business recommendation,
 #       grounded only in the retrieved evidence.
 #
+#   Intelligent Business Advisor (Phase 19):
+#     * AdvisoryResponseLayer (src.services.advisory) sits between
+#       retrieval and generation: BusinessIntentEngine enriches
+#       SearchManager's ProductMatch with registry context;
+#       ClarificationEngine short-circuits with a deterministic clarifying
+#       question (built entirely from registry text, zero LLM calls) for a
+#       genuinely ambiguous two-product match — never for a business-theme
+#       bundle or an explicitly-named comparison, both of which are
+#       deliberate, not confused; RecommendationEngine produces ranked,
+#       registry+evidence-grounded recommendations (now driving
+#       primary_product/complementary_products for ANY high-confidence
+#       match, not just business themes); NextActionsEngine attaches
+#       contextual next steps to the response's new optional
+#       ``next_actions`` field (additive to ChatResponse — old clients
+#       ignore it). AnalyticsService records anonymous, in-memory-only
+#       usage counters alongside it, best-effort (a failure there can never
+#       break a chat response). SessionContext (conversation awareness) is
+#       built and fully unit-tested but deliberately NOT wired in here yet
+#       — doing so needs the frontend to generate/persist/send a session
+#       id, out of scope for this pass; see SessionContext's docstring.
+#
 # Each component builds its own dependencies lazily from environment
 # settings (Settings.from_environment()) on first use, so this is safe to
 # construct at import time even before .env is loaded. If TAVILY_API_KEY/
@@ -401,6 +456,7 @@ _embedding_cache = TTLCache(ttl_seconds=3600.0, maxsize=1024)
 # return shapes, preserving backward compatibility with the FastAPI route
 # handler and CLI.
 _context_merger = ContextMerger(ngram_threshold=0.75)
+_analytics_service = AnalyticsService()
 
 chat_orchestrator = ChatOrchestrator(
     source_router=SourceRouter(),
@@ -415,4 +471,5 @@ chat_orchestrator = ChatOrchestrator(
     ),
     context_merger=_context_merger,
     response_generator=ResponseGenerator(citation_validator=CitationValidator()),
+    advisory_layer=AdvisoryResponseLayer(analytics=_analytics_service),
 )

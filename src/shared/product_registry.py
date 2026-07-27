@@ -51,6 +51,7 @@ PRODUCT_REGISTRY: dict[str, ProductInfo] = {
             "compliance verification", "onboarding users", "onboard users",
             "verify customers", "customer verification", "secure onboarding",
             "document verification", "id validation",
+            "customer onboarding", "verify customer identities", "identities during onboarding",
         ),
     },
     "ZivaAIRA": {

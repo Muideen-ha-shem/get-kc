@@ -25,7 +25,7 @@ import {
   parseMessageContent,
   tokenizeInline,
 } from '../../lib/parseMessage';
-import { solutions } from '../../solutions';
+import type { Solution } from '../../solutions';
 
 // Generic keyword -> icon lookup for feature cards. Purely heuristic on the
 // feature title text, so it works for any future solution's feature set
@@ -293,7 +293,7 @@ function renderBlock(block: MessageBlock, key: string) {
   }
 }
 
-export function MessageContent({ content }: { content: string }) {
+export function MessageContent({ content, solutions }: { content: string; solutions: Solution[] }) {
   const blocks = parseMessageContent(content);
   const header = detectProductHeader(content, solutions);
 
