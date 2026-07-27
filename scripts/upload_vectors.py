@@ -27,6 +27,34 @@ def run_vector_pipeline():
     print("🔌 Connecting to Supabase...")
     sb_client = get_client()
 
+    # cleaned_output/ is regenerated in full every run (test_clean.py has no
+    # incremental mode), so without this, every already-uploaded URL gets
+    # re-embedded and immediately discarded on the duplicate-key catch below
+    # — wasted embedding API calls/quota for no effect. Skip URLs that
+    # already have at least one chunk uploaded. (If an earlier run was
+    # interrupted partway through a URL's chunks, this could in principle
+    # skip finishing it — the per-chunk duplicate-key catch further down
+    # remains as a correctness fallback for that case; just re-run without
+    # this file present, or clear its rows, to force a full re-upload.)
+    print("🔎 Checking which URLs are already uploaded...")
+    existing_urls: set[str] = set()
+    page_size = 1000
+    offset = 0
+    while True:
+        page = (
+            sb_client.table("documentation_chunks")
+            .select("parent_url")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        if not page.data:
+            break
+        existing_urls.update(row["parent_url"] for row in page.data if row.get("parent_url"))
+        if len(page.data) < page_size:
+            break
+        offset += page_size
+    print(f"   ↳ {len(existing_urls)} URLs already have uploaded chunks.")
+
     print("🧠 Initializing Google GenAI embeddings client...")
     embeddings_client = genai.Client()
 
@@ -47,6 +75,10 @@ def run_vector_pipeline():
                 continue
             else:
                 content_lines.append(line)
+
+        if url in existing_urls:
+            print(f"\n⏭️  Skipping '{filename}' — {url} already uploaded.")
+            continue
 
         cleaned_text = "".join(content_lines).strip()
         chunks = split_into_semantic_chunks(cleaned_text)

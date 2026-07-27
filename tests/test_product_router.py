@@ -278,3 +278,90 @@ class TestProductRegistryConsistency:
         for product in PRODUCT_REGISTRY:
             assert product in router._product_names
             assert product in router._product_keywords
+
+
+# ---------------------------------------------------------------------------
+# Phase 17 — business-theme fallback (Part 3/4: broad business-need
+# questions that don't name any single product's own keywords, but imply
+# several at once).
+# ---------------------------------------------------------------------------
+
+
+class TestProductRouterBusinessThemes:
+    def test_hr_modernization_has_primary_and_complementary(self):
+        router = ProductRouter()
+        match = router.classify("We want to modernize our HR operations")
+        assert match.confidence == "ambiguous"
+        assert match.via_theme is True
+        assert match.primary == "ZivaAIRA"
+        assert set(match.products) == {
+            "ZivaAIRA", "STAAS", "Havis Vacay", "PayCheq", "WeCare", "Havis iReport",
+        }
+
+    def test_visitor_onboarding_prefers_v_login_as_primary(self):
+        router = ProductRouter()
+        match = router.classify("We need to securely onboard visitors")
+        assert match.via_theme is True
+        assert match.primary == "V-Login"
+        assert set(match.products) == {"V-Login", "SPIDIFY"}
+
+    def test_digital_transformation_has_no_single_primary(self):
+        router = ProductRouter()
+        match = router.classify("We are digitizing our company")
+        assert match.via_theme is True
+        assert match.primary is None
+        assert set(match.products) == {
+            "ZivaAIRA", "STAAS", "Havis Vacay", "PayCheq", "WeCare",
+            "Havis iReport", "Havis Xpend",
+        }
+
+    def test_explicit_product_name_still_wins_over_theme(self):
+        """A theme keyword phrase inside a question that also names a
+        product directly should not override the explicit name."""
+        router = ProductRouter()
+        match = router.classify("Does ZivaAIRA help us modernize HR operations?")
+        assert match.products == ("ZivaAIRA",)
+        assert match.confidence == "high"
+        assert match.via_theme is False
+
+    def test_single_product_keyword_match_is_not_via_theme(self):
+        router = ProductRouter()
+        match = router.classify("We need software licensing")
+        assert match.products == ("AppManage",)
+        assert match.via_theme is False
+        assert match.primary is None
+
+    def test_plain_comparison_is_not_via_theme(self):
+        """Two products named directly ("compare X and Y") is a different
+        code path from a business-theme match — via_theme must stay False
+        so ResponseGenerator doesn't add unwanted recommendation framing to
+        an ordinary comparison question."""
+        router = ProductRouter()
+        match = router.classify("Compare SPIDIFY and ZivaAIRA")
+        assert match.via_theme is False
+        assert match.primary is None
+
+    def test_no_theme_match_returns_default(self):
+        router = ProductRouter()
+        match = router.classify("What are your office hours?")
+        assert match == ProductMatch()
+        assert match.via_theme is False
+
+    def test_custom_business_themes_override_defaults(self):
+        router = ProductRouter(
+            product_names={"Widget": ("widgetpro",)},
+            product_keywords={"Widget": ("manufacturing",)},
+            business_themes={
+                "custom_theme": {
+                    "keywords": ("scale our factory",),
+                    "products": ("Widget",),
+                    "primary": "Widget",
+                }
+            },
+        )
+        match = router.classify("We want to scale our factory")
+        assert match.products == ("Widget",)
+        assert match.primary == "Widget"
+        assert match.via_theme is True
+        # Default themes are fully replaced, not merged
+        assert router.classify("We are digitizing our company").confidence == "none"

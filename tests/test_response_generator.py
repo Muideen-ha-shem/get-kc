@@ -348,3 +348,125 @@ class TestResponseGeneratorFormatting:
         block, citations = ResponseGenerator._format_evidence([item])
 
         assert citations[0]["score"] is None
+
+
+# ---------------------------------------------------------------------------
+# Phase 17 — business-recommendation framing (primary_product /
+# complementary_products). Every existing caller omits these two params, so
+# the first priority is proving that omitting them changes nothing.
+# ---------------------------------------------------------------------------
+
+
+class TestResponseGeneratorRecommendationFraming:
+    def test_no_recommendation_params_leaves_prompt_unchanged(self):
+        """The exact regression this whole feature must not break: every
+        pre-existing call site (SearchManager-only pipeline, no business
+        theme) omits primary_product/complementary_products entirely."""
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = "Answer [1]."
+
+        with patch("groq.Groq") as mock_groq:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_completion
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key")
+            gen.generate(
+                question="What does SPIDIFY do?",
+                context=[_make_evidence(content="SPIDIFY verifies identity.", url="https://havisspidify.com/")],
+            )
+
+            system_prompt = mock_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+
+        assert "Business recommendation framing" not in system_prompt
+
+    def test_primary_and_complementary_adds_framing_instruction(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = "ZivaAIRA is the primary recommendation [1]."
+
+        with patch("groq.Groq") as mock_groq:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_completion
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key")
+            gen.generate(
+                question="We want to modernize our HR operations",
+                context=[_make_evidence(content="ZivaAIRA automates hiring.", url="https://aira.havis360.com/")],
+                primary_product="ZivaAIRA",
+                complementary_products=["STAAS", "Havis Vacay", "PayCheq", "WeCare", "Havis iReport"],
+            )
+
+            system_prompt = mock_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+
+        assert "Business recommendation framing" in system_prompt
+        assert "primary" in system_prompt.lower()
+        assert "ZivaAIRA" in system_prompt
+        assert "STAAS" in system_prompt
+        assert "do not invent products" in system_prompt.lower()
+
+    def test_complementary_without_primary_adds_parallel_framing(self):
+        """A theme with no single dominant product (e.g. company-wide
+        digital transformation) still gets framing, just without
+        designating any one product as primary."""
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = "Several solutions apply here [1][2]."
+
+        with patch("groq.Groq") as mock_groq:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_completion
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key")
+            gen.generate(
+                question="We are digitizing our company",
+                context=[_make_evidence(content="ZivaAIRA automates hiring.", url="https://aira.havis360.com/")],
+                primary_product=None,
+                complementary_products=["ZivaAIRA", "STAAS", "Havis Vacay"],
+            )
+
+            system_prompt = mock_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+
+        assert "Business recommendation framing" in system_prompt
+        assert "no single dominant one" in system_prompt
+        assert "ZivaAIRA" in system_prompt
+
+    def test_empty_complementary_list_adds_no_framing(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = "Answer [1]."
+
+        with patch("groq.Groq") as mock_groq:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_completion
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key")
+            gen.generate(
+                question="Tell me about SPIDIFY",
+                context=[_make_evidence(content="SPIDIFY verifies identity.", url="https://havisspidify.com/")],
+                primary_product="SPIDIFY",
+                complementary_products=[],
+            )
+
+            system_prompt = mock_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+
+        assert "Business recommendation framing" not in system_prompt
+
+    def test_build_recommendation_framing_directly(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        assert ResponseGenerator._build_recommendation_framing(None, None) == ""
+        assert ResponseGenerator._build_recommendation_framing("X", []) == ""
+
+        framed = ResponseGenerator._build_recommendation_framing("V-Login", ["SPIDIFY"])
+        assert "V-Login" in framed
+        assert "SPIDIFY" in framed
+        assert "primary" in framed.lower()
