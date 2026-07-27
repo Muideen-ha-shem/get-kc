@@ -124,6 +124,8 @@ class ResponseGenerator:
         self,
         question: str,
         context: Sequence[EvidenceItem] | None = None,
+        primary_product: str | None = None,
+        complementary_products: Sequence[str] | None = None,
     ) -> dict[str, Any]:
         """Generate a grounded answer from *question* and *context*.
 
@@ -132,6 +134,22 @@ class ResponseGenerator:
             context:  A list of :class:`EvidenceItem` objects from the
                       :class:`~services.manager.SearchManager`.  May be
                       empty or ``None``.
+            primary_product: When the question matched a business-theme
+                      recommendation cluster with a designated primary
+                      product (see ``ProductRouter``/``BUSINESS_THEMES``),
+                      its name — otherwise ``None``. When set, the prompt
+                      asks the model to recommend it as the primary
+                      solution and frame the rest as complementary. When
+                      ``None`` (the default — every existing caller),
+                      behaviour is identical to before this parameter
+                      existed.
+            complementary_products: The other relevant products for that
+                      same business-theme match — either the rest of the
+                      cluster (when ``primary_product`` is set) or the
+                      whole cluster (when the theme has no single primary,
+                      e.g. a company-wide transformation touching several
+                      unrelated departments equally). ``None``/empty means
+                      no business-theme framing is added to the prompt.
 
         Returns:
             A dict with keys:
@@ -173,6 +191,7 @@ class ResponseGenerator:
             num_sources=len(evidence_list),
             evidence_block=evidence_block,
         )
+        system_prompt += self._build_recommendation_framing(primary_product, complementary_products)
         user_prompt = question_clean
 
         logger.info(
@@ -222,6 +241,43 @@ class ResponseGenerator:
     # ------------------------------------------------------------------
     # Formatting helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_recommendation_framing(
+        primary_product: str | None,
+        complementary_products: Sequence[str] | None,
+    ) -> str:
+        """Extra prompt instructions for a business-theme match — empty
+        string (no change to the prompt at all) unless the caller passed a
+        non-empty ``complementary_products``, so every existing caller that
+        doesn't pass these two new ``generate()`` params is unaffected."""
+        if not complementary_products:
+            return ""
+        others = ", ".join(complementary_products)
+
+        if primary_product:
+            return (
+                f"\n\nBusiness recommendation framing: this question describes a "
+                f"business need best addressed primarily by {primary_product}, with "
+                f"{others} as complementary solutions. Structure your answer to: "
+                f"(1) recommend {primary_product} as the primary solution, "
+                f"(2) explain specifically why it fits the stated need, "
+                f"(3) introduce {others} as complementary solutions and explain the "
+                f"role each one plays. Base every recommendation and every claim "
+                f"strictly on the evidence above — do not invent products, features, "
+                f"or capabilities not present in it, and do not recommend a product "
+                f"the evidence does not cover."
+            )
+        return (
+            f"\n\nBusiness recommendation framing: this question spans multiple "
+            f"relevant solutions with no single dominant one — {others}. Structure "
+            f"your answer to explain the role each solution plays in addressing the "
+            f"need. Base every recommendation and every claim strictly on the "
+            f"evidence above — do not invent products, features, or capabilities not "
+            f"present in it, do not recommend a product the evidence does not cover, "
+            f"and do not present one solution as more important than the others "
+            f"unless the evidence itself supports that."
+        )
 
     def _validate_citations(self, citations: list[dict[str, object]]) -> list[dict[str, object]]:
         """Run the injected citation validator, if any.

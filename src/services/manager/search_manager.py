@@ -169,6 +169,13 @@ class SearchManager:
         self._domain_filter: Any = domain_filter
         self._response_cache: Any = response_cache
         self._product_router: Any = product_router
+        # Set by _classify_product() on each retrieve() call — read via the
+        # product_match property below so callers (ChatOrchestrator) can see
+        # which product(s) the *last* retrieve() call scoped to, including
+        # any primary-recommendation designation from a business-theme
+        # match. Purely additive: retrieve()'s return type/behaviour is
+        # unchanged, this is just extra state exposed alongside it.
+        self._last_product_match: Any = None
 
         logger.info(
             "SearchManager ready (router=%s, merger=%s, semantic_reranker=%s, source_ranker=%s, "
@@ -188,6 +195,15 @@ class SearchManager:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    @property
+    def product_match(self) -> Any:
+        """The :class:`~services.routing.ProductRouter.ProductMatch` from
+        the most recent :meth:`retrieve` call's product classification, or
+        ``None`` if no product router is configured or ``retrieve()``
+        hasn't been called yet (or its knowledge source wasn't active).
+        """
+        return self._last_product_match
 
     def retrieve(
         self,
@@ -247,6 +263,28 @@ class SearchManager:
                 actual_decision = RoutingDecision(knowledge=True, web=True)
                 web_search_results = self._retrieve_web_search(question)
                 live_page_chunks = self._retrieve_live_pages(question, web_search_results)
+            elif actual_decision.web and self._named_product_with_adequate_confidence(kb_confidence):
+                # A question that explicitly names one or more of our own
+                # products (e.g. "Compare STAAS and WeCare") can still
+                # trigger web search too — a routing keyword like "compare"
+                # is a web signal on its own. If our own KB already answers
+                # confidently, a live search for a short product name risks
+                # surfacing an unrelated real-world entity that happens to
+                # share the name (confirmed live: "WeCare" also names an
+                # unrelated adult-care service, "STAAS" a storage-as-a-
+                # service term) — competing with, or bigram-colliding with,
+                # our own correct chunk in ContextMerger. Business-theme
+                # matches are exempt: the matched *phrase* (e.g. "modernize
+                # our HR operations") isn't the literal product name, so it
+                # carries none of this collision risk.
+                logger.info(
+                    "SearchManager: named product(s) %s with adequate KB confidence "
+                    "(%.4f) — skipping web search to avoid an unrelated same-named "
+                    "result competing with our own product content.",
+                    self._last_product_match.products,
+                    kb_confidence,
+                )
+                actual_decision = RoutingDecision(knowledge=True, web=False)
 
         if actual_decision.web:
             web_search_results = self._retrieve_web_search(question)
@@ -327,6 +365,16 @@ class SearchManager:
                 "SearchManager: knowledge retrieval failed — %s", exc, exc_info=True
             )
             return None
+
+    def _named_product_with_adequate_confidence(self, kb_confidence: float) -> bool:
+        """True when the last classification explicitly named one or more
+        of our own products (not a business-theme match) and KB confidence
+        for them is already adequate — see the web-search-suppression
+        comment at its call site in :meth:`retrieve`."""
+        match = self._last_product_match
+        if match is None or not match.products or getattr(match, "via_theme", False):
+            return False
+        return kb_confidence >= _CONFIDENCE_THRESHOLD
 
     # Per-product retrieval requests more candidates than the single-source
     # default (3). Short, boilerplate-heavy chunks (nav text, security
@@ -413,6 +461,7 @@ class SearchManager:
         except Exception as exc:
             logger.warning("SearchManager: product classification failed — %s.", exc)
             return None
+        self._last_product_match = match
         if match.products:
             logger.info(
                 "SearchManager: scoping knowledge retrieval to product(s) %s (%s).",

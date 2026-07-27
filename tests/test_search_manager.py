@@ -1091,3 +1091,204 @@ class TestSearchManagerProductRouter:
 
         manager.retrieve("test question", decision=RoutingDecision(knowledge=True, web=False))
         mock_kb.retrieve_context.assert_called_once_with("test question", product_filter=None)
+
+
+# ---------------------------------------------------------------------------
+# Phase 17 — SearchManager.product_match (exposes the last ProductRouter
+# classification, including a business-theme's primary/complementary
+# designation, for ChatOrchestrator to pass to ResponseGenerator).
+# ---------------------------------------------------------------------------
+
+
+class TestSearchManagerProductMatch:
+    def test_none_before_any_retrieve_call(self):
+        from src.services.manager.search_manager import SearchManager
+
+        manager = SearchManager(
+            knowledge_service=_make_mock_knowledge_service(matches=[]),
+            search_service=_make_mock_search_service(),
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+        )
+        assert manager.product_match is None
+
+    def test_exposes_last_classification_including_primary(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+        from src.services.routing.product_router import ProductMatch
+
+        mock_kb = _make_mock_knowledge_service(matches=[])
+        mock_product_router = MagicMock()
+        mock_product_router.classify.return_value = ProductMatch(
+            products=("ZivaAIRA", "STAAS", "Havis Vacay", "PayCheq", "WeCare", "Havis iReport"),
+            confidence="ambiguous",
+            primary="ZivaAIRA",
+            via_theme=True,
+        )
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=_make_mock_search_service(),
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+            product_router=mock_product_router,
+        )
+
+        manager.retrieve(
+            "We want to modernize our HR operations",
+            decision=RoutingDecision(knowledge=True, web=False),
+        )
+
+        match = manager.product_match
+        assert match is not None
+        assert match.primary == "ZivaAIRA"
+        assert match.via_theme is True
+        assert set(match.products) == {
+            "ZivaAIRA", "STAAS", "Havis Vacay", "PayCheq", "WeCare", "Havis iReport",
+        }
+
+    def test_updates_on_each_retrieve_call(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+        from src.services.routing.product_router import ProductMatch
+
+        mock_kb = _make_mock_knowledge_service(matches=[])
+        mock_product_router = MagicMock()
+        mock_product_router.classify.side_effect = [
+            ProductMatch(products=("SPIDIFY",), confidence="high"),
+            ProductMatch(products=("ZivaAIRA",), confidence="high"),
+        ]
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=_make_mock_search_service(),
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+            product_router=mock_product_router,
+        )
+
+        manager.retrieve("Tell me about SPIDIFY", decision=RoutingDecision(knowledge=True, web=False))
+        assert manager.product_match.products == ("SPIDIFY",)
+
+        manager.retrieve("Tell me about ZivaAIRA", decision=RoutingDecision(knowledge=True, web=False))
+        assert manager.product_match.products == ("ZivaAIRA",)
+
+
+# ---------------------------------------------------------------------------
+# Phase 17 — suppress web search for a confidently-named product match.
+#
+# Root cause this guards: "Compare STAAS and WeCare" (both real Ha-Shem
+# product names) also collided live with unrelated same-named entities
+# (a generic "storage-as-a-service" term, an unrelated adult-care service)
+# — the web search results for the literal name competed with, or
+# text-deduped out, our own correct KB chunk. Confirmed live before this
+# fix: WeCare's own KB page was missing from the final sources entirely.
+# ---------------------------------------------------------------------------
+
+
+class TestSearchManagerSuppressesWebForNamedProductMatch:
+    def test_web_skipped_when_product_named_and_kb_confidence_adequate(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+        from src.services.routing.product_router import ProductMatch
+
+        # similarity 0.68 > _CONFIDENCE_THRESHOLD (0.50)
+        mock_kb = _make_mock_knowledge_service(matches=[
+            {"chunk_content": "STAAS tracks attendance.", "similarity": 0.68, "parent_url": "https://ha-shem.com/HAVIS-360/staas/"},
+        ])
+        mock_product_router = MagicMock()
+        mock_product_router.classify.return_value = ProductMatch(
+            products=("STAAS", "WeCare"), confidence="ambiguous", via_theme=False,
+        )
+        mock_search = _make_mock_search_service()
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=mock_search,
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+            product_router=mock_product_router,
+        )
+
+        # "Compare" is a web keyword — decision starts as mixed.
+        manager.retrieve("Compare STAAS and WeCare", decision=RoutingDecision(knowledge=True, web=True))
+
+        mock_search.search.assert_not_called()
+
+    def test_web_still_runs_when_kb_confidence_low(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+        from src.services.routing.product_router import ProductMatch
+
+        mock_kb = _make_mock_knowledge_service(matches=[
+            {"chunk_content": "Weak match.", "similarity": 0.2, "parent_url": "https://ha-shem.com/HAVIS-360/staas/"},
+        ])
+        mock_product_router = MagicMock()
+        mock_product_router.classify.return_value = ProductMatch(
+            products=("STAAS", "WeCare"), confidence="ambiguous", via_theme=False,
+        )
+        mock_search = _make_mock_search_service()
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=mock_search,
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+            product_router=mock_product_router,
+        )
+
+        manager.retrieve("Compare STAAS and WeCare", decision=RoutingDecision(knowledge=True, web=True))
+
+        mock_search.search.assert_called()
+
+    def test_web_still_runs_for_business_theme_match(self):
+        """A theme match's phrase isn't the literal product name, so it
+        carries none of the name-collision risk — web should stay active
+        if the routing decision calls for it."""
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+        from src.services.routing.product_router import ProductMatch
+
+        mock_kb = _make_mock_knowledge_service(matches=[
+            {"chunk_content": "ZivaAIRA automates hiring.", "similarity": 0.68, "parent_url": "https://aira.havis360.com/"},
+        ])
+        mock_product_router = MagicMock()
+        mock_product_router.classify.return_value = ProductMatch(
+            products=("ZivaAIRA", "STAAS"), confidence="ambiguous", primary="ZivaAIRA", via_theme=True,
+        )
+        mock_search = _make_mock_search_service()
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=mock_search,
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+            product_router=mock_product_router,
+        )
+
+        manager.retrieve(
+            "We want to modernize our HR operations and also see the latest trends",
+            decision=RoutingDecision(knowledge=True, web=True),
+        )
+
+        mock_search.search.assert_called()
+
+    def test_web_still_runs_when_no_product_router_configured(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+
+        mock_kb = _make_mock_knowledge_service(matches=[
+            {"chunk_content": "Some content.", "similarity": 0.9, "parent_url": "https://ha-shem.com/"},
+        ])
+        mock_search = _make_mock_search_service()
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=mock_search,
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+        )  # no product_router
+
+        manager.retrieve("Compare our pricing with competitors", decision=RoutingDecision(knowledge=True, web=True))
+
+        mock_search.search.assert_called()
