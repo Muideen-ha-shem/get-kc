@@ -19,39 +19,22 @@ from dataclasses import dataclass
 from typing import Mapping, Sequence
 
 from ...shared.logging import get_logger
+from ...shared.product_registry import PRODUCT_REGISTRY
 
 logger: logging.Logger = get_logger(__name__)
 
 
-# Product name aliases — matching any of these mentions the product by name
-# directly, taking priority over intent-keyword matching below.
+# Product name aliases and intent keywords are derived from PRODUCT_REGISTRY
+# (the single source of truth also used by the crawl/metadata pipeline) —
+# adding product #12 means adding one entry there, nothing here. Matching
+# any alias mentions the product by name directly, taking priority over
+# intent-keyword matching below.
 _DEFAULT_PRODUCT_NAMES: dict[str, tuple[str, ...]] = {
-    "SPIDIFY": ("spidify",),
-    "ZivaAIRA": ("zivaaira", "ziva aira", "aira"),
+    name: info["aliases"] for name, info in PRODUCT_REGISTRY.items()
 }
 
-# Intent keywords per product, from the SPIDIFY/ZivaAIRA intent-classification
-# spec: recruitment/hiring/talent/HR -> ZivaAIRA; identity verification/KYC/
-# secure access -> SPIDIFY. Phrases are used (rather than single ambiguous
-# words like "onboarding" alone) to avoid false positives across products.
 _DEFAULT_PRODUCT_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "ZivaAIRA": (
-        "recruitment", "recruit", "recruiting", "recruiter",
-        "hiring", "hire", "hiring automation",
-        "talent acquisition", "talent management",
-        "hr management", "human resources", "hr workflow",
-        "applicant tracking", "job applicants", "candidate screening",
-        "interview scheduling", "onboarding employees", "onboard staff",
-        "workforce management", "employee onboarding",
-    ),
-    "SPIDIFY": (
-        "identity verification", "verify users", "verify identity",
-        "user verification", "identity validation",
-        "kyc", "know your customer",
-        "secure access", "user authentication", "authentication",
-        "compliance verification", "onboarding users", "onboard users",
-        "verify customers", "customer verification", "secure onboarding",
-    ),
+    name: info["keywords"] for name, info in PRODUCT_REGISTRY.items()
 }
 
 

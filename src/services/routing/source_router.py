@@ -29,8 +29,16 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from ...shared.logging import get_logger
+from ...shared.product_registry import PRODUCT_REGISTRY
 
 logger: logging.Logger = get_logger(__name__)
+
+# Every registered product's name/aliases, lowercased — derived from the
+# same registry ProductRouter uses, so a new catalog entry needs no changes
+# here either.
+_PRODUCT_NAME_KEYWORDS: tuple[str, ...] = tuple(
+    sorted({alias.lower() for info in PRODUCT_REGISTRY.values() for alias in info["aliases"]} | {name.lower() for name in PRODUCT_REGISTRY})
+)
 
 
 # ---------------------------------------------------------------------------
@@ -102,8 +110,10 @@ _KNOWLEDGE_KEYWORDS: tuple[str, ...] = (
     # without these, "compare" alone routes to web-only, and a live search
     # for a brand name that looks like a common word (confirmed live:
     # "spidify" gets corrected to "Spotify" by the search provider) returns
-    # entirely unrelated results instead of our own product content.
-    "spidify", "zivaaira",
+    # entirely unrelated results instead of our own product content. Derived
+    # from PRODUCT_REGISTRY (see _PRODUCT_NAME_KEYWORDS above) rather than
+    # hardcoded, so this scales to every current and future product.
+    *_PRODUCT_NAME_KEYWORDS,
 )
 
 # Keywords that strongly suggest current-event / external knowledge.
