@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
 from src.services.routing.product_router import ProductRouter, ProductMatch
+from src.shared.product_registry import PRODUCT_REGISTRY
 
 
 # ---------------------------------------------------------------------------
@@ -148,3 +151,130 @@ class TestProductRouterCustomConfig:
         assert router.classify("We need manufacturing automation").products == ("Widget",)
         # Defaults are fully replaced, not merged
         assert router.classify("Tell me about SPIDIFY").confidence == "none"
+
+
+# ---------------------------------------------------------------------------
+# Phase 16 — HAVIS-360 catalog expansion. These are the exact phrases from
+# the spec's "Success Criteria" section: every one must resolve to exactly
+# one product at "high" confidence with zero code changes beyond the
+# PRODUCT_REGISTRY entries (this is the whole point of deriving
+# ProductRouter's defaults from the registry).
+# ---------------------------------------------------------------------------
+
+
+class TestProductRouterHavis360SuccessCriteria:
+    @pytest.mark.parametrize(
+        "question,expected_product",
+        [
+            ("What solution manages payroll?", "PayCheq"),
+            ("I need visitor management.", "V-Login"),
+            ("What helps with employee leave?", "Havis Vacay"),
+            ("We need software licensing.", "AppManage"),
+            ("We want AI recruitment.", "ZivaAIRA"),
+            ("We need identity verification.", "SPIDIFY"),
+            ("We need attendance tracking.", "STAAS"),
+            ("Our employees submit paper receipts.", "Havis REMA"),
+            ("We need company-wide emergency alerts.", "KwikAlert"),
+            ("I need employee reporting.", "Havis iReport"),
+            ("We want internal certification.", "Havis eCertify"),
+            ("I need customer support ticket management.", "WeCare"),
+        ],
+    )
+    def test_success_criteria_phrase_resolves_correctly(self, question, expected_product):
+        router = ProductRouter()
+        match = router.classify(question)
+        assert match.products == (expected_product,), (
+            f"{question!r} -> {match.products} (confidence={match.confidence}), "
+            f"expected ({expected_product!r},)"
+        )
+        assert match.confidence == "high"
+
+    @pytest.mark.parametrize(
+        "question,expected_product",
+        [
+            ("What can help us manage attendance?", "STAAS"),
+            ("What handles payroll?", "PayCheq"),
+            ("I need expense approvals.", "Havis Xpend"),
+            ("I need visitor check-in.", "V-Login"),
+            ("What product manages leave?", "Havis Vacay"),
+            ("What solution helps employee certification?", "Havis eCertify"),
+            ("What should we use for emergency notifications?", "KwikAlert"),
+        ],
+    )
+    def test_additional_business_problem_phrasings(self, question, expected_product):
+        router = ProductRouter()
+        match = router.classify(question)
+        assert match.products == (expected_product,)
+
+
+class TestProductRouterHavis360ExplicitNames:
+    @pytest.mark.parametrize(
+        "question,expected_product",
+        [
+            ("Tell me about V-Login", "V-Login"),
+            ("What is STAAS?", "STAAS"),
+            ("How does WeCare work?", "WeCare"),
+            ("Tell me about Havis Xpend", "Havis Xpend"),
+            ("What is Havis Vacay?", "Havis Vacay"),
+            ("Tell me about Havis iReport", "Havis iReport"),
+            ("What is Havis REMA?", "Havis REMA"),
+            ("Tell me about Havis eCertify", "Havis eCertify"),
+            ("What is KwikAlert?", "KwikAlert"),
+            ("Tell me about AppManage", "AppManage"),
+            ("What is PayCheq?", "PayCheq"),
+        ],
+    )
+    def test_explicit_name_resolves_at_high_confidence(self, question, expected_product):
+        router = ProductRouter()
+        match = router.classify(question)
+        assert match.products == (expected_product,)
+        assert match.confidence == "high"
+
+
+class TestProductRouterHavis360Comparisons:
+    def test_comparing_two_new_products_is_ambiguous_and_scopes_both(self):
+        router = ProductRouter()
+        match = router.classify("Compare STAAS and WeCare")
+        assert set(match.products) == {"STAAS", "WeCare"}
+        assert match.confidence == "ambiguous"
+
+    def test_comparing_new_product_with_existing_product(self):
+        router = ProductRouter()
+        match = router.classify("Compare PayCheq and ZivaAIRA")
+        assert set(match.products) == {"PayCheq", "ZivaAIRA"}
+        assert match.confidence == "ambiguous"
+
+
+class TestProductRegistryConsistency:
+    """Guards the scalability claim: adding product #12 means adding one
+    PRODUCT_REGISTRY entry, nothing else. These tests fail loudly if a
+    future entry accidentally collides with an existing one."""
+
+    def test_registry_has_thirteen_products(self):
+        assert len(PRODUCT_REGISTRY) == 13
+
+    def test_no_alias_is_shared_across_products(self):
+        seen: dict[str, str] = {}
+        for product, info in PRODUCT_REGISTRY.items():
+            for alias in info["aliases"]:
+                assert alias not in seen, (
+                    f"alias {alias!r} used by both {seen.get(alias)!r} and {product!r}"
+                )
+                seen[alias] = product
+
+    def test_no_keyword_is_shared_across_products(self):
+        seen: dict[str, str] = {}
+        for product, info in PRODUCT_REGISTRY.items():
+            for keyword in info["keywords"]:
+                assert keyword not in seen, (
+                    f"keyword {keyword!r} used by both {seen.get(keyword)!r} and {product!r}"
+                )
+                seen[keyword] = product
+
+    def test_every_product_router_default_traces_back_to_registry(self):
+        """ProductRouter's no-arg defaults must be exactly derived from the
+        registry — no separate hand-maintained list drifting out of sync."""
+        router = ProductRouter()
+        for product in PRODUCT_REGISTRY:
+            assert product in router._product_names
+            assert product in router._product_keywords

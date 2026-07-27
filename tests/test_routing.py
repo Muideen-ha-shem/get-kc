@@ -215,3 +215,39 @@ class TestSourceRouterCustomKeywords:
         assert router.route("What is the best service?").knowledge is True
         assert router.route("what is the best SERVICE?").knowledge is True
         assert router.route("What is the best Api?").knowledge is True
+
+
+# ---------------------------------------------------------------------------
+# SourceRouter — Phase 16 catalog expansion. A named product must route to
+# "knowledge" (at least) even in a "compare X and Y"-style question, or a
+# live web search for the brand name risks returning unrelated results
+# (this is exactly the bug fixed for SPIDIFY/ZivaAIRA in Phase 15 — these
+# tests guard every new product against the same failure mode).
+# ---------------------------------------------------------------------------
+
+
+class TestSourceRouterHavis360ProductNames:
+    @pytest.mark.parametrize(
+        "question",
+        [
+            "Compare STAAS and WeCare",
+            "Compare V-Login and SPIDIFY",
+            "Compare Havis Xpend and Havis REMA",
+            "What is KwikAlert vs AppManage?",
+            "PayCheq vs Havis eCertify — which is better?",
+        ],
+    )
+    def test_comparison_question_still_includes_knowledge(self, question):
+        from src.services.routing.source_router import SourceRouter
+
+        router = SourceRouter()
+        decision = router.route(question)
+        assert decision.knowledge is True
+
+    def test_new_product_name_alone_routes_to_knowledge_only(self):
+        from src.services.routing.source_router import SourceRouter
+
+        router = SourceRouter()
+        decision = router.route("Tell me about Havis iReport")
+        assert decision.knowledge is True
+        assert decision.web is False

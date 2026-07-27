@@ -134,30 +134,39 @@
 > — it stays inert (`background_learning=None`) until a real
 > implementation is added.
 
-> **Multi-product knowledge base (SPIDIFY, ZivaAIRA):** `ProductRouter`
-> and the `product_filter` plumbing through `KnowledgeService` /
-> `retrieve_context()` / the new `match_documents_by_product` RPC are
-> fully built and tested, but **not** wired into the default
-> `chat_orchestrator` singleton, and the SQL migration that adds the
-> required columns/function (`scripts/sql/002_product_knowledge_schema.sql`)
-> has **not** been run against production. Wiring `ProductRouter` in before
-> that migration is applied would break knowledge retrieval for the
-> now-recognised product questions. See **Scripts and Utilities** below for
-> the ingestion order; once the migration is applied and
-> `scripts/crawl_spidify.py` / `scripts/crawl_zivaaira.py` have populated
-> the knowledge base, pass `product_router=ProductRouter()` to the
-> `SearchManager(...)` construction in `chat_orchestrator.py` to go live.
+> **Multi-product knowledge base:** `ProductRouter` **is** wired into the
+> default `chat_orchestrator` singleton (`product_router=ProductRouter()`
+> passed to `SearchManager(...)`), and
+> `scripts/sql/002_product_knowledge_schema.sql` has been applied. Product
+> identity, aliases, and intent keywords for every product — SPIDIFY,
+> ZivaAIRA, and the 11-product HAVIS-360 catalog — live in
+> `src/shared/product_registry.py`, the single source of truth `ProductRouter`,
+> `SourceRouter`, and `product_metadata.py` all derive from. A product whose
+> pages haven't been crawled/uploaded yet (see **Scripts and Utilities**
+> below for the ingestion order) simply won't have any chunks to retrieve —
+> nothing breaks, the question just falls through to general knowledge/web
+> search same as before that product existed.
 
 ## Scripts and Utilities
 - scripts/ — standalone tools, run manually, not imported by the API
   - `__init__.py`
   - `crawl.py` — crawls ha-shem.com via crawl4ai; also exposes a reusable
     `crawl_site(url, max_depth=2)` used by the product crawl scripts below
-  - `crawl_spidify.py` — crawls https://havisspidify.com/ into `crawled_pages`
-  - `crawl_zivaaira.py` — crawls https://aira.havis360.com/ into `crawled_pages`
-  - `product_metadata.py` — maps a crawled URL's domain to product metadata
-    (`product`, `category`, `source_type`); single source of truth for the
-    SPIDIFY/ZivaAIRA site URLs, used by the crawl scripts and `upload_vectors.py`
+  - `crawl_spidify.py` / `crawl_zivaaira.py` — crawl SPIDIFY/ZivaAIRA's own
+    dedicated product sites (deep-crawled, `max_depth` unset)
+  - `crawl_vlogin.py`, `crawl_staas.py`, `crawl_wecare.py`,
+    `crawl_havis_xpend.py`, `crawl_havis_vacay.py`, `crawl_havis_ireport.py`,
+    `crawl_havis_rema.py`, `crawl_havis_ecertify.py`, `crawl_kwikalert.py`,
+    `crawl_appmanage.py`, `crawl_paycheq.py` — each crawls one HAVIS-360
+    product's single page on ha-shem.com (`max_depth=0`, no link-following —
+    these aren't dedicated multi-page sites like SPIDIFY/ZivaAIRA)
+  - `product_metadata.py` — maps a crawled URL to product metadata
+    (`product`, `category`, `source_type`) for `upload_vectors.py`; matches
+    by domain (SPIDIFY/ZivaAIRA, each on their own domain) or by domain +
+    path prefix (the HAVIS-360 catalog, all sharing ha-shem.com). Sources
+    its data from `src/shared/product_registry.py` — **that** is the actual
+    single source of truth (also used by `ProductRouter`); this module is
+    just the URL-matching layer on top of it
   - `chunk_runner.py` — chunks cleaned content
   - `upload_vectors.py` — embeds and uploads chunks to Supabase; attaches
     product metadata automatically via `product_metadata.py` when the
@@ -181,14 +190,28 @@
       002. Once this exists, `POST /demo-request` works immediately with
       no code changes.
 
-**Multi-solution ingestion order** (SPIDIFY / ZivaAIRA), each step manual:
-1. Run `scripts/sql/002_product_knowledge_schema.sql` in Supabase.
-2. `python -m scripts.crawl_spidify` and `python -m scripts.crawl_zivaaira`
-   (each populates `crawled_pages`, same as `crawl.py` does for ha-shem.com).
+**Multi-solution ingestion order** (13 products: SPIDIFY, ZivaAIRA, and the
+11-product HAVIS-360 catalog — V-Login, STAAS, WeCare, Havis Xpend, Havis
+Vacay, Havis iReport, Havis REMA, Havis eCertify, KwikAlert, AppManage,
+PayCheq), each step manual:
+1. Run `scripts/sql/002_product_knowledge_schema.sql` in Supabase (only
+   needed once — the `product` column is free-text, so no migration is
+   needed when adding new products, only the first time this schema is set up).
+2. Run each `python -m scripts.crawl_<product>` script (e.g.
+   `scripts.crawl_vlogin`, `scripts.crawl_staas`, ...) — each populates
+   `crawled_pages`, same as `crawl.py` does for ha-shem.com.
 3. `python -m scripts.test_clean` (cleans all rows in `crawled_pages`,
    including the new solution pages, into `cleaned_output/`).
 4. `python -m scripts.upload_vectors` (chunks, embeds, and uploads
    everything in `cleaned_output/` — solution metadata attached automatically).
+
+**Adding product #14 and beyond:** add one entry to
+`src/shared/product_registry.py` (`PRODUCT_REGISTRY`) with its URL, domain,
+optional path prefix, category, aliases, and intent keywords, then create
+one `crawl_<product>.py` script mirroring the pattern above. No changes are
+needed to `ProductRouter`, `SourceRouter`, `product_metadata.py`, or any
+retrieval code — they all derive their product-specific behavior from the
+registry.
 
 **Demo requests**, independent of the above: run
 `scripts/sql/003_demo_requests.sql` in Supabase — `POST /demo-request`
