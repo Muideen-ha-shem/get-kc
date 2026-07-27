@@ -5,13 +5,16 @@ import {
   CheckCircle2,
   CircleHelp,
   Clock3,
+  Code2,
   GitCompare,
   Headphones,
   MessageCircleMore,
+  Search,
   Sparkles,
   Square,
   Ticket,
   SendHorizonal,
+  X,
   Zap,
 } from 'lucide-react';
 import { HavisIQMark } from './components/HavisIQMark';
@@ -19,7 +22,9 @@ import { DemoRequestModal } from './components/DemoRequestModal';
 import { CompareSolutionsModal } from './components/CompareSolutionsModal';
 import { MessageContent } from './components/message/MessageContent';
 import { SourceChips } from './components/message/SourceChips';
-import { solutions, type Solution } from './solutions';
+import { type Solution } from './solutions';
+import { useSolutions } from './lib/useSolutions';
+import { groupForCategory, sortGroups } from './productCatalogCopy';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 
@@ -56,12 +61,46 @@ type ChatResizeEdge = 'left' | 'right' | 'top' | 'bottom';
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
+// Full set used in the actual chat widget's quick-prompt row (plenty of
+// room to wrap there); the compact hero mock uses a short slice of these.
 const suggestedPrompts = [
-  'What does SPIDIFY do?',
-  'Tell me about ZivaAIRA',
-  'Do you offer cybersecurity services?',
-  'Help with cloud migration',
+  'Recommend the best solution for my business',
+  'Compare SPIDIFY and V-Login',
+  'Compare STAAS and WeCare',
+  'Which solution handles payroll?',
+  'Which solution improves recruitment?',
+  'Which solution manages expenses?',
+  'I need custom software',
+  'I need cybersecurity services',
+  'Tell me about Ha-Shem',
 ];
+const heroPrompts = suggestedPrompts.slice(0, 4);
+
+// "What are you trying to solve?" — Business Problem Discovery. Each
+// problem is matched against a solution's name/category/description
+// client-side (no API call — instant catalog highlighting), reusing
+// whatever's already in the fetched Product Registry data rather than a
+// second hardcoded product mapping.
+const businessProblems: { label: string; match: string[] }[] = [
+  { label: 'Identity Verification', match: ['identity', 'kyc', 'verification'] },
+  { label: 'Recruitment', match: ['recruit', 'hiring', 'hr recruitment', 'candidate'] },
+  { label: 'Visitor Management', match: ['visitor'] },
+  { label: 'Attendance Tracking', match: ['attendance'] },
+  { label: 'Leave Management', match: ['leave', 'vacation', 'absence'] },
+  { label: 'Expense Management', match: ['expense'] },
+  { label: 'Payroll', match: ['payroll', 'salary'] },
+  { label: 'Reporting', match: ['report'] },
+  { label: 'Compliance', match: ['compliance', 'certification', 'learning'] },
+  { label: 'Software Licensing', match: ['licens'] },
+  { label: 'Custom Software', match: ['software development', 'custom'] },
+  { label: 'Cloud Migration', match: ['cloud'] },
+  { label: 'Cybersecurity', match: ['cybersecurity', 'security'] },
+];
+
+function matchesProblem(solution: Solution, problem: { match: string[] }): boolean {
+  const haystack = `${solution.name} ${solution.category} ${solution.description}`.toLowerCase();
+  return problem.match.some((term) => haystack.includes(term));
+}
 
 const renderFormattedContent = (content: string) => {
   const lines = content.split('\n');
@@ -88,6 +127,10 @@ const renderFormattedContent = (content: string) => {
 };
 
 function App() {
+  const { solutions, isLoading: solutionsLoading, error: solutionsError } = useSolutions();
+  const [selectedProblem, setSelectedProblem] = useState<string | null>(null);
+  const [compareInitialId, setCompareInitialId] = useState<string | undefined>(undefined);
+
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -109,6 +152,23 @@ function App() {
 
   const openDemoModal = (solution?: Solution) => setDemoModal({ open: true, solution });
   const closeDemoModal = () => setDemoModal((prev) => ({ ...prev, open: false }));
+
+  const openCompareModal = (preselectId?: string) => {
+    setCompareInitialId(preselectId);
+    setIsCompareOpen(true);
+  };
+
+  const activeProblem = businessProblems.find((p) => p.label === selectedProblem) ?? null;
+  const matchedSolutionIds = activeProblem
+    ? new Set(solutions.filter((s) => matchesProblem(s, activeProblem)).map((s) => s.id))
+    : null;
+
+  const groupedSolutions = sortGroups(
+    Array.from(new Set(solutions.map((s) => groupForCategory(s.category))))
+  ).map((group) => ({
+    group,
+    items: solutions.filter((s) => groupForCategory(s.category) === group),
+  }));
 
   const [chatWidth, setChatWidth] = useState(CHAT_PANEL_DEFAULT_WIDTH);
   const [chatHeight, setChatHeight] = useState(CHAT_PANEL_DEFAULT_HEIGHT);
@@ -374,9 +434,10 @@ function App() {
                 One assistant. The right solution, every time.
               </h1>
               <p className="mt-6 text-lg leading-8 text-ink/65">
-                Describe a business need — identity verification, recruitment, cybersecurity, cloud, software
-                development, managed services, or training — and HavisIQ matches it to the right Ha-Shem solution,
-                with sources, in seconds. SPIDIFY and ZivaAIRA are the first two in a growing catalog.
+                Describe a business need — identity verification, recruitment, attendance, payroll, expenses,
+                cybersecurity, cloud, or custom software — and HavisIQ matches it to the right Ha-Shem solution,
+                with sources, in seconds, across a growing catalog of {solutionsLoading ? '13+' : solutions.length}{' '}
+                business solutions.
               </p>
               <div className="mt-8 flex flex-wrap gap-4">
                 <a href="#solutions" className="rounded-full border border-ink/15 bg-white px-6 py-3.5 font-semibold text-ink transition hover:-translate-y-0.5 hover:border-gold-400 hover:text-gold-700">
@@ -474,7 +535,7 @@ function App() {
                         Recommended: Cybersecurity
                       </div>
                       <div className="relative mt-3 flex flex-wrap gap-2">
-                        {suggestedPrompts.map((prompt, index) => (
+                        {heroPrompts.map((prompt, index) => (
                           <motion.button
                             key={prompt}
                             initial={{ opacity: 0, y: 6 }}
@@ -595,72 +656,200 @@ function App() {
           </div>
         </section>
 
+        <section className="mx-auto max-w-7xl px-6 pt-20 lg:px-8">
+          <div className="rounded-[2rem] border border-ink/10 bg-white p-8 shadow-sm sm:p-10">
+            <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.3em] text-gold-600">
+              <Search size={16} />
+              Business problem discovery
+            </div>
+            <h2 className="mt-2 font-display text-2xl tracking-tight text-ink sm:text-3xl">What are you trying to solve?</h2>
+            <p className="mt-2 max-w-2xl text-ink/65">
+              Pick the challenge closest to yours and we'll highlight the Ha-Shem solutions built for it.
+            </p>
+            <div className="mt-6 flex flex-wrap gap-2.5">
+              {businessProblems.map((problem) => {
+                const active = selectedProblem === problem.label;
+                return (
+                  <button
+                    key={problem.label}
+                    type="button"
+                    onClick={() => setSelectedProblem(active ? null : problem.label)}
+                    className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                      active
+                        ? 'border-ink bg-ink text-paper'
+                        : 'border-ink/15 bg-paper text-ink/70 hover:border-gold-400 hover:text-gold-700'
+                    }`}
+                  >
+                    {problem.label}
+                  </button>
+                );
+              })}
+            </div>
+            {activeProblem ? (
+              <div className="mt-5 flex flex-wrap items-center gap-3 rounded-2xl bg-gold-50 px-4 py-3 text-sm text-gold-800">
+                <Sparkles size={16} />
+                <span>
+                  Showing solutions for <strong>{activeProblem.label}</strong> — {matchedSolutionIds?.size ?? 0} match
+                  {matchedSolutionIds?.size === 1 ? '' : 'es'} highlighted below.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedProblem(null)}
+                  className="ml-auto inline-flex items-center gap-1 rounded-full bg-white px-3 py-1 text-xs font-semibold text-ink/70 shadow-sm transition hover:text-ink"
+                >
+                  <X size={12} />
+                  Clear
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </section>
+
         <section id="solutions" className="mx-auto max-w-7xl px-6 py-20 lg:px-8">
           <div className="mb-10 flex flex-wrap items-end justify-between gap-4">
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.3em] text-gold-600">Solution catalog</p>
               <h2 className="mt-2 font-display text-3xl tracking-tight text-ink">One advisor, a growing catalog of Ha-Shem expertise</h2>
               <p className="mt-3 max-w-2xl text-ink/65">
-                SPIDIFY and ZivaAIRA are live today, each with their own knowledge base. The rest are business areas
-                Ha-Shem already delivers on — ask HavisIQ, or talk to a specialist directly.
+                SPIDIFY, ZivaAIRA, and the full HAVIS-360 suite are live today, each with their own knowledge base.
+                Advisory services are business areas Ha-Shem already delivers on — ask HavisIQ, or talk to a
+                specialist directly.
               </p>
             </div>
             <button
               type="button"
-              onClick={() => setIsCompareOpen(true)}
+              onClick={() => openCompareModal()}
               className="inline-flex items-center gap-2 rounded-full border border-ink/15 px-5 py-2.5 text-sm font-semibold text-ink transition hover:border-gold-400 hover:text-gold-700"
             >
               <GitCompare size={16} />
               Compare Solutions
             </button>
           </div>
-          <div className="grid gap-6 lg:grid-cols-3">
-            {solutions.map((solution) => (
-              <div key={solution.id} className="flex flex-col rounded-[1.75rem] border border-ink/10 bg-white p-8 shadow-sm">
-                <div className="flex h-32 items-center justify-center rounded-[1.25rem] bg-gradient-to-br from-paper via-gold-50 to-paper">
-                  <span className="font-display text-2xl text-ink/70">{solution.name}</span>
+
+          {solutionsLoading ? (
+            <div className="grid gap-6 lg:grid-cols-3">
+              {[0, 1, 2, 3, 4, 5].map((i) => (
+                <div key={i} className="h-72 animate-pulse rounded-[1.75rem] border border-ink/10 bg-paper" />
+              ))}
+            </div>
+          ) : (
+            <>
+              {solutionsError ? (
+                <div className="mb-8 rounded-2xl border border-gold-300 bg-gold-50 px-4 py-3 text-sm text-gold-800">
+                  We couldn't reach the live solution catalog just now, so advisory services are shown below —
+                  everything else still works, including chat.
                 </div>
-                <div className="mt-6 flex items-center justify-between gap-2">
-                  <h3 className="text-xl font-semibold text-ink">{solution.name}</h3>
-                  <span
-                    className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${
-                      solution.status === 'live' ? 'bg-emerald-100 text-emerald-700' : 'bg-gold-100 text-gold-700'
-                    }`}
-                  >
-                    {solution.status === 'live' ? 'Live solution' : 'Ha-Shem Advisory'}
-                  </span>
-                </div>
-                <p className="mt-1 text-xs font-medium uppercase tracking-wide text-ink/40">{solution.category}</p>
-                <p className="mt-3 flex-1 text-sm leading-7 text-ink/65">{solution.description}</p>
-                <div className="mt-6 flex flex-wrap gap-2">
-                  {solution.learnMoreUrl ? (
-                    <a
-                      href={solution.learnMoreUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="rounded-full border border-ink/15 px-4 py-2 text-sm font-medium text-ink/80 transition hover:border-gold-400 hover:text-gold-700"
-                    >
-                      Learn More
-                    </a>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => openDemoModal(solution)}
-                      className="rounded-full border border-ink/15 px-4 py-2 text-sm font-medium text-ink/80 transition hover:border-gold-400 hover:text-gold-700"
-                    >
-                      Learn More
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => openDemoModal(solution)}
-                    className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition hover:bg-ink-soft"
-                  >
-                    Request Demo
-                  </button>
-                </div>
+              ) : null}
+              <div className="space-y-14">
+                {groupedSolutions.map(({ group, items }) => (
+                  <div key={group}>
+                    <h3 className="font-display text-lg tracking-tight text-ink/80">{group}</h3>
+                    <div className="mt-5 grid gap-6 lg:grid-cols-3">
+                      {items.map((solution) => {
+                        const dimmed = matchedSolutionIds !== null && !matchedSolutionIds.has(solution.id);
+                        const highlighted = matchedSolutionIds !== null && matchedSolutionIds.has(solution.id);
+                        return (
+                          <motion.div
+                            key={solution.id}
+                            animate={{ opacity: dimmed ? 0.4 : 1 }}
+                            transition={{ duration: 0.25 }}
+                            className={`flex flex-col rounded-[1.75rem] border bg-white p-8 shadow-sm transition-colors ${
+                              highlighted ? 'border-gold-400 ring-2 ring-gold-300/50' : 'border-ink/10'
+                            }`}
+                          >
+                            <div className="flex h-28 items-center justify-center rounded-[1.25rem] bg-gradient-to-br from-paper via-gold-50 to-paper">
+                              <span className="font-display text-2xl text-ink/70">{solution.name}</span>
+                            </div>
+                            <div className="mt-6 flex items-center justify-between gap-2">
+                              <h4 className="text-xl font-semibold text-ink">{solution.name}</h4>
+                              <span
+                                className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${
+                                  solution.status === 'live' ? 'bg-emerald-100 text-emerald-700' : 'bg-gold-100 text-gold-700'
+                                }`}
+                              >
+                                {solution.status === 'live' ? 'Live solution' : 'Ha-Shem Advisory'}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-xs font-medium uppercase tracking-wide text-ink/40">{solution.category}</p>
+                            <p className="mt-3 flex-1 text-sm leading-7 text-ink/65">{solution.description}</p>
+                            {solution.highlights.length > 0 ? (
+                              <ul className="mt-3 flex flex-wrap gap-1.5">
+                                {solution.highlights.slice(0, 3).map((highlight) => (
+                                  <li key={highlight} className="rounded-full bg-paper px-2.5 py-1 text-xs text-ink/60 ring-1 ring-ink/10">
+                                    {highlight}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : null}
+                            <div className="mt-6 flex flex-wrap gap-2">
+                              {solution.learnMoreUrl ? (
+                                <a
+                                  href={solution.learnMoreUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="rounded-full border border-ink/15 px-4 py-2 text-sm font-medium text-ink/80 transition hover:border-gold-400 hover:text-gold-700"
+                                >
+                                  Learn More
+                                </a>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => openDemoModal(solution)}
+                                  className="rounded-full border border-ink/15 px-4 py-2 text-sm font-medium text-ink/80 transition hover:border-gold-400 hover:text-gold-700"
+                                >
+                                  Learn More
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => openCompareModal(solution.id)}
+                                className="rounded-full border border-ink/15 px-4 py-2 text-sm font-medium text-ink/80 transition hover:border-gold-400 hover:text-gold-700"
+                              >
+                                Compare
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openDemoModal(solution)}
+                                className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition hover:bg-ink-soft"
+                              >
+                                Request Demo
+                              </button>
+                            </div>
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
+            </>
+          )}
+        </section>
+
+        <section className="mx-auto max-w-7xl px-6 pb-4 lg:px-8">
+          <div className="relative overflow-hidden rounded-[2rem] border border-ink/10 bg-gradient-to-br from-ink to-ink-soft p-8 text-paper shadow-sm sm:p-12">
+            <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-gold-400/10 blur-3xl" />
+            <div className="relative flex flex-col items-start gap-6 sm:flex-row sm:items-center sm:justify-between">
+              <div className="max-w-xl">
+                <div className="inline-flex items-center gap-2 rounded-full border border-gold-400/30 bg-gold-500/15 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-gold-200">
+                  <Code2 size={14} />
+                  Build a custom solution
+                </div>
+                <h2 className="mt-4 font-display text-2xl tracking-tight sm:text-3xl">Nothing in the catalog quite fits?</h2>
+                <p className="mt-3 text-paper/70">
+                  Tell us about your enterprise problem and our solution architects will design something custom —
+                  built on the same Ha-Shem platform standards as everything else in the catalog.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => openDemoModal({ id: 'custom-software', name: 'Custom Software', category: 'Advisory', description: '', status: 'advisory', highlights: [] })}
+                className="inline-flex shrink-0 items-center gap-2 rounded-full bg-gold-400 px-6 py-3.5 text-sm font-semibold text-ink transition hover:-translate-y-0.5 hover:bg-gold-300"
+              >
+                Request Custom Software
+                <Code2 size={16} />
+              </button>
+            </div>
           </div>
         </section>
 
@@ -841,7 +1030,7 @@ function App() {
                         message.isTyping ? (
                           renderFormattedContent(message.content)
                         ) : (
-                          <MessageContent content={message.content} />
+                          <MessageContent content={message.content} solutions={solutions} />
                         )
                       ) : (
                         message.content
@@ -930,8 +1119,12 @@ function App() {
       />
       <CompareSolutionsModal
         isOpen={isCompareOpen}
-        onClose={() => setIsCompareOpen(false)}
+        onClose={() => {
+          setIsCompareOpen(false);
+          setCompareInitialId(undefined);
+        }}
         solutions={solutions}
+        initialSelectedId={compareInitialId}
         onRequestDemo={(solution) => {
           setIsCompareOpen(false);
           openDemoModal(solution);

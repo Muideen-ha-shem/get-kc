@@ -7,9 +7,20 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
 
 
+class NextActionSchema(BaseModel):
+    """A contextual next-step suggestion (Phase 19) — additive to
+    ChatResponse, mirrors ``src.services.advisory.next_actions.NextAction``.
+    Old clients that don't know this field simply ignore it."""
+
+    label: str
+    action_type: str
+    target: str | None = None
+
+
 class ChatResponse(BaseModel):
     answer: str
     sources: list[str]
+    next_actions: list[NextActionSchema] | None = None
 
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -43,3 +54,17 @@ class DemoRequestResponse(BaseModel):
     use_case: str | None = None
     product: str | None = None
     status: str = "received"
+
+
+class SolutionSummary(BaseModel):
+    """One entry from ``GET /solutions`` — a curated, public-facing view of
+    a ``src.shared.product_registry.PRODUCT_REGISTRY`` entry. Deliberately
+    excludes retrieval-internal fields (path_prefix, domain, aliases,
+    keywords) that aren't meaningful to a frontend catalog."""
+
+    id: str
+    name: str
+    category: str
+    business_problem: str
+    solution_type: str
+    learn_more_url: str

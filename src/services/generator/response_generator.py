@@ -247,15 +247,14 @@ class ResponseGenerator:
         primary_product: str | None,
         complementary_products: Sequence[str] | None,
     ) -> str:
-        """Extra prompt instructions for a business-theme match — empty
+        """Extra prompt instructions for a business recommendation — empty
         string (no change to the prompt at all) unless the caller passed a
-        non-empty ``complementary_products``, so every existing caller that
-        doesn't pass these two new ``generate()`` params is unaffected."""
-        if not complementary_products:
-            return ""
-        others = ", ".join(complementary_products)
+        ``primary_product`` and/or non-empty ``complementary_products``, so
+        every existing caller that doesn't pass these two ``generate()``
+        params is unaffected."""
+        others = ", ".join(complementary_products) if complementary_products else ""
 
-        if primary_product:
+        if primary_product and others:
             return (
                 f"\n\nBusiness recommendation framing: this question describes a "
                 f"business need best addressed primarily by {primary_product}, with "
@@ -268,16 +267,31 @@ class ResponseGenerator:
                 f"or capabilities not present in it, and do not recommend a product "
                 f"the evidence does not cover."
             )
-        return (
-            f"\n\nBusiness recommendation framing: this question spans multiple "
-            f"relevant solutions with no single dominant one — {others}. Structure "
-            f"your answer to explain the role each solution plays in addressing the "
-            f"need. Base every recommendation and every claim strictly on the "
-            f"evidence above — do not invent products, features, or capabilities not "
-            f"present in it, do not recommend a product the evidence does not cover, "
-            f"and do not present one solution as more important than the others "
-            f"unless the evidence itself supports that."
-        )
+
+        if primary_product:
+            return (
+                f"\n\nBusiness recommendation framing: this question describes a "
+                f"business need best addressed by {primary_product}. Recommend it "
+                f"directly — for example, \"Based on your use case, I recommend "
+                f"{primary_product} because...\" — explain specifically why it fits "
+                f"the stated need, and highlight its primary business benefit. Base "
+                f"every claim strictly on the evidence above — do not invent "
+                f"products, features, or capabilities not present in it."
+            )
+
+        if others:
+            return (
+                f"\n\nBusiness recommendation framing: this question spans multiple "
+                f"relevant solutions with no single dominant one — {others}. Structure "
+                f"your answer to explain the role each solution plays in addressing the "
+                f"need. Base every recommendation and every claim strictly on the "
+                f"evidence above — do not invent products, features, or capabilities not "
+                f"present in it, do not recommend a product the evidence does not cover, "
+                f"and do not present one solution as more important than the others "
+                f"unless the evidence itself supports that."
+            )
+
+        return ""
 
     def _validate_citations(self, citations: list[dict[str, object]]) -> list[dict[str, object]]:
         """Run the injected citation validator, if any.

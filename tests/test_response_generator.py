@@ -437,11 +437,15 @@ class TestResponseGeneratorRecommendationFraming:
         assert "no single dominant one" in system_prompt
         assert "ZivaAIRA" in system_prompt
 
-    def test_empty_complementary_list_adds_no_framing(self):
+    def test_primary_product_alone_adds_single_product_framing(self):
+        """Phase 19: a lone primary_product (no complementary products) —
+        e.g. "we're struggling to verify identities" -> SPIDIFY alone —
+        must still get "recommend X because..." framing, not just the
+        primary+complementary combo from Phase 17."""
         from src.services.generator.response_generator import ResponseGenerator
 
         mock_completion = MagicMock()
-        mock_completion.choices[0].message.content = "Answer [1]."
+        mock_completion.choices[0].message.content = "I recommend SPIDIFY [1]."
 
         with patch("groq.Groq") as mock_groq:
             mock_client = MagicMock()
@@ -458,13 +462,19 @@ class TestResponseGeneratorRecommendationFraming:
 
             system_prompt = mock_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
 
-        assert "Business recommendation framing" not in system_prompt
+        assert "Business recommendation framing" in system_prompt
+        assert "SPIDIFY" in system_prompt
+        assert "do not invent" in system_prompt.lower()
 
     def test_build_recommendation_framing_directly(self):
         from src.services.generator.response_generator import ResponseGenerator
 
         assert ResponseGenerator._build_recommendation_framing(None, None) == ""
-        assert ResponseGenerator._build_recommendation_framing("X", []) == ""
+        assert ResponseGenerator._build_recommendation_framing(None, []) == ""
+
+        solo = ResponseGenerator._build_recommendation_framing("X", [])
+        assert "X" in solo
+        assert "Business recommendation framing" in solo
 
         framed = ResponseGenerator._build_recommendation_framing("V-Login", ["SPIDIFY"])
         assert "V-Login" in framed
