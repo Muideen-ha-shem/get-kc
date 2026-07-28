@@ -4,7 +4,6 @@ import {
   CalendarDays,
   CheckCircle2,
   CircleHelp,
-  Clock3,
   Code2,
   GitCompare,
   Headphones,
@@ -12,21 +11,29 @@ import {
   Search,
   Sparkles,
   Square,
+  Star,
   Ticket,
   SendHorizonal,
   X,
   Zap,
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { HavisIQMark } from './components/HavisIQMark';
 import { DemoRequestModal } from './components/DemoRequestModal';
 import { CompareSolutionsModal } from './components/CompareSolutionsModal';
+import { AuthModal } from './components/auth/AuthModal';
+import { AppointmentScheduler } from './components/AppointmentScheduler';
 import { MessageContent } from './components/message/MessageContent';
 import { SourceChips } from './components/message/SourceChips';
+import { detectProductHeader } from './lib/detectProduct';
 import { type Solution } from './solutions';
 import { useSolutions } from './lib/useSolutions';
 import { groupForCategory, sortGroups } from './productCatalogCopy';
+import { useAuth } from './lib/authContext';
+import { apiFetch } from './lib/apiClient';
+import { getSessionId } from './lib/sessionId';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
+type NextAction = { label: string; action_type: string; target: string | null };
 
 type Message = {
   id: number;
@@ -34,6 +41,9 @@ type Message = {
   content: string;
   isTyping?: boolean;
   sources?: string[];
+  question?: string;
+  nextActions?: NextAction[];
+  savedRecommendation?: boolean;
 };
 
 const navigation = ['Home', 'Solutions', 'Support Center', 'Contact'];
@@ -44,8 +54,6 @@ const supportWidgets = [
   { title: 'Knowledge Base', desc: 'Browse answers and documentation', icon: Sparkles },
   { title: 'Contact Support', desc: 'Speak to a specialist instantly', icon: Headphones },
 ];
-
-const appointmentSlots = ['09:00', '10:30', '13:00', '15:30'];
 
 const CHAT_PANEL_DEFAULT_WIDTH = 420;
 const CHAT_PANEL_DEFAULT_HEIGHT = 640;
@@ -149,6 +157,8 @@ function App() {
 
   const [demoModal, setDemoModal] = useState<{ open: boolean; solution?: Solution }>({ open: false });
   const [isCompareOpen, setIsCompareOpen] = useState(false);
+  const { user } = useAuth();
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
   const openDemoModal = (solution?: Solution) => setDemoModal({ open: true, solution });
   const closeDemoModal = () => setDemoModal((prev) => ({ ...prev, open: false }));
@@ -289,18 +299,16 @@ function App() {
     abortControllerRef.current = controller;
 
     try {
-      const response = await fetch(`${API_BASE_URL || 'http://localhost:8000'}/chat`, {
+      const response = await apiFetch('/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ message: trimmed }),
+        body: JSON.stringify({ message: trimmed, session_id: getSessionId() }),
         signal: controller.signal,
       });
 
       const data = await response.json();
       const answer = data.answer || 'I could not generate a response right now.';
       const sources = Array.isArray(data.sources) ? data.sources : [];
+      const nextActions: NextAction[] = Array.isArray(data.next_actions) ? data.next_actions : [];
 
       let streamedIndex = 0;
       const streamSpeed = 18;
@@ -319,7 +327,11 @@ function App() {
           abortControllerRef.current = null;
           activeAssistantIdRef.current = null;
           setMessages((prev) =>
-            prev.map((message) => (message.id === assistantMessageId ? { ...message, isTyping: false, sources } : message))
+            prev.map((message) =>
+              message.id === assistantMessageId
+                ? { ...message, isTyping: false, sources, question: trimmed, nextActions }
+                : message
+            )
           );
           setIsTyping(false);
         }
@@ -363,6 +375,36 @@ function App() {
     }
     activeAssistantIdRef.current = null;
     setIsTyping(false);
+  };
+
+  const recommendedProductsFor = (message: Message): string[] => {
+    const header = detectProductHeader(message.content, solutions);
+    const fromActions = (message.nextActions ?? [])
+      .filter((a) => a.action_type === 'learn_more' || a.action_type === 'request_demo' || a.action_type === 'compare')
+      .map((a) => a.target)
+      .filter((t): t is string => Boolean(t));
+    const products = new Set<string>(fromActions);
+    if (header) products.add(header.solution.name);
+    return Array.from(products);
+  };
+
+  const handleSaveRecommendation = async (message: Message) => {
+    const products = recommendedProductsFor(message);
+    if (products.length === 0) return;
+    try {
+      const response = await apiFetch('/saved-recommendations', {
+        method: 'POST',
+        body: JSON.stringify({
+          products,
+          question: message.question || '',
+          recommendation: message.content,
+        }),
+      });
+      if (!response.ok) return;
+      setMessages((prev) => prev.map((m) => (m.id === message.id ? { ...m, savedRecommendation: true } : m)));
+    } catch {
+      // Non-critical enrichment — a failed save just leaves the button clickable again.
+    }
   };
 
   const quickActions = [
@@ -412,15 +454,34 @@ function App() {
             ))}
           </nav>
 
-          <button
-            type="button"
-            onClick={() => openDemoModal()}
-            className="rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-paper shadow-lg shadow-ink/10 transition hover:-translate-y-0.5 hover:bg-ink-soft"
-          >
-            Request a demo
-          </button>
+          <div className="flex items-center gap-3">
+            {user ? (
+              <Link
+                to="/dashboard"
+                className="rounded-full border border-ink/15 px-4 py-2.5 text-sm font-semibold text-ink transition hover:bg-paper"
+              >
+                Dashboard
+              </Link>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsAuthModalOpen(true)}
+                className="rounded-full border border-ink/15 px-4 py-2.5 text-sm font-semibold text-ink transition hover:bg-paper"
+              >
+                Sign In
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => openDemoModal()}
+              className="rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-paper shadow-lg shadow-ink/10 transition hover:-translate-y-0.5 hover:bg-ink-soft"
+            >
+              Request a demo
+            </button>
+          </div>
         </div>
       </header>
+      <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} />
 
       <main>
         <section className="relative overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(200,154,62,0.14),_transparent_40%),linear-gradient(135deg,_#f7f8fa_0%,_#eceef2_100%)]">
@@ -857,7 +918,7 @@ function App() {
           <div className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
             <div className="rounded-[2rem] border border-ink/10 bg-white p-8 shadow-sm">
               <p className="text-sm font-semibold uppercase tracking-[0.3em] text-gold-600">Support Center</p>
-              <h2 className="mt-2 font-display text-3xl tracking-tight text-ink">Everything your customers need to get help fast</h2>
+              <h2 className="mt-2 font-display text-3xl tracking-tight text-ink">Everything you need to get help.</h2>
               <div className="mt-8 grid gap-4">
                 {supportWidgets.map((widget) => {
                   const Icon = widget.icon;
@@ -884,49 +945,7 @@ function App() {
             </div>
 
             <div className="rounded-[2rem] border border-ink/10 bg-gradient-to-br from-ink to-ink-soft p-8 text-paper shadow-sm">
-              <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-6 backdrop-blur">
-                <p className="text-sm font-semibold uppercase tracking-[0.3em] text-gold-300">Appointment Scheduling</p>
-                <h3 className="mt-3 font-display text-2xl">Book a strategy session</h3>
-                <div className="mt-6 grid gap-4 md:grid-cols-[1.1fr_0.9fr]">
-                  <div className="rounded-[1.25rem] border border-white/10 bg-black/20 p-4">
-                    <div className="flex items-center gap-2 text-sm font-medium text-gold-100">
-                      <CalendarDays size={16} />
-                      Available dates
-                    </div>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {['Mon', 'Tue', 'Wed', 'Thu'].map((day) => (
-                        <div key={day} className="rounded-full border border-white/10 px-3 py-2 text-sm text-paper/80">
-                          {day}
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {appointmentSlots.map((slot) => (
-                        <div key={slot} className="rounded-full bg-gold-400/15 px-3 py-2 text-sm text-gold-100">
-                          {slot}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="rounded-[1.25rem] border border-white/10 bg-white/5 p-4">
-                    <div className="flex items-center gap-2 text-sm font-medium text-gold-100">
-                      <Clock3 size={16} />
-                      Confirmation
-                    </div>
-                    <div className="mt-4 rounded-2xl bg-white p-4 text-ink">
-                      <p className="font-semibold">Thursday • 13:00</p>
-                      <p className="mt-2 text-sm text-ink/65">A senior specialist will confirm your slot.</p>
-                    </div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => openDemoModal()}
-                  className="mt-6 w-full rounded-full bg-gold-400 px-5 py-3 text-sm font-semibold text-ink transition hover:bg-gold-300"
-                >
-                  Contact Sales
-                </button>
-              </div>
+              <AppointmentScheduler />
             </div>
           </div>
         </section>
@@ -1038,6 +1057,21 @@ function App() {
                       {message.isTyping ? <span className="ml-1 animate-pulse">█</span> : null}
                       {message.sender === 'assistant' && !message.isTyping && message.sources && message.sources.length > 0 ? (
                         <SourceChips sources={message.sources} />
+                      ) : null}
+                      {message.sender === 'assistant' && !message.isTyping && user && recommendedProductsFor(message).length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => handleSaveRecommendation(message)}
+                          disabled={message.savedRecommendation}
+                          className={`mt-2 flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                            message.savedRecommendation
+                              ? 'cursor-default border-emerald-300 bg-emerald-50 text-emerald-700'
+                              : 'border-ink/10 text-ink/60 hover:border-gold-400 hover:text-gold-700'
+                          }`}
+                        >
+                          <Star size={12} className={message.savedRecommendation ? 'fill-current' : ''} />
+                          {message.savedRecommendation ? 'Saved' : 'Save Recommendation'}
+                        </button>
                       ) : null}
                     </div>
                   </div>
