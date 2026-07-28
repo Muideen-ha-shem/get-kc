@@ -15,11 +15,18 @@ trigger this:
   knows exactly what they asked for. Confirmed live this is a real failure
   mode without the check — every existing "Compare X and Y" question would
   otherwise get a clarifying question instead of the comparison it asked for.
+* A comparison asked via business-problem language rather than product
+  names — "Compare payroll and expense management solutions" — is just as
+  deliberate as naming the products directly; confirmed live this is a
+  distinct failure mode from the naming case above (``named_explicitly`` is
+  correctly ``False`` here since no product name appears in the text, but
+  the "compare" phrasing itself is just as strong a signal of deliberate
+  intent as naming would be).
 
 Genuine ambiguity is different: two competing, single-purpose products both
-inferred from need-phrased language (not named) with no signal favoring
-either is exactly when a real consultant would ask a clarifying question
-rather than guess.
+inferred from need-phrased language (not named, not asked to be compared)
+with no signal favoring either is exactly when a real consultant would ask
+a clarifying question rather than guess.
 
 The question text is built entirely from each candidate's own registry
 ``business_problem`` field — never invented, so it can't misdescribe what a
@@ -36,6 +43,8 @@ from .intent_engine import BusinessIntent
 
 logger: logging.Logger = get_logger(__name__)
 
+_COMPARISON_KEYWORDS = ("compare", "comparison", " vs ", " vs. ", " versus ")
+
 
 class ClarificationEngine:
     """Decides whether a question needs a clarifying follow-up instead of
@@ -47,6 +56,8 @@ class ClarificationEngine:
         if intent.via_theme:
             return None
         if intent.named_explicitly:
+            return None
+        if self._asks_for_comparison(intent.question):
             return None
         if intent.confidence != "ambiguous":
             return None
@@ -71,3 +82,8 @@ class ClarificationEngine:
             intent.question,
         )
         return question
+
+    @staticmethod
+    def _asks_for_comparison(question: str) -> bool:
+        padded = f" {(question or '').lower()} "
+        return any(keyword in padded for keyword in _COMPARISON_KEYWORDS)

@@ -20,9 +20,14 @@
   - `sb.py` — Supabase client accessor
   - api/
     - `app.py` — FastAPI app setup, CORS, router registration
-    - `schemas.py` — `ChatRequest`/`ChatResponse` and `DemoRequest`/`DemoRequestResponse` models
+    - `schemas.py` — `ChatRequest`/`ChatResponse`, `NextActionSchema`
+      (Phase 19 — optional, additive `next_actions` field on
+      `ChatResponse`), `SolutionSummary` (Phase 18), and
+      `DemoRequest`/`DemoRequestResponse` models
     - routes/
       - `chat.py` — `POST /chat` endpoint
+      - `solutions.py` — `GET /solutions` (Phase 18) — the Public Portal's
+        catalog, read straight from `PRODUCT_REGISTRY`
       - `demo_request.py` — `POST /demo-request` endpoint (backs every
         "Request a demo"/"Contact sales"/"Talk to an expert" CTA in the
         frontend); returns 503 with a friendly message if the
@@ -103,7 +108,52 @@
         never touches the LLM's answer text, only the returned
         citations/sources metadata
     - generator/
-      - `response_generator.py` — generates cited answers from merged evidence
+      - `response_generator.py` — generates cited answers from merged
+        evidence; accepts optional `primary_product`/`complementary_products`
+        (Phase 17, extended Phase 19) to frame the answer as a business
+        recommendation
+    - advisory/ (Phase 19 — "Intelligent Business Advisor")
+      - `intent_engine.py` — `BusinessIntentEngine`/`BusinessIntent`: wraps
+        `ProductRouter` (doesn't duplicate its keyword tables) and enriches
+        its `ProductMatch` with registry business-problem/category text,
+        plus a `named_explicitly` flag distinguishing "Compare X and Y"
+        (deliberate) from a need-phrased question that happens to match
+        two products' keywords (genuinely ambiguous)
+      - `recommendation_engine.py` — `RecommendationEngine`/`Recommendation`:
+        ranked, grounded recommendations. Never recommends a product
+        outside `PRODUCT_REGISTRY`; confidence is downgraded unless the
+        current retrieval evidence actually contains that product's own
+        content (checked via `product_metadata_for_url`, no new coupling
+        to `ContextMerger`/`EvidenceItem` needed)
+      - `clarification_engine.py` — `ClarificationEngine`: asks a
+        registry-grounded either/or question instead of guessing, but
+        *only* for a genuinely ambiguous two-product keyword match — never
+        for a business-theme bundle, an explicitly-named comparison, or a
+        comparison phrased via business-problem language ("compare payroll
+        and expense management solutions")
+      - `next_actions.py` — `NextActionsEngine`/`NextAction`: deterministic
+        next-step suggestions (Learn More/Compare/Request Demo/Talk to an
+        Expert/Build a Custom Solution/Contact Sales), never hardcoded into
+        a response template
+      - `advisory_layer.py` — `AdvisoryResponseLayer`/`AdvisoryResult`:
+        orchestrates the above for `ChatOrchestrator`; every sub-step is
+        failure-isolated (a bug in one stage degrades to "skip that
+        enrichment", never breaks the chat response). Optional and purely
+        additive — `ChatOrchestrator(advisory_layer=None)` behaves exactly
+        as it did before this phase
+      - `session_context.py` — `SessionContext`/`SessionState`:
+        session-scoped conversation awareness (discussed products,
+        recommendations, comparisons, current business problem), built on
+        the same `TTLCache` every other in-memory cache in this codebase
+        uses. Fully unit-tested, including the pronoun-reference resolver
+        that would make "How much does it cost?" resolve to the
+        last-discussed product — but **not wired into the live `/chat`
+        endpoint yet**: doing so needs the frontend to generate/persist/
+        send a session id, out of scope for this pass
+      - `analytics_service.py` — `AnalyticsService`: optional, in-memory,
+        anonymous usage counters (recommended/accepted products, compared
+        pairs, business problems, demo CTAs, custom-software requests);
+        `record_safely()` means a failure here can never break a response
   - shared/
     - `logging.py`
     - `cache.py` — `TTLCache`, a generic thread-safe time-to-live cache
@@ -146,6 +196,20 @@
 > below for the ingestion order) simply won't have any chunks to retrieve —
 > nothing breaks, the question just falls through to general knowledge/web
 > search same as before that product existed.
+
+> **Intelligent Business Advisor (Phase 19):** `AdvisoryResponseLayer`
+> (`src/services/advisory/`) **is** wired into the default
+> `chat_orchestrator` singleton, sitting between retrieval and generation.
+> It can short-circuit with a deterministic clarifying question (zero LLM
+> calls) for genuine ambiguity, or drive `ResponseGenerator`'s
+> `primary_product`/`complementary_products` framing for *any*
+> high-confidence recommendation — not just business-theme matches as in
+> Phase 17 — and attaches a `next_actions` list to the API response
+> (`ChatResponse.next_actions`, additive/optional — old clients unaffected).
+> `SessionContext` is fully built and unit-tested but deliberately not
+> wired into the live endpoint yet (needs a frontend session-id change,
+> out of scope for this pass). `AnalyticsService` is wired and records
+> in-memory-only, anonymous usage counters alongside every response.
 
 ## Scripts and Utilities
 - scripts/ — standalone tools, run manually, not imported by the API
