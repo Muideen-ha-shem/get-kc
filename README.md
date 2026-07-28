@@ -92,6 +92,64 @@ Standalone scripts such as crawl, chunking, vector upload, and cleaning utilitie
 - **API Rate Limiting**: Efficient request handling
 - **Error Handling**: Graceful fallbacks for unavailable services
 
+### 👤 Customer Accounts (Phase 20)
+
+Fully additive on top of the existing anonymous experience — nothing below
+changes how an anonymous visitor uses HavisIQ; it only unlocks extra features
+once a visitor signs in.
+
+- **Supabase Authentication**: Sign up, sign in, sign out, password reset, and
+  email verification via Supabase Auth (`src/services/auth/auth_service.py`).
+  Google/Microsoft OAuth can be added later purely as new `AuthService`
+  methods — no architectural change required.
+- **Customer Profile**: A lightweight profile (company, industry, phone —
+  *not* AI memory) that authenticated users can view/edit from the dashboard.
+- **Session-Aware Conversations**: Every `/chat` request can carry a
+  client-generated `session_id`; the backend resolves bare pronouns ("How much
+  does *it* cost?") against the last-discussed product before retrieval, with
+  zero extra retrieval calls, and remembers discussed/recommended/compared
+  products for the life of the session.
+- **Conversation Persistence & History**: Authenticated users can save, list,
+  resume, rename, and delete conversations from the Customer Dashboard — a
+  ChatGPT/Claude-like experience, but business-focused. Persistence happens
+  behind the existing `/chat` contract; the endpoint's request/response shape
+  only gained optional fields (`session_id`, `conversation_id`).
+- **Personalized Recommendations**: Authenticated users with a company/industry
+  on file get business-intent classification biased toward relevant products
+  (e.g. a Financial Services company asking about "customer onboarding" is
+  steered toward SPIDIFY without extra clarifying questions) — implemented by
+  lightly annotating the question text handed to the (unmodified) advisory
+  engines, not by changing their logic.
+- **Customer Dashboard**: `/dashboard` (React Router, auth-protected) with
+  Recent Conversations, Continue/New Conversation, Profile, Saved
+  Recommendations, Saved Comparisons, and a Notifications placeholder.
+
+### ⭐ Saved Comparisons & Recommendations
+
+- **Save Comparison**: A "Save Comparison" button inside `CompareSolutionsModal`
+  (visible once 2+ solutions are selected and the visitor is signed in) persists
+  the selected product ids to `saved_comparisons`. "Open" from the dashboard's
+  Saved Comparisons list reopens the *same* modal component with that selection
+  preloaded — no separate comparison view exists.
+- **Save Recommendation**: Whenever HavisIQ's chat widget names a recommended
+  product (via the existing product-header detection or a `next_actions`
+  target), a "Save Recommendation" button appears under that message for
+  signed-in visitors, persisting the question + recommendation text to
+  `saved_recommendations` — a personal recommendation library, viewable/
+  removable from the dashboard.
+
+### 📅 Appointment Scheduling
+
+Real booking logic behind the Support Center's "Book a strategy session"
+widget — `GET /appointments/availability` derives open slots for the next few
+calendar days directly from today's date plus whatever's already booked, so a
+day rolling out of that forward-looking window is what makes "availability
+resets the next day" true, with no cron job or explicit reset step anywhere.
+`POST /appointments` books a slot (public — no sign-in required, same as demo
+requests); a `unique (appointment_date, time_slot)` database constraint is the
+real guard against two people booking the same slot at once, not just the
+pre-check the API also does.
+
 ### 🎯 Retrieval Quality & Performance
 
 All of the following are optional pipeline refinements — each degrades gracefully
@@ -141,6 +199,109 @@ Ha-Shem AI Support Platform
 3. Supabase vector search finds relevant knowledge chunks
 4. Groq generates a grounded response using context
 5. Response streams back with source links
+
+### Authentication Architecture (Phase 20)
+
+```
+Frontend (React)
+  └── AuthProvider (src/lib/authContext.tsx)
+        stores access_token in localStorage, attaches "Authorization: Bearer <token>"
+        to every request via apiFetch()
+
+Backend (FastAPI)
+  ├── POST /auth/sign-up, /auth/sign-in, /auth/sign-out, /auth/password-reset, GET /auth/me
+  │     └── AuthService (src/services/auth/auth_service.py) — thin wrapper over
+  │         supabase-py's client.auth.* — no session state kept server-side.
+  ├── get_current_user_optional / get_current_user_required (src/api/deps.py)
+  │     └── FastAPI dependencies that decode the bearer token via AuthService.get_user().
+  │         Optional everywhere anonymous access must keep working (e.g. /chat);
+  │         required only on genuinely protected routes (/profile, /conversations).
+  └── ProfileService (src/services/profile/profile_service.py)
+        └── customer_profiles table, auto-created on first sign-in (or via a
+            DB trigger on auth.users insert — see the migration).
+```
+
+Supabase's built-in `auth.users` table is the source of truth for
+credentials; everything else (`customer_profiles`, `conversations`,
+`conversation_messages`) references it by `auth_user_id` / `user_id` and is
+protected by Row Level Security policies keyed on `auth.uid()`.
+
+### SessionContext Flow (Phase 20)
+
+```
+Frontend generates a session_id (crypto.randomUUID, sessionStorage) once per
+tab and sends it with every /chat call.
+
+ChatOrchestrator.chat(message, session_id=...)
+  1. SessionService.resolve_reference(session_id, message)
+       rewrites a bare pronoun ("it"/"this"/"that") to the last product
+       discussed in that session — BEFORE the single retrieval call, so no
+       extra retrieval round-trip is needed.
+  2. ... normal retrieval + advisory pipeline, unchanged ...
+  3. SessionService records this turn's discussed/recommended/compared
+     products and business problem back into the session (30-minute TTL,
+     in-memory only — no DB row).
+```
+
+`SessionContext` itself (`src/services/advisory/session_context.py`) is
+unchanged from Phase 19; Phase 20 only wires it into the live request path via
+the new `SessionService` adapter (`src/services/session/session_service.py`).
+
+### Conversation Lifecycle (Phase 20)
+
+```
+POST /conversations                 -> create a conversation (optionally titled
+                                        from the first message)
+POST /chat {conversation_id: "..."} -> persists the user+assistant turn into
+                                        conversation_messages behind the
+                                        existing /chat contract (best-effort;
+                                        a persistence failure never breaks the
+                                        chat response itself)
+GET  /conversations                 -> list, newest first
+GET  /conversations/{id}            -> full message history to resume in the UI
+PATCH /conversations/{id}           -> rename
+DELETE /conversations/{id}          -> delete (cascades to its messages)
+```
+
+### Dashboard Architecture (Phase 20)
+
+`frontend/src/pages/DashboardPage.tsx`, mounted at `/dashboard` behind
+`ProtectedRoute` (redirects anonymous visitors to `/`). Sections: Recent
+Conversations (with inline resume/rename/delete), Continue/New Conversation,
+Profile (reads/writes `GET`/`PATCH /profile`), and placeholders for Saved
+Recommendations, Saved Comparisons, and Notifications — reserved for a future
+phase once those concepts have a backend home.
+
+### Database Schema (Phase 20 additions)
+
+See `scripts/sql/004_customer_identity.sql` for the full migration (additive
+only — no existing table is modified):
+
+- **`customer_profiles`**: `id`, `auth_user_id` (unique, → `auth.users`),
+  `email`, `full_name`, `company_name`, `industry`, `phone`, `created_at`,
+  `updated_at`, `last_login`. RLS: a user can only read/insert/update their
+  own row.
+- **`conversations`**: `id`, `user_id` (→ `auth.users`), `title`,
+  `created_at`, `updated_at`. RLS: a user can only see/modify their own rows.
+- **`conversation_messages`**: `id`, `conversation_id` (→ `conversations`),
+  `role` (`user`/`assistant`), `content`, `citations` (jsonb), `metadata`
+  (jsonb), `created_at`. RLS: ownership checked via the parent conversation's
+  `user_id` (a message has no `user_id` column of its own).
+
+### Database Schema (Saved Comparisons / Recommendations / Appointments)
+
+See `scripts/sql/005_saved_items.sql` for the full migration (additive only):
+
+- **`saved_comparisons`**: `id`, `user_id` (→ `auth.users`), `product_ids`
+  (jsonb array), `created_at`. RLS: own rows only — same `auth.uid()` pattern
+  as `conversations`.
+- **`saved_recommendations`**: `id`, `user_id` (→ `auth.users`), `products`
+  (jsonb array), `question`, `recommendation`, `created_at`. RLS: own rows only.
+- **`appointments`**: `id`, `user_id` (nullable → `auth.users`), `name`,
+  `email`, `appointment_date`, `time_slot`, `status`, `created_at`,
+  `unique (appointment_date, time_slot)`. **No RLS** — booking is a public
+  action, same precedent as `demo_requests`; the unique constraint (not a
+  policy) is what prevents a double-booking race.
 
 ---
 
