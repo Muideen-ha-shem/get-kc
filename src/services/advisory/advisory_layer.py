@@ -40,11 +40,31 @@ class AdvisoryResult:
 
     @property
     def primary_product(self) -> str | None:
-        return self.recommendations[0].product if self.recommendations else None
+        """The lead product for response framing, or ``None`` when there
+        genuinely isn't one — a business theme with no single dominant
+        product (e.g. company-wide digital transformation touching 7
+        unrelated departments) must **not** silently pick whichever
+        product happens to be listed first in that theme's tuple; that's
+        an arbitrary registry ordering, not a real recommendation."""
+        if self.intent.primary:
+            return self.intent.primary
+        if not self.intent.via_theme and self.recommendations:
+            return self.recommendations[0].product
+        return None
 
     @property
     def complementary_products(self) -> list[str]:
-        return [r.product for r in self.recommendations[1:]] if len(self.recommendations) > 1 else []
+        """Products to frame alongside ``primary_product`` — the rest of
+        the recommendation list when there's a primary, or *every*
+        recommended product when this is a parallel, no-primary theme
+        bundle (so ResponseGenerator still gets the "no single dominant
+        one" framing instead of no framing at all)."""
+        primary = self.primary_product
+        if primary is not None:
+            return [r.product for r in self.recommendations if r.product != primary]
+        if self.intent.via_theme:
+            return [r.product for r in self.recommendations]
+        return []
 
 
 class AdvisoryResponseLayer:

@@ -33,8 +33,10 @@ from .recommendation_engine import Recommendation
 logger: logging.Logger = get_logger(__name__)
 
 _CUSTOM_SOFTWARE_KEYWORDS = (
-    "custom software", "custom solution", "custom-built", "software built for",
-    "build software", "bespoke software", "build us software", "software specifically for",
+    "custom software", "custom solution", "custom-built", "software built",
+    "build software", "bespoke software", "build us software",
+    "built specifically for", "built for our", "software specifically for",
+    "software tailored", "tailored software",
 )
 
 _ADVISORY_SERVICE_KEYWORDS = (
@@ -65,6 +67,20 @@ class NextActionsEngine:
             return [NextAction("Build a Custom Solution", "custom_solution")]
 
         if recommendations:
+            # A business theme with no single designated primary (e.g.
+            # company-wide digital transformation touching 7 unrelated
+            # departments) has no one product to name as "the" learn-more/
+            # demo target — naming whichever one happens to be first in the
+            # theme's product tuple would be arbitrary, not a real
+            # recommendation. Use neutral, explore-the-set phrasing instead.
+            if intent.via_theme and not intent.primary and len(recommendations) > 1:
+                return [
+                    NextAction("Explore These Solutions", "learn_more"),
+                    NextAction("Compare Solutions", "compare"),
+                    NextAction("Request a Demo", "request_demo"),
+                    NextAction("Talk to an Expert", "talk_to_expert"),
+                ]
+
             primary = recommendations[0]
             actions = [NextAction(f"Learn more about {primary.product}", "learn_more", primary.product)]
             if len(recommendations) > 1 or primary.alternatives or primary.related:
