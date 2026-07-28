@@ -1,7 +1,9 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { CheckCircle2, GitCompare, X } from 'lucide-react';
+import { CheckCircle2, GitCompare, Star, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { Solution } from '../solutions';
+import { useAuth } from '../lib/authContext';
+import { apiJson } from '../lib/apiClient';
 
 type CompareSolutionsModalProps = {
   isOpen: boolean;
@@ -10,16 +12,41 @@ type CompareSolutionsModalProps = {
   onRequestDemo: (solution: Solution) => void;
   /** Pre-selects one solution when opened from a card's "Compare" button. */
   initialSelectedId?: string;
+  /** Pre-selects multiple solutions — used to reopen a saved comparison from
+   * the Customer Dashboard with its full selection already loaded. Takes
+   * priority over initialSelectedId when both are given. */
+  initialSelectedIds?: string[];
 };
 
-export function CompareSolutionsModal({ isOpen, onClose, solutions, onRequestDemo, initialSelectedId }: CompareSolutionsModalProps) {
+export function CompareSolutionsModal({
+  isOpen,
+  onClose,
+  solutions,
+  onRequestDemo,
+  initialSelectedId,
+  initialSelectedIds,
+}: CompareSolutionsModalProps) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const { user } = useAuth();
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
 
   useEffect(() => {
     if (isOpen) {
-      setSelectedIds(initialSelectedId ? [initialSelectedId] : []);
+      setSelectedIds(initialSelectedIds ?? (initialSelectedId ? [initialSelectedId] : []));
+      setSaveStatus('idle');
     }
-  }, [isOpen, initialSelectedId]);
+  }, [isOpen, initialSelectedId, initialSelectedIds]);
+
+  const handleSaveComparison = async () => {
+    if (saveStatus === 'saving' || selectedIds.length < 2) return;
+    setSaveStatus('saving');
+    try {
+      await apiJson('/saved-comparisons', { method: 'POST', body: JSON.stringify({ product_ids: selectedIds }) });
+      setSaveStatus('saved');
+    } catch {
+      setSaveStatus('idle');
+    }
+  };
 
   const toggleSelection = (id: string) => {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -56,6 +83,25 @@ export function CompareSolutionsModal({ isOpen, onClose, solutions, onRequestDem
                 ) : null}
               </div>
               <div className="flex items-center gap-2">
+                {isComparing && user ? (
+                  <button
+                    type="button"
+                    onClick={handleSaveComparison}
+                    disabled={saveStatus !== 'idle'}
+                    className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                      saveStatus === 'saved'
+                        ? 'cursor-default border-emerald-300 bg-emerald-50 text-emerald-700'
+                        : 'border-ink/15 text-ink/70 hover:border-gold-400 hover:text-gold-700'
+                    }`}
+                  >
+                    {saveStatus === 'saved' ? <CheckCircle2 size={13} /> : <Star size={13} />}
+                    {saveStatus === 'saved'
+                      ? 'Comparison saved successfully'
+                      : saveStatus === 'saving'
+                      ? 'Saving...'
+                      : 'Save Comparison'}
+                  </button>
+                ) : null}
                 {selectedIds.length > 0 ? (
                   <button
                     type="button"

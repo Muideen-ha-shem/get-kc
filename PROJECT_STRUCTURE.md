@@ -20,12 +20,29 @@
   - `sb.py` — Supabase client accessor
   - api/
     - `app.py` — FastAPI app setup, CORS, router registration
+    - `deps.py` — (Phase 20) `get_current_user_optional` /
+      `get_current_user_required` FastAPI dependencies; decode the
+      `Authorization: Bearer` header via `AuthService.get_user()`. Optional
+      is used on routes that must keep working anonymously (`/chat`);
+      required is used on genuinely protected routes (`/profile`,
+      `/conversations`)
     - `schemas.py` — `ChatRequest`/`ChatResponse`, `NextActionSchema`
       (Phase 19 — optional, additive `next_actions` field on
-      `ChatResponse`), `SolutionSummary` (Phase 18), and
-      `DemoRequest`/`DemoRequestResponse` models
+      `ChatResponse`), `SolutionSummary` (Phase 18),
+      `DemoRequest`/`DemoRequestResponse` models, and (Phase 20)
+      `ChatRequest.session_id`/`conversation_id` (additive, optional),
+      `ChatResponse.session_id` (additive, optional), plus
+      `SignUpRequest`/`SignInRequest`/`PasswordResetRequest`/
+      `AuthSessionResponse`, `CustomerProfileSchema`/`UpdateProfileRequest`,
+      `ConversationSummary`/`ConversationDetail`/`ConversationMessageSchema`
     - routes/
-      - `chat.py` — `POST /chat` endpoint
+      - `chat.py` — `POST /chat` endpoint. Phase 20: resolves the optional
+        bearer token to a user (or `None`), builds a short
+        company/industry `profile_context` hint for authenticated users
+        with a profile on file, forwards `session_id`/`profile_context` to
+        `ChatOrchestrator`, and — best-effort, never breaking the
+        response — persists the turn via `ConversationService` when the
+        caller is authenticated and passed a `conversation_id`
       - `solutions.py` — `GET /solutions` (Phase 18) — the Public Portal's
         catalog, read straight from `PRODUCT_REGISTRY`
       - `demo_request.py` — `POST /demo-request` endpoint (backs every
@@ -33,6 +50,17 @@
         frontend); returns 503 with a friendly message if the
         `demo_requests` table hasn't been created yet, rather than leaking
         a raw database error
+      - `auth.py` — (Phase 20) `POST /auth/sign-up`, `/auth/sign-in`,
+        `/auth/sign-out`, `/auth/password-reset`, `GET /auth/me`
+      - `profile.py` — (Phase 20) `GET`/`PATCH /profile` (auth required)
+      - `conversations.py` — (Phase 20) `GET`/`POST /conversations`,
+        `GET`/`PATCH`/`DELETE /conversations/{id}` (auth required)
+      - `saved_items.py` — `GET`/`POST /saved-comparisons`,
+        `DELETE /saved-comparisons/{id}`, `GET`/`POST /saved-recommendations`,
+        `DELETE /saved-recommendations/{id}` (auth required)
+      - `appointments.py` — `GET /appointments/availability` (public),
+        `POST /appointments` (public — records `user_id` when the booker
+        happens to be signed in, but never requires it)
     - services/
       - `embeddings.py` — Gemini embedding calls
       - `generator.py` — Groq LLM generation
@@ -145,15 +173,62 @@
         session-scoped conversation awareness (discussed products,
         recommendations, comparisons, current business problem), built on
         the same `TTLCache` every other in-memory cache in this codebase
-        uses. Fully unit-tested, including the pronoun-reference resolver
-        that would make "How much does it cost?" resolve to the
-        last-discussed product — but **not wired into the live `/chat`
-        endpoint yet**: doing so needs the frontend to generate/persist/
-        send a session id, out of scope for this pass
+        uses. Wired into the live `/chat` endpoint as of Phase 20 via
+        `SessionService` (`src/services/session/`) — the pronoun-reference
+        resolver now runs for real, e.g. "Tell me about SPIDIFY" then
+        "How much does it cost?" resolves "it" to SPIDIFY without a second
+        retrieval call
       - `analytics_service.py` — `AnalyticsService`: optional, in-memory,
         anonymous usage counters (recommended/accepted products, compared
         pairs, business problems, demo CTAs, custom-software requests);
         `record_safely()` means a failure here can never break a response
+    - auth/ (Phase 20)
+      - `auth_service.py` — `AuthService`/`AuthUser`/`AuthSession`/
+        `AuthError`: thin wrapper over `supabase-py`'s `client.auth.*`,
+        no server-side session state. `sign_out` uses
+        `client.auth.admin.sign_out(token, "global")` since the API only
+        ever has the caller's bearer token, not a full session with a
+        refresh token — non-fatal if the configured Supabase key isn't
+        service-role (logs and returns; the frontend clearing its local
+        token already achieves sign-out for the user)
+    - profile/ (Phase 20)
+      - `profile_service.py` — `ProfileService`/`CustomerProfile`: CRUD
+        over `customer_profiles`. `get_or_create` handles both the
+        DB-trigger-already-created-it case and the trigger-didn't-exist-yet
+        case
+    - conversation/ (Phase 20)
+      - `conversation_repository.py` — `ConversationRepository`: raw
+        Supabase access for `conversations`/`conversation_messages`, every
+        query explicitly scoped by `user_id` (defense in depth regardless
+        of whether the configured key is anon+RLS or service-role)
+      - `conversation_service.py` — `ConversationService`: conversation
+        lifecycle (auto-titling from the first message, `record_turn` for
+        persisting a user+assistant pair, ownership-checked reads)
+    - session/ (Phase 20)
+      - `session_service.py` — `SessionService`: thin adapter
+        `ChatOrchestrator` depends on so it doesn't need to know about
+        session-id generation or `SessionContext`'s constructor directly;
+        every method is a no-op when `session_id` is `None`, so it's safe
+        to always inject
+    - saved_items/
+      - `saved_comparison_service.py` — `SavedComparisonService`: CRUD over
+        `saved_comparisons`. Stores only the product-id selection a
+        comparison was built from — no comparison rendering logic lives
+        here; reopening one just replays those ids through the existing
+        `CompareSolutionsModal`
+      - `saved_recommendation_service.py` — `SavedRecommendationService`:
+        CRUD over `saved_recommendations` (products, the user's question,
+        the recommendation text)
+    - appointments/
+      - `appointment_service.py` — `AppointmentService`: availability is
+        *computed*, never stored — each call derives candidate dates from
+        "today" forward and subtracts what's booked in `appointments` for
+        those dates, which is what gives "availability resets the next
+        day" for free (no cron, no explicit reset). `SLOT_TEMPLATE` is the
+        one place a real calendar-provider integration would plug in
+        later. `book()` pre-checks for a clearer error message, but the
+        table's `unique (appointment_date, time_slot)` constraint is the
+        actual race guard — `SlotAlreadyBookedError` is raised either way
   - shared/
     - `logging.py`
     - `cache.py` — `TTLCache`, a generic thread-safe time-to-live cache
@@ -206,10 +281,28 @@
 > high-confidence recommendation — not just business-theme matches as in
 > Phase 17 — and attaches a `next_actions` list to the API response
 > (`ChatResponse.next_actions`, additive/optional — old clients unaffected).
-> `SessionContext` is fully built and unit-tested but deliberately not
-> wired into the live endpoint yet (needs a frontend session-id change,
-> out of scope for this pass). `AnalyticsService` is wired and records
-> in-memory-only, anonymous usage counters alongside every response.
+> `AnalyticsService` is wired and records in-memory-only, anonymous usage
+> counters alongside every response.
+
+> **Customer Identity Foundation (Phase 20):** 100% additive on top of the
+> above — anonymous `/chat` usage is byte-for-byte unchanged when no
+> `session_id`/`conversation_id`/bearer token is sent. New, independently
+> injectable collaborators: `AuthService`, `ProfileService`,
+> `ConversationService` (+ `ConversationRepository`), and `SessionService`
+> (the live wiring for Phase 19's previously-unwired `SessionContext`).
+> `ChatOrchestrator.chat()` gained two optional keyword args —
+> `session_id` (pronoun resolution + session recording) and
+> `profile_context` (personalization: a short "Company — Industry" hint
+> that only biases business-intent classification, built by lightly
+> prefixing the question text handed to the *unmodified* Phase 19 advisory
+> engines, since those engines are explicitly out of scope to modify this
+> phase). Conversation persistence happens in the `/chat` **route**, not
+> the orchestrator, keeping `ChatOrchestrator` free of auth/DB coupling.
+> New tables (`customer_profiles`, `conversations`, `conversation_messages`
+> — see `scripts/sql/004_customer_identity.sql`) are additive; RLS keyed on
+> `auth.uid()` for defense in depth, with every repository query also
+> explicitly scoped by `user_id` regardless of which Supabase key is
+> configured.
 
 ## Scripts and Utilities
 - scripts/ — standalone tools, run manually, not imported by the API
@@ -253,6 +346,22 @@
       standalone extract of just the `demo_requests` table, independent of
       002. Once this exists, `POST /demo-request` works immediately with
       no code changes.
+    - `004_customer_identity.sql` — **not executed by any script or by
+      Claude** (same no-DDL-access constraint as 002/003). Additive-only:
+      creates `customer_profiles`, `conversations`, `conversation_messages`
+      plus RLS policies and a trigger that auto-creates a blank profile row
+      on `auth.users` insert. Requires Supabase Auth's built-in `auth.users`
+      table, which exists by default in every Supabase project. Run this
+      yourself before using any `/auth`, `/profile`, or `/conversations`
+      route.
+    - `005_saved_items.sql` — **not executed by any script or by Claude**
+      (same no-DDL-access constraint). Additive-only: creates
+      `saved_comparisons`, `saved_recommendations` (RLS, same `auth.uid()`
+      pattern as 004) and `appointments` (no RLS — public booking, same
+      precedent as `demo_requests`; a `unique (appointment_date, time_slot)`
+      constraint guards against double-booking). Run this yourself before
+      using `/saved-comparisons`, `/saved-recommendations`, or
+      `/appointments`.
 
 **Multi-solution ingestion order** (13 products: SPIDIFY, ZivaAIRA, and the
 11-product HAVIS-360 catalog — V-Login, STAAS, WeCare, Havis Xpend, Havis
@@ -294,7 +403,7 @@ addition to `src/solutions.ts`; no other file needs to change.
 
 - frontend/
   - `index.html`
-  - `package.json`, `package-lock.json`
+  - `package.json`, `package-lock.json` — Phase 20 adds `react-router-dom`
   - `postcss.config.js`, `tailwind.config.js` — `ink`/`paper`/`gold` brand
     tokens and the `font-display` (Georgia-based serif) type family
   - `vite.config.ts`
@@ -304,13 +413,37 @@ addition to `src/solutions.ts`; no other file needs to change.
       inline SVG component, not a static asset)
   - src/
     - `App.tsx` — main application: hero, solution catalog grid, chat
-      widget (client-side typewriter reveal of `/chat` responses),
-      support/appointment sections
+      widget (client-side typewriter reveal of `/chat` responses, sending a
+      persistent `session_id`, and a "Save Recommendation" button under any
+      message that names a recommended product), Support Center (real
+      `AppointmentScheduler`), and a Sign In / Dashboard header control
     - `solutions.ts` — the solution catalog data (single source of truth
       for the catalog grid, the compare view, and demo-request context)
-    - `main.tsx`
+    - `main.tsx` — (Phase 20) wraps the app in `BrowserRouter` +
+      `AuthProvider`; routes: `/` → `App`, `/dashboard` → `DashboardPage`
+      behind `ProtectedRoute`
     - `styles.css`
     - `vite-env.d.ts`
+    - pages/
+      - `DashboardPage.tsx` — authenticated Customer Dashboard, sticky
+        sidebar (profile avatar/name/email + nav always visible; only the
+        content area and, within the Conversations section, the
+        conversation list itself scroll independently): Recent
+        Conversations (resume/rename/delete), New Conversation, Profile,
+        Saved Recommendations (expand to read, remove), Saved Comparisons
+        (Open reopens `CompareSolutionsModal` preloaded via
+        `initialSelectedIds`, remove), and a Notifications placeholder
+    - lib/
+      - `detectProduct.ts`, `parseMessage.ts`, `useSolutions.ts`
+      - `apiClient.ts` — (Phase 20) `API_BASE_URL`, stored-token helpers,
+        and `apiFetch`/`apiJson` (attach `Authorization: Bearer` when a
+        token is stored)
+      - `authContext.tsx` — (Phase 20) `AuthProvider`/`useAuth` — sign
+        up/in/out/reset against the backend's `/auth/*` routes, persists
+        the access token in `localStorage`
+      - `sessionId.ts` — (Phase 20) per-tab `session_id`
+        (`crypto.randomUUID`, `sessionStorage`) sent with every `/chat`
+        request so the backend can resolve pronouns/stay conversation-aware
     - components/
       - `HavisIQMark.tsx` — the brand mark (H monogram, broken crossbar,
         gold node). Colors are set inline, not via Tailwind utility
@@ -321,8 +454,25 @@ addition to `src/solutions.ts`; no other file needs to change.
         `POST /demo-request`, pre-fills solution context when opened from
         a specific catalog card, and shows a friendly inline error (not a
         raw fetch failure) if the backend returns one
-      - `CompareSolutionsModal.tsx` — read-only side-by-side view of the
-        full catalog, each card also opening `DemoRequestModal`
+      - `CompareSolutionsModal.tsx` — side-by-side comparison view of the
+        catalog, each card also opening `DemoRequestModal`. Accepts either
+        `initialSelectedId` (single, from a catalog card's "Compare"
+        button) or `initialSelectedIds` (multiple, used by the dashboard to
+        reopen a saved comparison) — the latter takes priority when both
+        are given. Shows a "Save Comparison" button once 2+ solutions are
+        selected and the visitor is signed in, posting to
+        `POST /saved-comparisons`
+      - `AppointmentScheduler.tsx` — the Support Center's real booking
+        widget: fetches `GET /appointments/availability`, lets the visitor
+        pick a date/time and book via `POST /appointments`, disables
+        already-booked slots and fully-booked dates, and optimistically
+        marks the just-booked slot unavailable before the follow-up
+        refetch confirms it — no page refresh needed
+      - auth/ (Phase 20)
+        - `AuthModal.tsx` — sign in / sign up / password reset, one modal
+          with a mode switch (same visual language as `DemoRequestModal`)
+        - `ProtectedRoute.tsx` — redirects to `/` if `useAuth().user` is
+          `null` once the initial `/auth/me` check resolves
 
 ## Tests
 - tests/
@@ -347,6 +497,29 @@ addition to `src/solutions.ts`; no other file needs to change.
   - `test_knowledge_service.py`
   - `test_demo_requests.py`
   - `test_mcp_server.py`
+  - `test_auth_service.py` (Phase 20)
+  - `test_profile_service.py` (Phase 20)
+  - `test_conversation_service.py` (Phase 20)
+  - `test_session_service.py` (Phase 20)
+  - `test_chat_orchestrator_session.py` (Phase 20 — pronoun resolution,
+    session recording, session_id passthrough, personalization)
+  - `test_phase20_routes.py` (Phase 20 — `/auth`, `/profile`,
+    `/conversations`, and the updated `/chat` contract, end-to-end through
+    FastAPI's `TestClient` with `dependency_overrides` faking auth)
+  - `test_rls_authenticated_client.py` (Phase 20 — regression coverage for
+    a real bug: `ProfileService`/`ConversationRepository` must route
+    RLS-protected calls through `get_authenticated_client(access_token)`,
+    not the module's own anon-key client, or Postgres rejects the write)
+  - `test_saved_items_services.py` — `SavedComparisonService`/
+    `SavedRecommendationService`, including the same authenticated-client
+    threading as above
+  - `test_appointment_service.py` — `AppointmentService`: availability
+    derivation, booked-slot/fully-booked-day flagging, the "window
+    advances with today" automatic-reset behaviour, and both the
+    pre-check and unique-constraint paths for a double-booking
+  - `test_saved_items_appointments_routes.py` — `/saved-comparisons`,
+    `/saved-recommendations` (auth required), and `/appointments` (public;
+    booking still records `user_id` when the caller happens to be signed in)
 
 ## Notes
 - The backend follows a layered structure: API, orchestrator, services,

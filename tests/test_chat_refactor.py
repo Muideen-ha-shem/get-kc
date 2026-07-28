@@ -10,11 +10,11 @@ class ChatRouteRefactorTests(unittest.TestCase):
     def test_chat_uses_orchestrator_and_returns_response(self):
         mocked_response = ChatResponse(answer="ok", sources=["https://example.com"])
         with patch("src.api.routes.chat.chat_orchestrator.process_request_response", return_value=mocked_response) as mock_process:
-            result = chat(ChatRequest(message="hello"))
+            result = chat(ChatRequest(message="hello"), user=None)
 
         self.assertEqual(result.answer, "ok")
         self.assertEqual(result.sources, ["https://example.com"])
-        mock_process.assert_called_once_with("hello")
+        mock_process.assert_called_once_with("hello", session_id=None, profile_context=None)
 
     def test_legacy_chat_entrypoint_delegates_to_orchestrator(self):
         with patch("src.chat.chat_orchestrator.process_request", return_value={"answer": "ok", "sources": []}) as mock_process:

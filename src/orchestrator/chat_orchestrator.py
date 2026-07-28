@@ -44,6 +44,7 @@ from ..services.query import QueryRewriter
 from ..services.filtering import DomainQualityFilter
 from ..services.validation import CitationValidator
 from ..services.advisory import AdvisoryResponseLayer, AnalyticsService
+from ..services.session.session_service import SessionService
 from ..shared.cache import TTLCache
 from ..shared.logging import get_logger
 
@@ -101,6 +102,7 @@ class ChatOrchestrator:
         background_learning: Any = None,
         enable_background_learning: bool | None = None,
         advisory_layer: Any = None,
+        session_service: SessionService | None = None,
     ) -> None:
         # Legacy services
         self._knowledge_service = knowledge_service or KnowledgeService()
@@ -119,6 +121,10 @@ class ChatOrchestrator:
         # to the Phase 17 via_theme-only logic, and no next_actions are
         # ever attached to the response.
         self._advisory_layer = advisory_layer
+        # Phase 20 — optional session wiring (pronoun resolution + recording
+        # discussed products/recommendations/comparisons/business problem).
+        # None preserves exact prior behaviour: every call is stateless.
+        self._session_service = session_service
 
         # Whether to trigger background learning after responses
         if enable_background_learning is None:
@@ -149,7 +155,13 @@ class ChatOrchestrator:
     # Public API
     # ------------------------------------------------------------------
 
-    def chat(self, message: str) -> dict[str, Any]:
+    def chat(
+        self,
+        message: str,
+        *,
+        session_id: str | None = None,
+        profile_context: str | None = None,
+    ) -> dict[str, Any]:
         """Process a user message and return a response.
 
         This is the primary entry point.  It routes the question, retrieves
@@ -158,6 +170,18 @@ class ChatOrchestrator:
 
         Args:
             message: The user's natural-language message.
+            session_id: Optional client-generated session id (Phase 20).
+                When provided and a ``session_service`` is configured,
+                pronoun references ("it", "this") are resolved against the
+                session's last-discussed product before retrieval, and the
+                turn's products/recommendations/comparisons/business
+                problem are recorded back into the session afterward.
+                ``None`` preserves exact prior stateless behaviour.
+            profile_context: Optional short natural-language description of
+                the authenticated customer (e.g. "ABC Bank — Financial
+                Services industry"), used only to bias business-intent
+                classification toward relevant products — never sent to
+                retrieval or shown in the answer.
 
         Returns:
             A dict with keys:
@@ -168,7 +192,7 @@ class ChatOrchestrator:
                     using the new pipeline).
         """
         if self._using_new_pipeline:
-            return self._chat_new_pipeline(message)
+            return self._chat_new_pipeline(message, session_id=session_id, profile_context=profile_context)
         return self._chat_legacy(message)
 
     def process_request(self, message: str) -> dict[str, Any]:
@@ -179,23 +203,32 @@ class ChatOrchestrator:
         """
         return self.chat(message)
 
-    def process_request_response(self, message: str) -> ChatResponse:
+    def process_request_response(
+        self,
+        message: str,
+        *,
+        session_id: str | None = None,
+        profile_context: str | None = None,
+    ) -> ChatResponse:
         """Process a request and return a Pydantic ``ChatResponse``.
 
         This method is used by the FastAPI route handler.
 
         Args:
             message: The user's natural-language message.
+            session_id: See :meth:`chat`.
+            profile_context: See :meth:`chat`.
 
         Returns:
             A :class:`~api.schemas.ChatResponse` instance.
         """
-        result = self.chat(message)
+        result = self.chat(message, session_id=session_id, profile_context=profile_context)
         next_actions = result.get("next_actions") or None
         return ChatResponse(
             answer=result["answer"],
             sources=result.get("sources", []),
             next_actions=next_actions,
+            session_id=result.get("session_id"),
         )
 
     # ------------------------------------------------------------------
@@ -221,8 +254,29 @@ class ChatOrchestrator:
     # New multi-source pipeline
     # ------------------------------------------------------------------
 
-    def _chat_new_pipeline(self, message: str) -> dict[str, Any]:
+    def _chat_new_pipeline(
+        self,
+        message: str,
+        *,
+        session_id: str | None = None,
+        profile_context: str | None = None,
+    ) -> dict[str, Any]:
         """Full multi-source pipeline with router, manager, merger, generator."""
+        # --- Step 0: Session wiring (Phase 20, optional) ---
+        # Resolve a bare pronoun ("it", "this") against the session's last
+        # discussed product *before* the single retrieval call below, so
+        # e.g. "How much does it cost?" retrieves against "SPIDIFY" directly
+        # rather than retrieving twice or not resolving at all.
+        if self._session_service is not None:
+            if session_id:
+                message = self._session_service.resolve_reference(session_id, message)
+            else:
+                session_id = self._session_service.new_session_id()
+
+        advisory_question = message
+        if profile_context:
+            advisory_question = f"{profile_context}. {message}"
+
         # --- Step 1: Route (SourceRouter) ---
         if self._source_router:
             decision = self._source_router.route(message)
@@ -256,7 +310,7 @@ class ChatOrchestrator:
         next_actions: list[dict[str, Any]] = []
 
         if self._advisory_layer is not None:
-            advisory = self._advisory_layer.build(message, evidence, product_match=match)
+            advisory = self._advisory_layer.build(advisory_question, evidence, product_match=match)
             if advisory.needs_clarification:
                 # Deterministic, zero-LLM-call short circuit — a clarifying
                 # question is never at risk of hallucinating since it's
@@ -266,6 +320,7 @@ class ChatOrchestrator:
                     "sources": [],
                     "citations": [],
                     "next_actions": [],
+                    "session_id": session_id,
                 }
             primary_product = advisory.primary_product
             complementary_products = advisory.complementary_products
@@ -273,6 +328,7 @@ class ChatOrchestrator:
                 {"label": a.label, "action_type": a.action_type, "target": a.target}
                 for a in advisory.next_actions
             ]
+            self._record_session_state(session_id, advisory)
         elif match is not None and getattr(match, "via_theme", False):
             # No advisory layer configured — exact Phase 17 behaviour.
             primary_product = match.primary
@@ -315,7 +371,28 @@ class ChatOrchestrator:
             "sources": sources,
             "citations": citations,
             "next_actions": next_actions,
+            "session_id": session_id,
         }
+
+    def _record_session_state(self, session_id: str | None, advisory: Any) -> None:
+        """Feed this turn's advisory outcome back into the session so the
+        *next* turn can resolve pronouns / stay aware of what's already
+        been discussed. Best-effort — never raises into the chat response.
+        """
+        if self._session_service is None or not session_id:
+            return
+        try:
+            intent = advisory.intent
+            if intent.products:
+                self._session_service.record_products(session_id, list(intent.products))
+            if advisory.primary_product:
+                self._session_service.record_recommendation(session_id, advisory.primary_product)
+            if len(intent.products) >= 2:
+                self._session_service.record_comparison(session_id, list(intent.products))
+            for category in intent.categories:
+                self._session_service.record_business_problem(session_id, category)
+        except Exception as exc:
+            logger.warning("ChatOrchestrator: session recording failed — %s.", exc)
 
     # ------------------------------------------------------------------
     # Background learning
@@ -457,6 +534,7 @@ _embedding_cache = TTLCache(ttl_seconds=3600.0, maxsize=1024)
 # handler and CLI.
 _context_merger = ContextMerger(ngram_threshold=0.75)
 _analytics_service = AnalyticsService()
+_session_service = SessionService()
 
 chat_orchestrator = ChatOrchestrator(
     source_router=SourceRouter(),
@@ -472,4 +550,5 @@ chat_orchestrator = ChatOrchestrator(
     context_merger=_context_merger,
     response_generator=ResponseGenerator(citation_validator=CitationValidator()),
     advisory_layer=AdvisoryResponseLayer(analytics=_analytics_service),
+    session_service=_session_service,
 )
