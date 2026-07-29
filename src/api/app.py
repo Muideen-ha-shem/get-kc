@@ -7,6 +7,8 @@ from .routes.auth import router as auth_router
 from .routes.chat import router as chat_router
 from .routes.conversations import router as conversations_router
 from .routes.demo_request import router as demo_request_router
+from .routes.feedback import router as feedback_router
+from .routes.notifications import router as notifications_router
 from .routes.profile import router as profile_router
 from .routes.saved_items import router as saved_items_router
 from .routes.solutions import router as solutions_router
@@ -36,6 +38,8 @@ app.include_router(profile_router)
 app.include_router(conversations_router)
 app.include_router(saved_items_router)
 app.include_router(appointments_router)
+app.include_router(feedback_router)
+app.include_router(notifications_router)
 
 
 @app.get("/health")

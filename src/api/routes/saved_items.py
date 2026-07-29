@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from ...services.auth.auth_service import AuthUser
+from ...services.notifications.notification_service import NotificationService
 from ...services.saved_items.saved_comparison_service import SavedComparisonService
 from ...services.saved_items.saved_recommendation_service import SavedRecommendationService
 from ..deps import get_current_access_token_required, get_current_user_required
@@ -15,6 +16,7 @@ router = APIRouter()
 
 _comparison_service = SavedComparisonService()
 _recommendation_service = SavedRecommendationService()
+_notification_service = NotificationService()
 
 
 @router.post("/saved-comparisons", response_model=SavedComparisonSchema)
@@ -56,6 +58,10 @@ def save_recommendation(
 ) -> SavedRecommendationSchema:
     row = _recommendation_service.save(
         user.id, request.products, request.question, request.recommendation, access_token=access_token
+    )
+    _notification_service.notify(
+        user.id, "saved_recommendation", "Recommendation saved",
+        ", ".join(request.products), access_token=access_token,
     )
     return SavedRecommendationSchema(
         id=row.id, products=row.products, question=row.question,

@@ -38,8 +38,10 @@ class ConversationService:
     ) -> ConversationRow | None:
         return self._repo.get_conversation(conversation_id, user_id, access_token=access_token)
 
-    def list_conversations(self, user_id: str, access_token: str | None = None) -> list[ConversationRow]:
-        return self._repo.list_conversations(user_id, access_token=access_token)
+    def list_conversations(
+        self, user_id: str, access_token: str | None = None, search: str | None = None
+    ) -> list[ConversationRow]:
+        return self._repo.list_conversations(user_id, access_token=access_token, search=search)
 
     def rename_conversation(
         self, conversation_id: str, user_id: str, title: str, access_token: str | None = None
