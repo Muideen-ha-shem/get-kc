@@ -91,17 +91,17 @@ class ConversationRepository:
         return ConversationRow.from_row(response.data[0])
 
     def list_conversations(
-        self, user_id: str, limit: int = 50, access_token: str | None = None
+        self, user_id: str, limit: int = 50, access_token: str | None = None, search: str | None = None
     ) -> list[ConversationRow]:
-        response = (
+        query = (
             self._client_for(access_token)
             .table(_CONVERSATIONS)
             .select("*")
             .eq("user_id", user_id)
-            .order("updated_at", desc=True)
-            .limit(limit)
-            .execute()
         )
+        if search:
+            query = query.ilike("title", f"%{search}%")
+        response = query.order("updated_at", desc=True).limit(limit).execute()
         return [ConversationRow.from_row(row) for row in response.data]
 
     def rename_conversation(

@@ -49,18 +49,32 @@
         "Request a demo"/"Contact sales"/"Talk to an expert" CTA in the
         frontend); returns 503 with a friendly message if the
         `demo_requests` table hasn't been created yet, rather than leaking
-        a raw database error
+        a raw database error. Phase 21: also fires a best-effort
+        notification when the requester happens to be signed in
       - `auth.py` — (Phase 20) `POST /auth/sign-up`, `/auth/sign-in`,
         `/auth/sign-out`, `/auth/password-reset`, `GET /auth/me`
       - `profile.py` — (Phase 20) `GET`/`PATCH /profile` (auth required)
-      - `conversations.py` — (Phase 20) `GET`/`POST /conversations`,
-        `GET`/`PATCH`/`DELETE /conversations/{id}` (auth required)
+      - `conversations.py` — (Phase 20) `GET /conversations` (Phase 21:
+        accepts `?search=` — an `ilike` filter on title), `POST
+        /conversations`, `GET`/`PATCH`/`DELETE /conversations/{id}` (auth
+        required)
       - `saved_items.py` — `GET`/`POST /saved-comparisons`,
         `DELETE /saved-comparisons/{id}`, `GET`/`POST /saved-recommendations`,
-        `DELETE /saved-recommendations/{id}` (auth required)
+        `DELETE /saved-recommendations/{id}` (auth required). Phase 21:
+        saving a recommendation also fires a best-effort notification to
+        its owner
       - `appointments.py` — `GET /appointments/availability` (public),
         `POST /appointments` (public — records `user_id` when the booker
-        happens to be signed in, but never requires it)
+        happens to be signed in, but never requires it; Phase 21: also
+        fires a best-effort notification when the booker is signed in)
+      - `feedback.py` — (Phase 21) `POST /chat/feedback` — 👍/👎 + optional
+        comment on a chat answer. Public, same precedent as
+        `demo_requests`/`appointments`; records `user_id` when the rater
+        happens to be signed in
+      - `notifications.py` — (Phase 21) `GET /notifications`,
+        `GET /notifications/unread-count`,
+        `POST /notifications/{id}/read`, `POST /notifications/read-all`
+        (auth required)
     - services/
       - `embeddings.py` — Gemini embedding calls
       - `generator.py` — Groq LLM generation
@@ -200,7 +214,9 @@
       - `conversation_repository.py` — `ConversationRepository`: raw
         Supabase access for `conversations`/`conversation_messages`, every
         query explicitly scoped by `user_id` (defense in depth regardless
-        of whether the configured key is anon+RLS or service-role)
+        of whether the configured key is anon+RLS or service-role).
+        `list_conversations` takes an optional `search` (Phase 21 — an
+        `ilike` filter on `title`, skipped entirely when not given)
       - `conversation_service.py` — `ConversationService`: conversation
         lifecycle (auto-titling from the first message, `record_turn` for
         persisting a user+assistant pair, ownership-checked reads)
@@ -229,6 +245,20 @@
         later. `book()` pre-checks for a clearer error message, but the
         table's `unique (appointment_date, time_slot)` constraint is the
         actual race guard — `SlotAlreadyBookedError` is raised either way
+    - feedback/ (Phase 21)
+      - `feedback_service.py` — `FeedbackService`: inserts into
+        `message_feedback`. Public — no RLS, no auth required, same
+        precedent as `demo_requests`/`appointments`
+    - notifications/ (Phase 21)
+      - `notification_service.py` — `NotificationService`: `notify`/
+        `list_for_user`/`unread_count`/`mark_read`/`mark_all_read` over
+        `notifications`. `notify()` is deliberately best-effort (logs and
+        returns `None` on failure) since every caller of it is triggering
+        a notification as a side effect of some other action (booking,
+        saving a recommendation, ...) that must never fail because of it.
+        Designed for future realtime support — every caller goes through
+        this one class, so swapping polling for a push subscription later
+        doesn't touch anything outside it
   - shared/
     - `logging.py`
     - `cache.py` — `TTLCache`, a generic thread-safe time-to-live cache
@@ -362,6 +392,12 @@
       constraint guards against double-booking). Run this yourself before
       using `/saved-comparisons`, `/saved-recommendations`, or
       `/appointments`.
+    - `006_feedback_notifications.sql` — **not executed by any script or by
+      Claude** (same no-DDL-access constraint). Additive-only: creates
+      `message_feedback` (no RLS — public, same precedent as
+      `demo_requests`) and `notifications` (RLS, same `auth.uid()` pattern
+      as 004/005). Run this yourself before using `/chat/feedback` or
+      `/notifications`.
 
 **Multi-solution ingestion order** (13 products: SPIDIFY, ZivaAIRA, and the
 11-product HAVIS-360 catalog — V-Login, STAAS, WeCare, Havis Xpend, Havis
@@ -414,8 +450,11 @@ addition to `src/solutions.ts`; no other file needs to change.
   - src/
     - `App.tsx` — main application: hero, solution catalog grid, chat
       widget (client-side typewriter reveal of `/chat` responses, sending a
-      persistent `session_id`, and a "Save Recommendation" button under any
-      message that names a recommended product), Support Center (real
+      persistent `session_id`; an animated three-dot loading state instead
+      of a second "thinking" bubble; each real Q&A turn gets `MessageActions`
+      — Copy/Regenerate/👍👎 — plus a "Save Recommendation" button when the
+      message names a recommended product; a header Export button downloads
+      the visible conversation as Markdown), Support Center (real
       `AppointmentScheduler`), and a Sign In / Dashboard header control
     - `solutions.ts` — the solution catalog data (single source of truth
       for the catalog grid, the compare view, and demo-request context)
@@ -426,13 +465,17 @@ addition to `src/solutions.ts`; no other file needs to change.
     - `vite-env.d.ts`
     - pages/
       - `DashboardPage.tsx` — authenticated Customer Dashboard, sticky
-        sidebar (profile avatar/name/email + nav always visible; only the
-        content area and, within the Conversations section, the
-        conversation list itself scroll independently): Recent
-        Conversations (resume/rename/delete), New Conversation, Profile,
-        Saved Recommendations (expand to read, remove), Saved Comparisons
-        (Open reopens `CompareSolutionsModal` preloaded via
-        `initialSelectedIds`, remove), and a Notifications placeholder
+        sidebar (profile avatar/name/email + nav + unread-notification bell
+        badge always visible; only the content area and, within the
+        Conversations section, the conversation list itself scroll
+        independently): Recent Conversations (debounced search-as-you-type
+        via `?search=`, resume/rename/delete, `MessageActions` + Export on
+        each turn), New Conversation, Profile, Saved Recommendations
+        (expand to read, remove), Saved Comparisons (Open reopens
+        `CompareSolutionsModal` preloaded via `initialSelectedIds`, remove),
+        and Notifications (real inbox — unread highlighted, mark
+        one/all read). Skeleton placeholders (not "Loading..." text) while
+        each section's first fetch is in flight
     - lib/
       - `detectProduct.ts`, `parseMessage.ts`, `useSolutions.ts`
       - `apiClient.ts` — (Phase 20) `API_BASE_URL`, stored-token helpers,
@@ -444,6 +487,10 @@ addition to `src/solutions.ts`; no other file needs to change.
       - `sessionId.ts` — (Phase 20) per-tab `session_id`
         (`crypto.randomUUID`, `sessionStorage`) sent with every `/chat`
         request so the backend can resolve pronouns/stay conversation-aware
+      - `exportConversation.ts` — (Phase 21) `messagesToMarkdown`/
+        `downloadMarkdown` — plain-text Markdown transcript generation and
+        a browser download trigger, shared by the floating widget's and
+        the Dashboard's Export buttons
     - components/
       - `HavisIQMark.tsx` — the brand mark (H monogram, broken crossbar,
         gold node). Colors are set inline, not via Tailwind utility
@@ -473,6 +520,20 @@ addition to `src/solutions.ts`; no other file needs to change.
           with a mode switch (same visual language as `DemoRequestModal`)
         - `ProtectedRoute.tsx` — redirects to `/` if `useAuth().user` is
           `null` once the initial `/auth/me` check resolves
+      - message/
+        - `MessageContent.tsx` — renders `parseMessage.ts`'s structured
+          blocks (headings, paragraphs, KPI stat chips, feature cards,
+          checklists, a numbered-step timeline, pricing cards, and
+          comparison tables — sticky header + row-hover as of Phase 21) as
+          premium components instead of raw Markdown; also renders the
+          product header card via `detectProduct.ts`
+        - `SourceChips.tsx` — clickable source/citation chips built from
+          the API response's `sources` array
+        - `MessageActions.tsx` — (Phase 21) Copy / optional Regenerate /
+          👍👎 feedback (thumbs-down reveals an optional comment field)
+          row, shared verbatim by the floating chat widget and the
+          Dashboard's conversation view — one `POST /chat/feedback` call
+          site, not two
 
 ## Tests
 - tests/
@@ -520,6 +581,18 @@ addition to `src/solutions.ts`; no other file needs to change.
   - `test_saved_items_appointments_routes.py` — `/saved-comparisons`,
     `/saved-recommendations` (auth required), and `/appointments` (public;
     booking still records `user_id` when the caller happens to be signed in)
+  - `test_feedback_service.py` (Phase 21) — `FeedbackService`: public
+    submission, optional context (user/session/conversation id), both
+    rating values
+  - `test_notification_service.py` (Phase 21) — `NotificationService`:
+    `notify`/`list_for_user`/`unread_count`/`mark_read`/`mark_all_read`,
+    the authenticated-client threading, and that a `notify()` failure
+    returns `None` instead of raising
+  - `test_feedback_notifications_routes.py` (Phase 21) — `/chat/feedback`
+    (public, records `user_id` when signed in), `/notifications/*` (auth
+    required), and the notification triggers wired into `/appointments`,
+    `/saved-recommendations`, and `/demo-request` (each fires only when the
+    caller is authenticated)
 
 ## Notes
 - The backend follows a layered structure: API, orchestrator, services,

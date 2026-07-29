@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   CircleHelp,
   Code2,
+  Download,
   GitCompare,
   Headphones,
   MessageCircleMore,
@@ -25,6 +26,7 @@ import { AuthModal } from './components/auth/AuthModal';
 import { AppointmentScheduler } from './components/AppointmentScheduler';
 import { MessageContent } from './components/message/MessageContent';
 import { SourceChips } from './components/message/SourceChips';
+import { MessageActions } from './components/message/MessageActions';
 import { detectProductHeader } from './lib/detectProduct';
 import { type Solution } from './solutions';
 import { useSolutions } from './lib/useSolutions';
@@ -32,6 +34,7 @@ import { groupForCategory, sortGroups } from './productCatalogCopy';
 import { useAuth } from './lib/authContext';
 import { apiFetch } from './lib/apiClient';
 import { getSessionId } from './lib/sessionId';
+import { downloadMarkdown, messagesToMarkdown } from './lib/exportConversation';
 
 type NextAction = { label: string; action_type: string; target: string | null };
 
@@ -280,20 +283,9 @@ function App() {
     setInput(prompt);
   };
 
-  const handleSubmit = async (event: FormEvent) => {
-    event.preventDefault();
-    const trimmed = input.trim();
-    if (!trimmed || isTyping) return;
-
-    const userMessage: Message = { id: Date.now(), sender: 'user', content: trimmed };
-    const assistantMessageId = Date.now() + 1;
+  const streamAssistantReply = async (question: string, assistantMessageId: number) => {
     activeAssistantIdRef.current = assistantMessageId;
-
-    setMessages((prev) => [...prev, userMessage]);
-    setInput('');
-    setIsAssistantOpen(true);
     setIsTyping(true);
-    setMessages((prev) => [...prev, { id: assistantMessageId, sender: 'assistant', content: '', isTyping: true }]);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -301,7 +293,7 @@ function App() {
     try {
       const response = await apiFetch('/chat', {
         method: 'POST',
-        body: JSON.stringify({ message: trimmed, session_id: getSessionId() }),
+        body: JSON.stringify({ message: question, session_id: getSessionId() }),
         signal: controller.signal,
       });
 
@@ -329,7 +321,7 @@ function App() {
           setMessages((prev) =>
             prev.map((message) =>
               message.id === assistantMessageId
-                ? { ...message, isTyping: false, sources, question: trimmed, nextActions }
+                ? { ...message, isTyping: false, sources, question, nextActions, savedRecommendation: false }
                 : message
             )
           );
@@ -352,6 +344,30 @@ function App() {
       abortControllerRef.current = null;
       activeAssistantIdRef.current = null;
     }
+  };
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    const trimmed = input.trim();
+    if (!trimmed || isTyping) return;
+
+    const userMessage: Message = { id: Date.now(), sender: 'user', content: trimmed };
+    const assistantMessageId = Date.now() + 1;
+
+    setMessages((prev) => [...prev, userMessage]);
+    setInput('');
+    setIsAssistantOpen(true);
+    setMessages((prev) => [...prev, { id: assistantMessageId, sender: 'assistant', content: '', isTyping: true }]);
+
+    await streamAssistantReply(trimmed, assistantMessageId);
+  };
+
+  const handleRegenerate = async (message: Message) => {
+    if (isTyping || !message.question) return;
+    setMessages((prev) =>
+      prev.map((m) => (m.id === message.id ? { ...m, content: '', isTyping: true, sources: undefined } : m))
+    );
+    await streamAssistantReply(message.question, message.id);
   };
 
   const handleStopGenerating = () => {
@@ -405,6 +421,15 @@ function App() {
     } catch {
       // Non-critical enrichment — a failed save just leaves the button clickable again.
     }
+  };
+
+  const handleExportConversation = () => {
+    const exportable = messages
+      .filter((m) => !m.isTyping)
+      .map((m) => ({ role: m.sender, content: m.content, sources: m.sources }));
+    if (exportable.length === 0) return;
+    const markdown = messagesToMarkdown('HavisIQ Conversation', exportable);
+    downloadMarkdown(`havisiq-conversation-${new Date().toISOString().slice(0, 10)}.md`, markdown);
   };
 
   const quickActions = [
@@ -1028,9 +1053,22 @@ function App() {
                   ×
                 </button>
               </div>
-              <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-300">
-                <CheckCircle2 size={12} />
-                Secure & Live
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <div className="inline-flex items-center gap-2 rounded-full border border-emerald-400/30 bg-emerald-500/15 px-3 py-1 text-xs font-medium text-emerald-300">
+                  <CheckCircle2 size={12} />
+                  Secure & Live
+                </div>
+                {messages.some((m) => m.sender === 'assistant' && !m.isTyping) ? (
+                  <button
+                    type="button"
+                    onClick={handleExportConversation}
+                    className="flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1 text-xs font-medium text-paper/80 transition hover:bg-white/10 hover:text-paper"
+                    aria-label="Export conversation as Markdown"
+                  >
+                    <Download size={12} />
+                    Export
+                  </button>
+                ) : null}
               </div>
             </div>
 
@@ -1058,28 +1096,40 @@ function App() {
                       {message.sender === 'assistant' && !message.isTyping && message.sources && message.sources.length > 0 ? (
                         <SourceChips sources={message.sources} />
                       ) : null}
-                      {message.sender === 'assistant' && !message.isTyping && user && recommendedProductsFor(message).length > 0 ? (
-                        <button
-                          type="button"
-                          onClick={() => handleSaveRecommendation(message)}
-                          disabled={message.savedRecommendation}
-                          className={`mt-2 flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                            message.savedRecommendation
-                              ? 'cursor-default border-emerald-300 bg-emerald-50 text-emerald-700'
-                              : 'border-ink/10 text-ink/60 hover:border-gold-400 hover:text-gold-700'
-                          }`}
-                        >
-                          <Star size={12} className={message.savedRecommendation ? 'fill-current' : ''} />
-                          {message.savedRecommendation ? 'Saved' : 'Save Recommendation'}
-                        </button>
+                      {message.sender === 'assistant' && !message.isTyping && message.question ? (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <MessageActions
+                            question={message.question}
+                            answer={message.content}
+                            sessionId={getSessionId()}
+                            onRegenerate={() => handleRegenerate(message)}
+                          />
+                          {user && recommendedProductsFor(message).length > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => handleSaveRecommendation(message)}
+                              disabled={message.savedRecommendation}
+                              className={`mt-2 flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                                message.savedRecommendation
+                                  ? 'cursor-default border-emerald-300 bg-emerald-50 text-emerald-700'
+                                  : 'border-ink/10 text-ink/60 hover:border-gold-400 hover:text-gold-700'
+                              }`}
+                            >
+                              <Star size={12} className={message.savedRecommendation ? 'fill-current' : ''} />
+                              {message.savedRecommendation ? 'Saved' : 'Save Recommendation'}
+                            </button>
+                          ) : null}
+                        </div>
                       ) : null}
                     </div>
                   </div>
                 ))}
-                {isTyping ? (
+                {isTyping && !messages.some((m) => m.sender === 'assistant' && m.isTyping && m.content) ? (
                   <div className="flex justify-start">
-                    <div className="rounded-2xl bg-white px-3 py-2 text-sm text-ink/70 shadow-sm ring-1 ring-ink/10">
-                      HavisIQ is thinking...
+                    <div className="flex items-center gap-1.5 rounded-2xl bg-white px-4 py-3 shadow-sm ring-1 ring-ink/10">
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink/40 [animation-delay:-0.3s]" />
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink/40 [animation-delay:-0.15s]" />
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink/40" />
                     </div>
                   </div>
                 ) : null}

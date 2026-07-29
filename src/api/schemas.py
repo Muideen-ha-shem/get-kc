@@ -227,3 +227,34 @@ class AppointmentSchema(BaseModel):
     name: str
     email: str
     status: str
+
+
+class SubmitFeedbackRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=2000)
+    answer: str = Field(..., min_length=1, max_length=8000)
+    rating: str = Field(..., pattern="^(helpful|not_helpful)$")
+    comment: str | None = Field(None, max_length=2000)
+    session_id: str | None = None
+    conversation_id: str | None = None
+
+
+class FeedbackSchema(BaseModel):
+    id: str
+    question: str
+    answer: str
+    rating: str
+    comment: str | None = None
+    created_at: str | None = None
+
+
+class NotificationSchema(BaseModel):
+    id: str
+    type: str
+    title: str
+    body: str | None = None
+    is_read: bool
+    created_at: str | None = None
+
+
+class UnreadCountSchema(BaseModel):
+    count: int

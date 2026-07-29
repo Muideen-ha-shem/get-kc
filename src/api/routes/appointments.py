@@ -6,12 +6,14 @@ from ...services.appointments.appointment_service import (
     SlotAlreadyBookedError,
 )
 from ...services.auth.auth_service import AuthUser
-from ..deps import get_current_user_optional
+from ...services.notifications.notification_service import NotificationService
+from ..deps import get_current_access_token, get_current_user_optional
 from ..schemas import AppointmentSchema, AppointmentSlotSchema, BookAppointmentRequest, DailyAvailabilitySchema
 
 router = APIRouter()
 
 _appointment_service = AppointmentService()
+_notification_service = NotificationService()
 
 
 @router.get("/appointments/availability", response_model=list[DailyAvailabilitySchema])
@@ -31,7 +33,9 @@ def get_availability(days: int = 4) -> list[DailyAvailabilitySchema]:
 
 @router.post("/appointments", response_model=AppointmentSchema)
 def book_appointment(
-    request: BookAppointmentRequest, user: AuthUser | None = Depends(get_current_user_optional)
+    request: BookAppointmentRequest,
+    user: AuthUser | None = Depends(get_current_user_optional),
+    access_token: str | None = Depends(get_current_access_token),
 ) -> AppointmentSchema:
     try:
         appointment = _appointment_service.book(
@@ -42,6 +46,14 @@ def book_appointment(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except InvalidSlotError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if user is not None:
+        _notification_service.notify(
+            user.id, "appointment", "Appointment confirmed",
+            f"{appointment.appointment_date} at {appointment.time_slot}",
+            access_token=access_token,
+        )
+
     return AppointmentSchema(
         id=appointment.id, date=appointment.appointment_date, time=appointment.time_slot,
         name=appointment.name, email=appointment.email, status=appointment.status,

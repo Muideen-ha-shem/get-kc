@@ -22,10 +22,12 @@ def _to_summary(row) -> ConversationSummary:
 
 @router.get("", response_model=list[ConversationSummary])
 def list_conversations(
+    search: str | None = None,
     user: AuthUser = Depends(get_current_user_required),
     access_token: str = Depends(get_current_access_token_required),
 ) -> list[ConversationSummary]:
-    return [_to_summary(row) for row in _conversation_service.list_conversations(user.id, access_token=access_token)]
+    rows = _conversation_service.list_conversations(user.id, access_token=access_token, search=search)
+    return [_to_summary(row) for row in rows]
 
 
 @router.post("", response_model=ConversationSummary)
