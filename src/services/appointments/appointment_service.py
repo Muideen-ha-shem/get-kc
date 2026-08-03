@@ -82,6 +82,25 @@ class AppointmentService:
     def __init__(self, client: Client | None = None) -> None:
         self._client = client or get_client()
 
+    def list_for_user(self, user_id: str) -> list[Appointment]:
+        """Phase 25: used by the Customer Timeline aggregation. Public
+        feature, no RLS on this table (see class docstring) — scoped by
+        the app-layer `user_id` filter, same as every other query here."""
+        response = (
+            self._client.table(_TABLE)
+            .select("*")
+            .eq("user_id", user_id)
+            .order("appointment_date", desc=True)
+            .execute()
+        )
+        return [
+            Appointment(
+                id=row["id"], appointment_date=row["appointment_date"], time_slot=row["time_slot"],
+                name=row["name"], email=row["email"], status=row["status"], created_at=row.get("created_at"),
+            )
+            for row in response.data
+        ]
+
     def get_availability(self, days: int = 4, workspace_id: str | None = None) -> list[DailyAvailability]:
         candidate_dates = [date.today() + timedelta(days=offset) for offset in range(days)]
         start, end = candidate_dates[0].isoformat(), candidate_dates[-1].isoformat()

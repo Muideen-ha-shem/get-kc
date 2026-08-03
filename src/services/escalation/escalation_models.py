@@ -39,3 +39,17 @@ class EscalationMessage:
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "EscalationMessage":
         return cls(**{field: row.get(field) for field in cls.__dataclass_fields__})
+
+
+@dataclass(frozen=True)
+class EscalationNote:
+    id: str
+    escalation_id: str
+    workspace_id: str
+    author_agent_id: str | None
+    content: str
+    created_at: str | None = None
+
+    @classmethod
+    def from_row(cls, row: dict[str, Any]) -> "EscalationNote":
+        return cls(**{field: row.get(field) for field in cls.__dataclass_fields__})

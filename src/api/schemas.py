@@ -15,6 +15,12 @@ class ChatRequest(BaseModel):
         None, description="An existing conversation (Phase 20, authenticated users "
         "only) to persist this turn into. Ignored for anonymous requests."
     )
+    handoff_context: str | None = Field(
+        None, description="Phase 25: an optional recap from a just-resolved human "
+        "escalation (returned by POST /agent/escalations/{id}/rejoin-ai), prepended "
+        "to the question exactly like profile_context — lets the AI resume without "
+        "the customer repeating themselves. Omit for the exact prior behaviour."
+    )
 
 
 class NextActionSchema(BaseModel):
@@ -324,14 +330,27 @@ class EscalationMessageSchema(BaseModel):
     created_at: str | None = None
 
 
+class EscalationNoteSchema(BaseModel):
+    id: str
+    author_agent_id: str | None = None
+    content: str
+    created_at: str | None = None
+
+
 class EscalationSchema(BaseModel):
     id: str
     workspace_id: str
     conversation_id: str | None = None
     status: str
     assigned_agent_id: str | None = None
+    assigned_agent_name: str | None = Field(
+        None, description="Phase 25: populated by the route from the assigned agent's "
+        "name — lets the AI-to-human handoff message read '<name> from <department> "
+        "has been assigned' without a second lookup on the client."
+    )
     trigger_reason: str
     department: str | None = None
+    ai_engaged: bool = True
     summary: EscalationSummarySchema | None = None
     created_at: str | None = None
     assigned_at: str | None = None
@@ -339,6 +358,10 @@ class EscalationSchema(BaseModel):
     closed_at: str | None = None
     messages: list[EscalationMessageSchema] | None = Field(
         None, description="Only populated by the escalation detail endpoint."
+    )
+    notes: list[EscalationNoteSchema] | None = Field(
+        None, description="Only populated by the escalation detail endpoint. "
+        "Never returned to any customer-facing endpoint."
     )
 
 
@@ -353,3 +376,40 @@ class EscalationActionRequest(BaseModel):
 
 class EscalationMessageCreateRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=5000)
+
+
+class EscalationNoteCreateRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=5000)
+
+
+class CopilotSuggestReplyRequest(BaseModel):
+    question: str = Field(..., min_length=1)
+
+
+class CopilotSuggestReplySchema(BaseModel):
+    draft: str
+    citations: list[dict]
+
+
+class RejoinAiResponseSchema(BaseModel):
+    escalation: EscalationSchema
+    handoff_recap: str
+
+
+class CustomerTimelineSchema(BaseModel):
+    profile: dict | None = None
+    conversations: list[ConversationSummary] = Field(default_factory=list)
+    saved_recommendations: list[SavedRecommendationSchema] = Field(default_factory=list)
+    saved_comparisons: list[SavedComparisonSchema] = Field(default_factory=list)
+    appointments: list[AppointmentSchema] = Field(default_factory=list)
+    past_escalations: list[EscalationSchema] = Field(default_factory=list)
+    demo_requests: list[dict] = Field(default_factory=list)
+    demo_requests_note: str
+
+
+class AgentDashboardStatsSchema(BaseModel):
+    status: str
+    department: str
+    current_workload: int
+    resolved_today: int
+    average_resolution_minutes: float | None = None

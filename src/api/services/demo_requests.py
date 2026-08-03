@@ -67,3 +67,21 @@ def submit_demo_request(
 
     rows = response.data or []
     return rows[0] if rows else payload
+
+
+def list_by_email(email: str) -> list[dict[str, Any]]:
+    """Phase 25: best-effort match for the Customer Timeline aggregation.
+
+    ``demo_requests`` has no ``user_id``/``workspace_id`` column (it's
+    anonymous-only, see the table schema) — matched by email only, which
+    is approximate, not a guaranteed link back to a specific customer.
+    """
+    sb_client = get_client()
+    try:
+        response = sb_client.table("demo_requests").select("*").eq("email", email).execute()
+    except Exception as exc:
+        message = str(exc)
+        if "Could not find the table" in message or "PGRST205" in message:
+            return []
+        raise
+    return response.data or []

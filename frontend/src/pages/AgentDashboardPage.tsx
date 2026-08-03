@@ -32,23 +32,56 @@ type EscalationMessage = {
   created_at: string | null;
 };
 
+type EscalationNote = {
+  id: string;
+  author_agent_id: string | null;
+  content: string;
+  created_at: string | null;
+};
+
+type EscalationStatus = 'waiting' | 'assigned' | 'active' | 'waiting_for_customer' | 'resolved' | 'closed';
+
+const STATUS_LABELS: Record<EscalationStatus, string> = {
+  waiting: 'New',
+  assigned: 'Assigned',
+  active: 'In Progress',
+  waiting_for_customer: 'Waiting for Customer',
+  resolved: 'Resolved',
+  closed: 'Closed',
+};
+
 type Escalation = {
   id: string;
-  status: 'waiting' | 'assigned' | 'active' | 'resolved' | 'closed';
+  status: EscalationStatus;
   trigger_reason: string;
+  department: string | null;
+  assigned_agent_name: string | null;
   summary: EscalationSummary | null;
   messages?: EscalationMessage[] | null;
+  notes?: EscalationNote[] | null;
+};
+
+type DashboardStats = {
+  status: AgentStatus;
+  department: string;
+  current_workload: number;
+  resolved_today: number;
+  average_resolution_minutes: number | null;
 };
 
 const POLL_INTERVAL_MS = 5000;
+const OPEN_CONVERSATION_POLL_INTERVAL_MS = 2500;
 
 export function AgentDashboardPage() {
   const [agent, setAgent] = useState<SupportAgent | null>(null);
   const [notAnAgent, setNotAnAgent] = useState(false);
+  const [stats, setStats] = useState<DashboardStats | null>(null);
   const [queue, setQueue] = useState<Escalation[]>([]);
   const [myConversations, setMyConversations] = useState<Escalation[]>([]);
   const [openEscalation, setOpenEscalation] = useState<Escalation | null>(null);
   const [messageInput, setMessageInput] = useState('');
+  const [noteInput, setNoteInput] = useState('');
+  const [copilotDraft, setCopilotDraft] = useState<string | null>(null);
 
   useEffect(() => {
     apiJson<SupportAgent>('/agents/me')
@@ -62,6 +95,7 @@ export function AgentDashboardPage() {
     const poll = () => {
       apiJson<Escalation[]>('/agent/queue').then(setQueue).catch(() => {});
       apiJson<Escalation[]>('/agent/conversations').then(setMyConversations).catch(() => {});
+      apiJson<DashboardStats>('/agent/dashboard/stats').then(setStats).catch(() => {});
       if (openEscalation) {
         apiJson<Escalation>(`/agent/escalations/${openEscalation.id}`)
           .then(setOpenEscalation)
@@ -70,7 +104,7 @@ export function AgentDashboardPage() {
     };
 
     poll();
-    const interval = setInterval(poll, POLL_INTERVAL_MS);
+    const interval = setInterval(poll, openEscalation ? OPEN_CONVERSATION_POLL_INTERVAL_MS : POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [agent, openEscalation?.id]);
 
@@ -93,6 +127,18 @@ export function AgentDashboardPage() {
     setOpenEscalation(null);
   }
 
+  async function markWaitingForCustomer(escalationId: string) {
+    const updated = await apiJson<Escalation>(`/agent/escalations/${escalationId}/wait-for-customer`, {
+      method: 'POST',
+    });
+    setOpenEscalation(updated);
+  }
+
+  async function rejoinAi(escalationId: string) {
+    await apiJson(`/agent/escalations/${escalationId}/rejoin-ai`, { method: 'POST' });
+    setOpenEscalation(null);
+  }
+
   async function sendMessage(event: FormEvent) {
     event.preventDefault();
     if (!openEscalation || !messageInput.trim()) return;
@@ -101,8 +147,31 @@ export function AgentDashboardPage() {
       body: JSON.stringify({ content: messageInput }),
     });
     setMessageInput('');
+    setCopilotDraft(null);
     const detail = await apiJson<Escalation>(`/agent/escalations/${openEscalation.id}`);
     setOpenEscalation(detail);
+  }
+
+  async function addNote(event: FormEvent) {
+    event.preventDefault();
+    if (!openEscalation || !noteInput.trim()) return;
+    await apiJson(`/agent/escalations/${openEscalation.id}/notes`, {
+      method: 'POST',
+      body: JSON.stringify({ content: noteInput }),
+    });
+    setNoteInput('');
+    const detail = await apiJson<Escalation>(`/agent/escalations/${openEscalation.id}`);
+    setOpenEscalation(detail);
+  }
+
+  async function requestCopilotDraft() {
+    if (!openEscalation) return;
+    const question = openEscalation.summary?.problem ?? '';
+    const result = await apiJson<{ draft: string }>(
+      `/agent/escalations/${openEscalation.id}/copilot/suggest-reply`,
+      { method: 'POST', body: JSON.stringify({ question }) },
+    );
+    setCopilotDraft(result.draft);
   }
 
   if (notAnAgent) {
@@ -130,7 +199,7 @@ export function AgentDashboardPage() {
           <span className="font-semibold">Agent Dashboard</span>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-500">{agent.name}</span>
+          <span className="text-sm text-gray-500">{agent.name} · {agent.department}</span>
           <select
             value={agent.status}
             onChange={(e) => setStatus(e.target.value as AgentStatus)}
@@ -143,14 +212,27 @@ export function AgentDashboardPage() {
         </div>
       </header>
 
+      {stats && (
+        <div className="flex gap-6 px-6 py-3 border-b bg-white text-sm text-gray-600">
+          <span>Workload: <strong className="text-gray-900">{stats.current_workload}</strong></span>
+          <span>Resolved today: <strong className="text-gray-900">{stats.resolved_today}</strong></span>
+          <span>
+            Avg. resolution:{' '}
+            <strong className="text-gray-900">
+              {stats.average_resolution_minutes != null ? `${Math.round(stats.average_resolution_minutes)}m` : '—'}
+            </strong>
+          </span>
+        </div>
+      )}
+
       <div className="flex flex-1 overflow-hidden">
         <aside className="w-80 border-r bg-white overflow-y-auto">
           <section className="p-4">
-            <h2 className="text-sm font-semibold text-gray-500 uppercase mb-2">Waiting Queue</h2>
+            <h2 className="text-sm font-semibold text-gray-500 uppercase mb-2">My Queue</h2>
             {queue.length === 0 && <p className="text-sm text-gray-400">Nothing waiting.</p>}
             {queue.map((escalation) => (
               <div key={escalation.id} className="border rounded p-3 mb-2">
-                <p className="text-sm font-medium">{escalation.trigger_reason}</p>
+                <p className="text-sm font-medium">{escalation.trigger_reason} · {escalation.department}</p>
                 <p className="text-xs text-gray-500">{escalation.summary?.problem}</p>
                 <button
                   onClick={() => acceptEscalation(escalation.id)}
@@ -162,7 +244,7 @@ export function AgentDashboardPage() {
             ))}
           </section>
           <section className="p-4 border-t">
-            <h2 className="text-sm font-semibold text-gray-500 uppercase mb-2">My Conversations</h2>
+            <h2 className="text-sm font-semibold text-gray-500 uppercase mb-2">Active Chats</h2>
             {myConversations.length === 0 && <p className="text-sm text-gray-400">None yet.</p>}
             {myConversations.map((escalation) => (
               <button
@@ -170,7 +252,7 @@ export function AgentDashboardPage() {
                 onClick={() => setOpenEscalation(escalation)}
                 className="w-full text-left border rounded p-3 mb-2 hover:bg-gray-50"
               >
-                <p className="text-sm font-medium">{escalation.status}</p>
+                <p className="text-sm font-medium">{STATUS_LABELS[escalation.status]}</p>
                 <p className="text-xs text-gray-500">{escalation.summary?.problem}</p>
               </button>
             ))}
@@ -183,7 +265,35 @@ export function AgentDashboardPage() {
           ) : (
             <div className="flex flex-col h-full">
               <div className="bg-white border rounded p-4 mb-4">
-                <h2 className="font-semibold mb-2">Summary</h2>
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="font-semibold">Summary — {STATUS_LABELS[openEscalation.status]}</h2>
+                  <div className="flex gap-2">
+                    {openEscalation.status === 'active' && (
+                      <button
+                        onClick={() => markWaitingForCustomer(openEscalation.id)}
+                        className="text-xs bg-gray-200 rounded px-2 py-1"
+                      >
+                        Waiting on Customer
+                      </button>
+                    )}
+                    {openEscalation.status !== 'resolved' && openEscalation.status !== 'closed' && (
+                      <>
+                        <button
+                          onClick={() => resolveEscalation(openEscalation.id)}
+                          className="text-xs bg-green-600 text-white rounded px-2 py-1"
+                        >
+                          Resolve
+                        </button>
+                        <button
+                          onClick={() => rejoinAi(openEscalation.id)}
+                          className="text-xs bg-purple-600 text-white rounded px-2 py-1"
+                        >
+                          Hand back to AI
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
                 {openEscalation.summary && (
                   <dl className="text-sm grid grid-cols-2 gap-2">
                     <dt className="text-gray-500">Customer</dt>
@@ -198,14 +308,22 @@ export function AgentDashboardPage() {
                     <dd>{openEscalation.summary.problem}</dd>
                   </dl>
                 )}
-                {openEscalation.status !== 'resolved' && openEscalation.status !== 'closed' && (
-                  <button
-                    onClick={() => resolveEscalation(openEscalation.id)}
-                    className="mt-3 text-xs bg-green-600 text-white rounded px-2 py-1"
-                  >
-                    Resolve
-                  </button>
-                )}
+              </div>
+
+              <div className="bg-white border rounded p-3 mb-4">
+                <h3 className="text-sm font-semibold text-gray-500 uppercase mb-2">Internal Notes</h3>
+                {(openEscalation.notes ?? []).map((note) => (
+                  <p key={note.id} className="text-xs text-gray-600 mb-1">{note.content}</p>
+                ))}
+                <form onSubmit={addNote} className="flex gap-2 mt-2">
+                  <input
+                    value={noteInput}
+                    onChange={(e) => setNoteInput(e.target.value)}
+                    className="flex-1 border rounded px-2 py-1 text-xs"
+                    placeholder="Add an internal note (not visible to the customer)…"
+                  />
+                  <button type="submit" className="text-xs bg-gray-200 rounded px-2 py-1">Add</button>
+                </form>
               </div>
 
               <div className="flex-1 bg-white border rounded p-4 overflow-y-auto mb-4">
@@ -216,7 +334,27 @@ export function AgentDashboardPage() {
                 ))}
               </div>
 
+              {copilotDraft && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded p-3 mb-3 text-sm">
+                  <p className="text-xs font-semibold text-yellow-700 mb-1">Suggested reply (review before sending)</p>
+                  <p className="mb-2">{copilotDraft}</p>
+                  <button
+                    onClick={() => setMessageInput(copilotDraft)}
+                    className="text-xs bg-yellow-600 text-white rounded px-2 py-1"
+                  >
+                    Use as draft
+                  </button>
+                </div>
+              )}
+
               <form onSubmit={sendMessage} className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={requestCopilotDraft}
+                  className="text-xs bg-gray-200 rounded px-3 py-2"
+                >
+                  Ask Copilot
+                </button>
                 <input
                   value={messageInput}
                   onChange={(e) => setMessageInput(e.target.value)}

@@ -37,6 +37,12 @@ class AgentRepository:
             return None
         return SupportAgent.from_row(response.data[0])
 
+    def get_by_id(self, agent_id: str) -> SupportAgent | None:
+        response = self._client.table(_TABLE).select("*").eq("id", agent_id).limit(1).execute()
+        if not response.data:
+            return None
+        return SupportAgent.from_row(response.data[0])
+
     def get_or_create(
         self,
         auth_user_id: str,

@@ -18,9 +18,11 @@ from ..advisory.advisory_layer import AdvisoryResult
 from ..agents.agent_service import AgentService
 from ..notifications.notification_service import NotificationService
 from .decision import decide_escalation
+from .department_routing import determine_department
 from .escalation_models import Escalation
 from .escalation_repository import EscalationRepository
-from .intent import detect_sentiment_hint
+from .intent import detect_critical_intent, detect_sentiment_hint
+from .routing import select_best_agent
 from .summary import build_summary
 
 logger: logging.Logger = get_logger(__name__)
@@ -107,9 +109,24 @@ class EscalationService:
             question=question,
             sentiment=sentiment,
         )
-        escalation = self._repository.create(workspace_id, conversation_id, trigger_reason, None, summary)
+        critical_category = detect_critical_intent(question)
+        department = determine_department(critical_category=critical_category, question=question)
+        escalation = self._repository.create(workspace_id, conversation_id, trigger_reason, department, summary)
 
         available_agents = self._agent_service.list_available(workspace_id)
+
+        # --- Auto-assignment (Phase 25): best available agent, not "first
+        # available." Workload+idle-time ordering, soft department
+        # preference. Falls back to leaving the escalation `waiting` (the
+        # Phase 24 queue, still claimable via /agent/accept) when no agent
+        # is available at all.
+        workloads = {
+            agent.id: self._repository.count_active_for_agent(agent.id) for agent in available_agents
+        }
+        best_agent = select_best_agent(available_agents, workloads, department=department)
+        if best_agent is not None:
+            escalation = self._repository.assign(escalation.id, best_agent.id)
+
         for agent in available_agents:
             self._notification_service.notify(
                 agent.auth_user_id,
@@ -119,9 +136,12 @@ class EscalationService:
                 workspace_id=workspace_id,
             )
         logger.info(
-            "EscalationService: escalation %s created (reason=%s), notified %d available agent(s).",
+            "EscalationService: escalation %s created (reason=%s, department=%s), "
+            "assigned=%s, notified %d available agent(s).",
             escalation.id,
             trigger_reason,
+            department,
+            best_agent.id if best_agent else None,
             len(available_agents),
         )
         return escalation
