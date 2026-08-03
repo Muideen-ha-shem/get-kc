@@ -130,3 +130,21 @@ class TestBookAppointment:
 
         with pytest.raises(APIError):
             service.book("2026-08-01", "09:00", "Ada", "ada@example.com")
+
+
+class TestListForUser:
+    """Phase 25 — used by the Customer Timeline aggregation."""
+
+    def test_returns_appointments_ordered_newest_first(self):
+        client = MagicMock()
+        client.table.return_value.select.return_value.eq.return_value.order.return_value.execute.return_value.data = [
+            {"id": "a1", "appointment_date": "2026-08-01", "time_slot": "09:00",
+             "name": "Ada", "email": "ada@example.com", "status": "confirmed", "created_at": None}
+        ]
+        service = AppointmentService(client=client)
+
+        appointments = service.list_for_user("u1")
+
+        assert len(appointments) == 1
+        assert appointments[0].id == "a1"
+        client.table.return_value.select.return_value.eq.assert_called_once_with("user_id", "u1")

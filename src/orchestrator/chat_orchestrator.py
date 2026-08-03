@@ -163,6 +163,7 @@ class ChatOrchestrator:
         session_id: str | None = None,
         profile_context: str | None = None,
         workspace_id: str | None = None,
+        handoff_context: str | None = None,
     ) -> dict[str, Any]:
         """Process a user message and return a response.
 
@@ -195,7 +196,11 @@ class ChatOrchestrator:
         """
         if self._using_new_pipeline:
             return self._chat_new_pipeline(
-                message, session_id=session_id, profile_context=profile_context, workspace_id=workspace_id
+                message,
+                session_id=session_id,
+                profile_context=profile_context,
+                workspace_id=workspace_id,
+                handoff_context=handoff_context,
             )
         return self._chat_legacy(message)
 
@@ -214,6 +219,7 @@ class ChatOrchestrator:
         session_id: str | None = None,
         profile_context: str | None = None,
         workspace_id: str | None = None,
+        handoff_context: str | None = None,
     ) -> ChatResponse:
         """Process a request and return a Pydantic ``ChatResponse``.
 
@@ -223,12 +229,17 @@ class ChatOrchestrator:
             message: The user's natural-language message.
             session_id: See :meth:`chat`.
             profile_context: See :meth:`chat`.
+            handoff_context: See :meth:`chat`.
 
         Returns:
             A :class:`~api.schemas.ChatResponse` instance.
         """
         result = self.chat(
-            message, session_id=session_id, profile_context=profile_context, workspace_id=workspace_id
+            message,
+            session_id=session_id,
+            profile_context=profile_context,
+            workspace_id=workspace_id,
+            handoff_context=handoff_context,
         )
         next_actions = result.get("next_actions") or None
         return ChatResponse(
@@ -270,6 +281,7 @@ class ChatOrchestrator:
         session_id: str | None = None,
         profile_context: str | None = None,
         workspace_id: str | None = None,
+        handoff_context: str | None = None,
     ) -> dict[str, Any]:
         """Full multi-source pipeline with router, manager, merger, generator."""
         # --- Step 0: Session wiring (Phase 20, optional) ---
@@ -286,6 +298,13 @@ class ChatOrchestrator:
         advisory_question = message
         if profile_context:
             advisory_question = f"{profile_context}. {message}"
+        # Phase 25: an optional recap from a just-resolved human escalation
+        # (see ChatRequest.handoff_context), prepended the same way — lets
+        # the AI resume without the customer repeating themselves. No
+        # Business Advisor logic changes; this only widens what text
+        # reaches it, exactly like profile_context already does.
+        if handoff_context:
+            advisory_question = f"{handoff_context}. {advisory_question}"
 
         # --- Step 1: Route (SourceRouter) ---
         if self._source_router:

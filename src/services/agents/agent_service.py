@@ -13,6 +13,9 @@ class AgentService:
     def get_by_auth_user_id(self, auth_user_id: str, workspace_id: str) -> SupportAgent | None:
         return self._repo.get_by_auth_user_id(auth_user_id, workspace_id)
 
+    def get_by_id(self, agent_id: str) -> SupportAgent | None:
+        return self._repo.get_by_id(agent_id)
+
     def get_or_create(
         self, auth_user_id: str, email: str, name: str, workspace_id: str, department: str = "General"
     ) -> SupportAgent:

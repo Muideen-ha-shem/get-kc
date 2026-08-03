@@ -13,12 +13,14 @@ from supabase import Client
 
 from ...sb import get_client
 from ...shared.logging import get_logger
-from .escalation_models import Escalation, EscalationMessage
+from .escalation_models import Escalation, EscalationMessage, EscalationNote
 
 logger: logging.Logger = get_logger(__name__)
 
 _ESCALATIONS = "escalations"
 _MESSAGES = "escalation_messages"
+_NOTES = "escalation_notes"
+_ACTIVE_STATUSES = ("assigned", "active", "waiting_for_customer")
 
 
 class EscalationRepository:
@@ -79,6 +81,7 @@ class EscalationRepository:
                 "status": "assigned",
                 "assigned_agent_id": agent_id,
                 "assigned_at": datetime.now(timezone.utc).isoformat(),
+                "ai_engaged": False,
             })
             .eq("id", escalation_id)
             .execute()
@@ -91,6 +94,62 @@ class EscalationRepository:
         self._client.table(_ESCALATIONS).update({"status": "active"}).eq(
             "id", escalation_id
         ).eq("status", "assigned").execute()
+
+    def set_waiting_for_customer(self, escalation_id: str) -> Escalation:
+        response = (
+            self._client.table(_ESCALATIONS)
+            .update({"status": "waiting_for_customer"})
+            .eq("id", escalation_id)
+            .execute()
+        )
+        return Escalation.from_row(response.data[0])
+
+    def set_active(self, escalation_id: str) -> None:
+        self._client.table(_ESCALATIONS).update({"status": "active"}).eq(
+            "id", escalation_id
+        ).eq("status", "waiting_for_customer").execute()
+
+    def set_ai_engaged(self, escalation_id: str, engaged: bool) -> Escalation:
+        response = (
+            self._client.table(_ESCALATIONS)
+            .update({"ai_engaged": engaged})
+            .eq("id", escalation_id)
+            .execute()
+        )
+        return Escalation.from_row(response.data[0])
+
+    def count_active_for_agent(self, agent_id: str) -> int:
+        response = (
+            self._client.table(_ESCALATIONS)
+            .select("id", count="exact")
+            .eq("assigned_agent_id", agent_id)
+            .in_("status", list(_ACTIVE_STATUSES))
+            .execute()
+        )
+        return response.count or 0
+
+    def list_by_conversation_ids(self, conversation_ids: list[str]) -> list[Escalation]:
+        if not conversation_ids:
+            return []
+        response = (
+            self._client.table(_ESCALATIONS)
+            .select("*")
+            .in_("conversation_id", conversation_ids)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return [Escalation.from_row(row) for row in response.data]
+
+    def list_resolved_today_for_agent(self, agent_id: str, since_iso: str) -> list[Escalation]:
+        response = (
+            self._client.table(_ESCALATIONS)
+            .select("*")
+            .eq("assigned_agent_id", agent_id)
+            .eq("status", "resolved")
+            .gte("resolved_at", since_iso)
+            .execute()
+        )
+        return [Escalation.from_row(row) for row in response.data]
 
     def mark_resolved(self, escalation_id: str) -> Escalation:
         response = (
@@ -131,3 +190,25 @@ class EscalationRepository:
             .execute()
         )
         return [EscalationMessage.from_row(row) for row in response.data]
+
+    def add_note(
+        self, workspace_id: str, escalation_id: str, author_agent_id: str | None, content: str
+    ) -> EscalationNote:
+        payload = {
+            "workspace_id": workspace_id,
+            "escalation_id": escalation_id,
+            "author_agent_id": author_agent_id,
+            "content": content,
+        }
+        response = self._client.table(_NOTES).insert(payload).execute()
+        return EscalationNote.from_row(response.data[0])
+
+    def list_notes(self, escalation_id: str) -> list[EscalationNote]:
+        response = (
+            self._client.table(_NOTES)
+            .select("*")
+            .eq("escalation_id", escalation_id)
+            .order("created_at")
+            .execute()
+        )
+        return [EscalationNote.from_row(row) for row in response.data]
