@@ -161,6 +161,7 @@ class ChatOrchestrator:
         *,
         session_id: str | None = None,
         profile_context: str | None = None,
+        workspace_id: str | None = None,
     ) -> dict[str, Any]:
         """Process a user message and return a response.
 
@@ -192,7 +193,9 @@ class ChatOrchestrator:
                     using the new pipeline).
         """
         if self._using_new_pipeline:
-            return self._chat_new_pipeline(message, session_id=session_id, profile_context=profile_context)
+            return self._chat_new_pipeline(
+                message, session_id=session_id, profile_context=profile_context, workspace_id=workspace_id
+            )
         return self._chat_legacy(message)
 
     def process_request(self, message: str) -> dict[str, Any]:
@@ -209,6 +212,7 @@ class ChatOrchestrator:
         *,
         session_id: str | None = None,
         profile_context: str | None = None,
+        workspace_id: str | None = None,
     ) -> ChatResponse:
         """Process a request and return a Pydantic ``ChatResponse``.
 
@@ -222,7 +226,9 @@ class ChatOrchestrator:
         Returns:
             A :class:`~api.schemas.ChatResponse` instance.
         """
-        result = self.chat(message, session_id=session_id, profile_context=profile_context)
+        result = self.chat(
+            message, session_id=session_id, profile_context=profile_context, workspace_id=workspace_id
+        )
         next_actions = result.get("next_actions") or None
         return ChatResponse(
             answer=result["answer"],
@@ -260,6 +266,7 @@ class ChatOrchestrator:
         *,
         session_id: str | None = None,
         profile_context: str | None = None,
+        workspace_id: str | None = None,
     ) -> dict[str, Any]:
         """Full multi-source pipeline with router, manager, merger, generator."""
         # --- Step 0: Session wiring (Phase 20, optional) ---
@@ -287,7 +294,7 @@ class ChatOrchestrator:
 
         # --- Step 2: Retrieve (SearchManager) ---
         if self._search_manager:
-            evidence = self._search_manager.retrieve(message, decision=decision)
+            evidence = self._search_manager.retrieve(message, decision=decision, workspace_id=workspace_id)
         else:
             # Fallback: use legacy knowledge service
             matches, _, _ = self._knowledge_service.retrieve_context(message)

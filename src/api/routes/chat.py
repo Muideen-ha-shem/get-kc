@@ -4,7 +4,8 @@ from ...orchestrator.chat_orchestrator import chat_orchestrator
 from ...services.auth.auth_service import AuthUser
 from ...services.conversation.conversation_service import ConversationService
 from ...services.profile.profile_service import ProfileService
-from ..deps import get_current_access_token, get_current_user_optional
+from ...services.workspace.workspace_context import WorkspaceContext
+from ..deps import get_current_access_token, get_current_user_optional, get_current_workspace
 from ..schemas import ChatRequest, ChatResponse
 
 router = APIRouter()
@@ -36,12 +37,14 @@ def chat(
     request: ChatRequest,
     user: AuthUser | None = Depends(get_current_user_optional),
     access_token: str | None = Depends(get_current_access_token),
+    workspace: WorkspaceContext = Depends(get_current_workspace),
 ) -> ChatResponse:
     try:
         response = chat_orchestrator.process_request_response(
             request.message,
             session_id=request.session_id,
             profile_context=_profile_context(user, access_token),
+            workspace_id=workspace.workspace_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

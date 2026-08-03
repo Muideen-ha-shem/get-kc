@@ -37,6 +37,7 @@ from postgrest.exceptions import APIError
 from supabase import Client
 
 from ...sb import get_client
+from ...services.workspace.workspace_models import DEFAULT_WORKSPACE_ID
 from ...shared.logging import get_logger
 
 logger: logging.Logger = get_logger(__name__)
@@ -81,18 +82,20 @@ class AppointmentService:
     def __init__(self, client: Client | None = None) -> None:
         self._client = client or get_client()
 
-    def get_availability(self, days: int = 4) -> list[DailyAvailability]:
+    def get_availability(self, days: int = 4, workspace_id: str | None = None) -> list[DailyAvailability]:
         candidate_dates = [date.today() + timedelta(days=offset) for offset in range(days)]
         start, end = candidate_dates[0].isoformat(), candidate_dates[-1].isoformat()
 
-        response = (
+        query = (
             self._client.table(_TABLE)
             .select("appointment_date,time_slot")
             .eq("status", "confirmed")
             .gte("appointment_date", start)
             .lte("appointment_date", end)
-            .execute()
         )
+        if workspace_id is not None:
+            query = query.eq("workspace_id", workspace_id)
+        response = query.execute()
         booked_by_date: dict[str, set[str]] = {}
         for row in response.data:
             booked_by_date.setdefault(row["appointment_date"], set()).add(row["time_slot"])
@@ -118,16 +121,25 @@ class AppointmentService:
         name: str,
         email: str,
         user_id: str | None = None,
+        workspace_id: str = DEFAULT_WORKSPACE_ID,
     ) -> Appointment:
         if time_slot not in SLOT_TEMPLATE:
             raise InvalidSlotError(f"{time_slot!r} is not an offered time slot")
 
+        # Note: the DB's unique(appointment_date, time_slot) constraint
+        # (005_saved_items.sql) is not workspace-scoped — a Phase 22
+        # migration only adds an ALTER-COLUMN, never an ALTER-CONSTRAINT, to
+        # stay additive-only. Two different tenants booking the same date
+        # and slot would still race on that constraint. Flagged as a Phase
+        # 23 follow-up (widen the unique constraint to
+        # (workspace_id, appointment_date, time_slot)), not a silent gap.
         existing = (
             self._client.table(_TABLE)
             .select("id")
             .eq("appointment_date", appointment_date)
             .eq("time_slot", time_slot)
             .eq("status", "confirmed")
+            .eq("workspace_id", workspace_id)
             .limit(1)
             .execute()
         )
@@ -140,6 +152,7 @@ class AppointmentService:
             "name": name,
             "email": email,
             "user_id": user_id,
+            "workspace_id": workspace_id,
         }
         try:
             response = self._client.table(_TABLE).insert(payload).execute()

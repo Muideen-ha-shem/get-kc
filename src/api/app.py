@@ -12,6 +12,7 @@ from .routes.notifications import router as notifications_router
 from .routes.profile import router as profile_router
 from .routes.saved_items import router as saved_items_router
 from .routes.solutions import router as solutions_router
+from .routes.workspace import router as workspace_router
 
 load_dotenv()
 
@@ -19,13 +20,15 @@ app = FastAPI(title="Ha-Shem RAG API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
-    allow_credentials=True,
+    # Phase 23: opened to any origin so the embeddable SDK can be loaded
+    # from arbitrary third-party sites. Safe for the existing frontend,
+    # which authenticates via a Bearer header (localStorage-backed), never
+    # cookies — credentials mode has no effect on custom-header auth, and
+    # allow_origins="*" is only valid (per browser CORS rules) paired with
+    # allow_credentials=False. The real tenant boundary is workspace
+    # resolution (api_key/host/slug), not CORS.
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -40,6 +43,7 @@ app.include_router(saved_items_router)
 app.include_router(appointments_router)
 app.include_router(feedback_router)
 app.include_router(notifications_router)
+app.include_router(workspace_router)
 
 
 @app.get("/health")

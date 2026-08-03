@@ -73,7 +73,7 @@ class TestGetAvailability:
 class TestBookAppointment:
     def test_successful_booking(self):
         client = MagicMock()
-        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = []
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = []
         client.table.return_value.insert.return_value.execute.return_value.data = [{
             "id": "a1", "appointment_date": "2026-08-01", "time_slot": "09:00",
             "name": "Ada", "email": "ada@example.com", "status": "confirmed", "created_at": None,
@@ -96,7 +96,7 @@ class TestBookAppointment:
 
     def test_already_booked_slot_rejected_by_precheck(self):
         client = MagicMock()
-        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = [
             {"id": "existing"}
         ]
         service = AppointmentService(client=client)
@@ -111,7 +111,7 @@ class TestBookAppointment:
         constraint rejecting the insert — this is the actual correctness
         guarantee, not the precheck."""
         client = MagicMock()
-        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = []
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = []
         client.table.return_value.insert.return_value.execute.side_effect = APIError(
             {"message": "duplicate key value violates unique constraint", "code": "23505"}
         )
@@ -122,7 +122,7 @@ class TestBookAppointment:
 
     def test_unrelated_api_error_propagates(self):
         client = MagicMock()
-        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = []
+        client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = []
         client.table.return_value.insert.return_value.execute.side_effect = APIError(
             {"message": "connection error", "code": "08000"}
         )

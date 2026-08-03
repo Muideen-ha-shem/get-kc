@@ -23,6 +23,7 @@ from typing import Any, Literal
 from supabase import Client
 
 from ...sb import get_authenticated_client, get_client
+from ...services.workspace.workspace_models import DEFAULT_WORKSPACE_ID
 from ...shared.logging import get_logger
 
 logger: logging.Logger = get_logger(__name__)
@@ -60,40 +61,55 @@ class NotificationService:
         title: str,
         body: str | None = None,
         access_token: str | None = None,
+        workspace_id: str = DEFAULT_WORKSPACE_ID,
     ) -> Notification | None:
         """Create a notification. Best-effort by design — callers (booking,
         saving a recommendation, ...) must never let a notification failure
         break the primary action, so this swallows and logs rather than
         raising. Returns ``None`` on failure."""
         try:
-            payload = {"user_id": user_id, "type": type, "title": title, "body": body}
+            payload = {
+                "user_id": user_id,
+                "type": type,
+                "title": title,
+                "body": body,
+                "workspace_id": workspace_id,
+            }
             response = self._client_for(access_token).table(_TABLE).insert(payload).execute()
             return Notification.from_row(response.data[0])
         except Exception as exc:
             logger.warning("NotificationService: notify failed (non-fatal) — %s", exc)
             return None
 
-    def list_for_user(self, user_id: str, access_token: str | None = None, limit: int = 50) -> list[Notification]:
-        response = (
+    def list_for_user(
+        self,
+        user_id: str,
+        access_token: str | None = None,
+        limit: int = 50,
+        workspace_id: str | None = None,
+    ) -> list[Notification]:
+        query = (
             self._client_for(access_token)
             .table(_TABLE)
             .select("*")
             .eq("user_id", user_id)
-            .order("created_at", desc=True)
-            .limit(limit)
-            .execute()
         )
+        if workspace_id is not None:
+            query = query.eq("workspace_id", workspace_id)
+        response = query.order("created_at", desc=True).limit(limit).execute()
         return [Notification.from_row(row) for row in response.data]
 
-    def unread_count(self, user_id: str, access_token: str | None = None) -> int:
-        response = (
+    def unread_count(self, user_id: str, access_token: str | None = None, workspace_id: str | None = None) -> int:
+        query = (
             self._client_for(access_token)
             .table(_TABLE)
             .select("id", count="exact")
             .eq("user_id", user_id)
             .eq("is_read", False)
-            .execute()
         )
+        if workspace_id is not None:
+            query = query.eq("workspace_id", workspace_id)
+        response = query.execute()
         return response.count or 0
 
     def mark_read(self, notification_id: str, user_id: str, access_token: str | None = None) -> bool:

@@ -21,6 +21,7 @@ from typing import Any
 from supabase import Client
 
 from ...sb import get_authenticated_client, get_client
+from ...services.workspace.workspace_models import DEFAULT_WORKSPACE_ID
 from ...shared.logging import get_logger
 
 logger: logging.Logger = get_logger(__name__)
@@ -47,20 +48,29 @@ class SavedComparisonService:
     def _client_for(self, access_token: str | None) -> Client:
         return get_authenticated_client(access_token) if access_token else self._client
 
-    def save(self, user_id: str, product_ids: list[str], access_token: str | None = None) -> SavedComparison:
-        payload = {"user_id": user_id, "product_ids": product_ids}
+    def save(
+        self,
+        user_id: str,
+        product_ids: list[str],
+        access_token: str | None = None,
+        workspace_id: str = DEFAULT_WORKSPACE_ID,
+    ) -> SavedComparison:
+        payload = {"user_id": user_id, "product_ids": product_ids, "workspace_id": workspace_id}
         response = self._client_for(access_token).table(_TABLE).insert(payload).execute()
         return SavedComparison.from_row(response.data[0])
 
-    def list_for_user(self, user_id: str, access_token: str | None = None) -> list[SavedComparison]:
-        response = (
+    def list_for_user(
+        self, user_id: str, access_token: str | None = None, workspace_id: str | None = None
+    ) -> list[SavedComparison]:
+        query = (
             self._client_for(access_token)
             .table(_TABLE)
             .select("*")
             .eq("user_id", user_id)
-            .order("created_at", desc=True)
-            .execute()
         )
+        if workspace_id is not None:
+            query = query.eq("workspace_id", workspace_id)
+        response = query.order("created_at", desc=True).execute()
         return [SavedComparison.from_row(row) for row in response.data]
 
     def delete(self, comparison_id: str, user_id: str, access_token: str | None = None) -> bool:
