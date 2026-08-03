@@ -1,4 +1,5 @@
 import re
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -34,6 +35,17 @@ class ChatResponse(BaseModel):
         None, description="Echoes the request's session_id, or a freshly generated "
         "one when none was supplied — Phase 20 clients should persist this and send "
         "it on the next turn."
+    )
+    escalation_recommended: bool = Field(
+        False, description="Phase 24: true when the escalation engine recommends human "
+        "handoff for this turn (explicit request, critical intent, low confidence, or no "
+        "evidence at all). Recommending is read-only — nothing is escalated until the "
+        "caller explicitly calls POST /chat/escalate. Old clients that ignore this field "
+        "see identical behaviour to before this phase."
+    )
+    escalation_reason: str | None = Field(
+        None, description="One of 'explicit_request' | 'critical_intent' | 'low_confidence' "
+        "| 'unresolved' when escalation_recommended is true, else None."
     )
 
 
@@ -274,3 +286,70 @@ class NotificationSchema(BaseModel):
 
 class UnreadCountSchema(BaseModel):
     count: int
+
+
+class SupportAgentSchema(BaseModel):
+    """One `support_agents` row (Phase 24) — never includes internal
+    fields beyond what an agent needs to see about themselves or teammates."""
+
+    id: str
+    workspace_id: str
+    name: str
+    email: str
+    department: str
+    status: str
+    created_at: str | None = None
+
+
+class AgentStatusUpdate(BaseModel):
+    status: Literal["available", "away", "offline"]
+
+
+class EscalationSummarySchema(BaseModel):
+    customer: str
+    workspace: str
+    intent: list[str]
+    sentiment: str
+    products: list[str]
+    problem: str
+    actions_already_taken: list[dict]
+    suggested_resolution: list[dict]
+
+
+class EscalationMessageSchema(BaseModel):
+    id: str
+    sender_type: str
+    sender_auth_user_id: str | None = None
+    content: str
+    created_at: str | None = None
+
+
+class EscalationSchema(BaseModel):
+    id: str
+    workspace_id: str
+    conversation_id: str | None = None
+    status: str
+    assigned_agent_id: str | None = None
+    trigger_reason: str
+    department: str | None = None
+    summary: EscalationSummarySchema | None = None
+    created_at: str | None = None
+    assigned_at: str | None = None
+    resolved_at: str | None = None
+    closed_at: str | None = None
+    messages: list[EscalationMessageSchema] | None = Field(
+        None, description="Only populated by the escalation detail endpoint."
+    )
+
+
+class EscalationCreateRequest(BaseModel):
+    conversation_id: str | None = None
+    question: str = Field(..., min_length=1)
+
+
+class EscalationActionRequest(BaseModel):
+    escalation_id: str
+
+
+class EscalationMessageCreateRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=5000)

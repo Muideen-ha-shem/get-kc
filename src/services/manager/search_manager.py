@@ -176,6 +176,14 @@ class SearchManager:
         # match. Purely additive: retrieve()'s return type/behaviour is
         # unchanged, this is just extra state exposed alongside it.
         self._last_product_match: Any = None
+        # Set inside retrieve() wherever kb_confidence is already computed
+        # (Phase 24) — read via the kb_confidence property below, exact
+        # mirror of _last_product_match/product_match above. Purely
+        # additive: no change to the confidence computation or the
+        # KB->web fallback logic itself, just exposes the value one hop
+        # further so the escalation engine can reuse it instead of
+        # building a second confidence system.
+        self._last_kb_confidence: float | None = None
 
         logger.info(
             "SearchManager ready (router=%s, merger=%s, semantic_reranker=%s, source_ranker=%s, "
@@ -204,6 +212,15 @@ class SearchManager:
         hasn't been called yet (or its knowledge source wasn't active).
         """
         return self._last_product_match
+
+    @property
+    def kb_confidence(self) -> float | None:
+        """The knowledge-base confidence score from the most recent
+        :meth:`retrieve` call (Phase 24), or ``None`` if the knowledge
+        source wasn't active for that call or ``retrieve()`` hasn't been
+        called yet.
+        """
+        return self._last_kb_confidence
 
     def retrieve(
         self,
@@ -249,6 +266,7 @@ class SearchManager:
             # automatically fall back to live search
             from ..merger.context_merger import ContextMerger
             kb_confidence = ContextMerger.compute_knowledge_confidence(knowledge_evidence)
+            self._last_kb_confidence = kb_confidence
             logger.info(
                 "SearchManager: KB confidence=%.4f (threshold=%.2f).",
                 kb_confidence,
