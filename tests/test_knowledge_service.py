@@ -16,7 +16,7 @@ class TestKnowledgeServiceRetrieveContext:
             KnowledgeService().retrieve_context("test question")
 
         mock_retrieve.assert_called_once_with(
-            "test question", product_filter=None, match_count=3
+            "test question", product_filter=None, match_count=3, workspace_id=None
         )
 
     def test_passes_product_filter_through(self):
@@ -29,7 +29,7 @@ class TestKnowledgeServiceRetrieveContext:
             KnowledgeService().retrieve_context("test question", product_filter=["SPIDIFY"])
 
         mock_retrieve.assert_called_once_with(
-            "test question", product_filter=["SPIDIFY"], match_count=3
+            "test question", product_filter=["SPIDIFY"], match_count=3, workspace_id=None
         )
 
     def test_returns_underlying_result_unchanged(self):

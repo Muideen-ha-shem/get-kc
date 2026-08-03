@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from ...services.workspace.workspace_models import DEFAULT_WORKSPACE_ID
 from ...shared.logging import get_logger
 from .conversation_repository import ConversationRepository, ConversationRow, MessageRow
 
@@ -28,20 +29,38 @@ class ConversationService:
         self._repo = repository or ConversationRepository()
 
     def start_conversation(
-        self, user_id: str, first_message: str | None = None, access_token: str | None = None
+        self,
+        user_id: str,
+        first_message: str | None = None,
+        access_token: str | None = None,
+        workspace_id: str = DEFAULT_WORKSPACE_ID,
     ) -> ConversationRow:
         title = self._title_from_message(first_message) if first_message else "New conversation"
-        return self._repo.create_conversation(user_id, title=title, access_token=access_token)
+        return self._repo.create_conversation(
+            user_id, title=title, access_token=access_token, workspace_id=workspace_id
+        )
 
     def get_conversation(
-        self, conversation_id: str, user_id: str, access_token: str | None = None
+        self,
+        conversation_id: str,
+        user_id: str,
+        access_token: str | None = None,
+        workspace_id: str | None = None,
     ) -> ConversationRow | None:
-        return self._repo.get_conversation(conversation_id, user_id, access_token=access_token)
+        return self._repo.get_conversation(
+            conversation_id, user_id, access_token=access_token, workspace_id=workspace_id
+        )
 
     def list_conversations(
-        self, user_id: str, access_token: str | None = None, search: str | None = None
+        self,
+        user_id: str,
+        access_token: str | None = None,
+        search: str | None = None,
+        workspace_id: str | None = None,
     ) -> list[ConversationRow]:
-        return self._repo.list_conversations(user_id, access_token=access_token, search=search)
+        return self._repo.list_conversations(
+            user_id, access_token=access_token, search=search, workspace_id=workspace_id
+        )
 
     def rename_conversation(
         self, conversation_id: str, user_id: str, title: str, access_token: str | None = None

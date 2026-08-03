@@ -103,7 +103,7 @@ class TestSearchManagerWithDecision:
         evidence = manager.retrieve("test question", decision=decision)
 
         assert len(evidence) >= 1
-        mock_kb.retrieve_context.assert_called_once_with("test question", product_filter=None)
+        mock_kb.retrieve_context.assert_called_once_with("test question", product_filter=None, workspace_id=None)
 
     def test_web_only(self):
         from src.services.manager.search_manager import SearchManager
@@ -929,7 +929,7 @@ class TestSearchManagerProductRouter:
         )  # product_router=None
 
         manager.retrieve("test question", decision=RoutingDecision(knowledge=True, web=False))
-        mock_kb.retrieve_context.assert_called_once_with("test question", product_filter=None)
+        mock_kb.retrieve_context.assert_called_once_with("test question", product_filter=None, workspace_id=None)
 
     def test_high_confidence_match_scopes_retrieval(self):
         from src.services.manager.search_manager import SearchManager
@@ -952,7 +952,7 @@ class TestSearchManagerProductRouter:
 
         mock_product_router.classify.assert_called_once_with("Tell me about SPIDIFY")
         mock_kb.retrieve_context.assert_called_once_with(
-            "Tell me about SPIDIFY", product_filter=["SPIDIFY"]
+            "Tell me about SPIDIFY", product_filter=["SPIDIFY"], workspace_id=None
         )
 
     def test_ambiguous_match_queries_each_matched_product_separately(self):
@@ -991,10 +991,10 @@ class TestSearchManagerProductRouter:
 
         assert mock_kb.retrieve_context.call_count == 2
         mock_kb.retrieve_context.assert_any_call(
-            "Compare SPIDIFY and ZivaAIRA", product_filter=["SPIDIFY"], match_count=6
+            "Compare SPIDIFY and ZivaAIRA", product_filter=["SPIDIFY"], match_count=6, workspace_id=None
         )
         mock_kb.retrieve_context.assert_any_call(
-            "Compare SPIDIFY and ZivaAIRA", product_filter=["ZivaAIRA"], match_count=6
+            "Compare SPIDIFY and ZivaAIRA", product_filter=["ZivaAIRA"], match_count=6, workspace_id=None
         )
         # Both products' evidence made it through — neither was starved out
         urls = {e.url for e in evidence}
@@ -1021,7 +1021,7 @@ class TestSearchManagerProductRouter:
         )
 
         manager.retrieve("Tell me about SPIDIFY", decision=RoutingDecision(knowledge=True, web=False))
-        mock_kb.retrieve_context.assert_called_once_with("Tell me about SPIDIFY", product_filter=["SPIDIFY"])
+        mock_kb.retrieve_context.assert_called_once_with("Tell me about SPIDIFY", product_filter=["SPIDIFY"], workspace_id=None)
 
     def test_per_product_retrieval_failure_for_one_product_does_not_break_the_other(self):
         from src.services.manager.search_manager import SearchManager
@@ -1070,7 +1070,7 @@ class TestSearchManagerProductRouter:
 
         manager.retrieve("What are your business hours?", decision=RoutingDecision(knowledge=True, web=False))
         mock_kb.retrieve_context.assert_called_once_with(
-            "What are your business hours?", product_filter=None
+            "What are your business hours?", product_filter=None, workspace_id=None
         )
 
     def test_product_router_failure_falls_back_to_unscoped(self):
@@ -1090,7 +1090,7 @@ class TestSearchManagerProductRouter:
         )
 
         manager.retrieve("test question", decision=RoutingDecision(knowledge=True, web=False))
-        mock_kb.retrieve_context.assert_called_once_with("test question", product_filter=None)
+        mock_kb.retrieve_context.assert_called_once_with("test question", product_filter=None, workspace_id=None)
 
 
 # ---------------------------------------------------------------------------

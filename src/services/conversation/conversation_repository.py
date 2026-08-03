@@ -21,6 +21,7 @@ from supabase import Client
 
 from ...sb import get_authenticated_client, get_client
 from ...shared.logging import get_logger
+from ...services.workspace.workspace_models import DEFAULT_WORKSPACE_ID
 
 logger: logging.Logger = get_logger(__name__)
 
@@ -35,6 +36,7 @@ class ConversationRow:
     title: str
     created_at: str | None = None
     updated_at: str | None = None
+    workspace_id: str | None = None
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "ConversationRow":
@@ -64,34 +66,48 @@ class ConversationRepository:
         return get_authenticated_client(access_token) if access_token else self._client
 
     def create_conversation(
-        self, user_id: str, title: str = "New conversation", access_token: str | None = None
+        self,
+        user_id: str,
+        title: str = "New conversation",
+        access_token: str | None = None,
+        workspace_id: str = DEFAULT_WORKSPACE_ID,
     ) -> ConversationRow:
         response = (
             self._client_for(access_token)
             .table(_CONVERSATIONS)
-            .insert({"user_id": user_id, "title": title})
+            .insert({"user_id": user_id, "title": title, "workspace_id": workspace_id})
             .execute()
         )
         return ConversationRow.from_row(response.data[0])
 
     def get_conversation(
-        self, conversation_id: str, user_id: str, access_token: str | None = None
+        self,
+        conversation_id: str,
+        user_id: str,
+        access_token: str | None = None,
+        workspace_id: str | None = None,
     ) -> ConversationRow | None:
-        response = (
+        query = (
             self._client_for(access_token)
             .table(_CONVERSATIONS)
             .select("*")
             .eq("id", conversation_id)
             .eq("user_id", user_id)
-            .limit(1)
-            .execute()
         )
+        if workspace_id is not None:
+            query = query.eq("workspace_id", workspace_id)
+        response = query.limit(1).execute()
         if not response.data:
             return None
         return ConversationRow.from_row(response.data[0])
 
     def list_conversations(
-        self, user_id: str, limit: int = 50, access_token: str | None = None, search: str | None = None
+        self,
+        user_id: str,
+        limit: int = 50,
+        access_token: str | None = None,
+        search: str | None = None,
+        workspace_id: str | None = None,
     ) -> list[ConversationRow]:
         query = (
             self._client_for(access_token)
@@ -101,6 +117,8 @@ class ConversationRepository:
         )
         if search:
             query = query.ilike("title", f"%{search}%")
+        if workspace_id is not None:
+            query = query.eq("workspace_id", workspace_id)
         response = query.order("updated_at", desc=True).limit(limit).execute()
         return [ConversationRow.from_row(row) for row in response.data]
 

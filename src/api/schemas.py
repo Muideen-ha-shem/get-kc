@@ -1,6 +1,6 @@
 import re
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ChatRequest(BaseModel):
@@ -168,6 +168,22 @@ class SolutionSummary(BaseModel):
     business_problem: str
     solution_type: str
     learn_more_url: str
+
+
+class WorkspaceConfigSchema(BaseModel):
+    """Public branding config for the embeddable SDK (``GET /workspace/config``,
+    Phase 23). Deliberately excludes ``api_key``/``host``/``is_active`` —
+    internal resolution fields never exposed to a browser-embedded widget."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    slug: str
+    name: str
+    logo: str | None = None
+    primary_color: str | None = Field(None, alias="primaryColor")
+    welcome_message: str | None = Field(None, alias="welcomeMessage")
+    quick_actions: list[dict] | None = Field(None, alias="quickActions")
 
 
 class SaveComparisonRequest(BaseModel):

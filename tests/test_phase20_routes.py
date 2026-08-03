@@ -20,6 +20,7 @@ from src.api.deps import (
     get_current_user_required,
 )
 from src.services.auth.auth_service import AuthUser
+from src.services.workspace.workspace_models import DEFAULT_WORKSPACE_ID
 
 
 @pytest.fixture()
@@ -53,7 +54,9 @@ class TestChatBackwardCompatibility:
         body = response.json()
         assert body["answer"] == "ok"
         assert body["session_id"] == "generated-1"
-        mock_process.assert_called_once_with("hello", session_id=None, profile_context=None)
+        mock_process.assert_called_once_with(
+            "hello", session_id=None, profile_context=None, workspace_id=DEFAULT_WORKSPACE_ID
+        )
 
     def test_old_style_request_without_new_fields_is_accepted(self, client):
         with patch("src.api.routes.chat.chat_orchestrator.process_request_response") as mock_process:
@@ -74,7 +77,9 @@ class TestChatSessionIdPassthrough:
 
             client.post("/chat", json={"message": "How much does it cost?", "session_id": "s1"})
 
-        mock_process.assert_called_once_with("How much does it cost?", session_id="s1", profile_context=None)
+        mock_process.assert_called_once_with(
+            "How much does it cost?", session_id="s1", profile_context=None, workspace_id=DEFAULT_WORKSPACE_ID
+        )
 
 
 class TestChatAuthenticatedPersonalizationAndPersistence:

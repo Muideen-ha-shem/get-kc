@@ -15,6 +15,7 @@ from typing import Any
 from supabase import Client
 
 from ...sb import get_client
+from ...services.workspace.workspace_models import DEFAULT_WORKSPACE_ID
 from ...shared.logging import get_logger
 
 logger: logging.Logger = get_logger(__name__)
@@ -51,6 +52,7 @@ class FeedbackService:
         user_id: str | None = None,
         session_id: str | None = None,
         conversation_id: str | None = None,
+        workspace_id: str = DEFAULT_WORKSPACE_ID,
     ) -> Feedback:
         payload = {
             "question": question,
@@ -60,6 +62,7 @@ class FeedbackService:
             "user_id": user_id,
             "session_id": session_id,
             "conversation_id": conversation_id,
+            "workspace_id": workspace_id,
         }
         response = self._client.table(_TABLE).insert(payload).execute()
         return Feedback.from_row(response.data[0])

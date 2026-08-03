@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ...services.auth.auth_service import AuthUser
 from ...services.notifications.notification_service import NotificationService
-from ..deps import get_current_access_token_required, get_current_user_required
+from ...services.workspace.workspace_context import WorkspaceContext
+from ..deps import get_current_access_token_required, get_current_user_required, get_current_workspace
 from ..schemas import NotificationSchema, UnreadCountSchema
 
 router = APIRouter()
@@ -18,8 +19,9 @@ def _to_schema(row) -> NotificationSchema:
 def list_notifications(
     user: AuthUser = Depends(get_current_user_required),
     access_token: str = Depends(get_current_access_token_required),
+    workspace: WorkspaceContext = Depends(get_current_workspace),
 ) -> list[NotificationSchema]:
-    rows = _notification_service.list_for_user(user.id, access_token=access_token)
+    rows = _notification_service.list_for_user(user.id, access_token=access_token, workspace_id=workspace.workspace_id)
     return [_to_schema(r) for r in rows]
 
 
@@ -27,8 +29,11 @@ def list_notifications(
 def unread_count(
     user: AuthUser = Depends(get_current_user_required),
     access_token: str = Depends(get_current_access_token_required),
+    workspace: WorkspaceContext = Depends(get_current_workspace),
 ) -> UnreadCountSchema:
-    return UnreadCountSchema(count=_notification_service.unread_count(user.id, access_token=access_token))
+    return UnreadCountSchema(
+        count=_notification_service.unread_count(user.id, access_token=access_token, workspace_id=workspace.workspace_id)
+    )
 
 
 @router.post("/notifications/{notification_id}/read")

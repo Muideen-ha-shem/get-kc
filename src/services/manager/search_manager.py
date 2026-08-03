@@ -209,6 +209,7 @@ class SearchManager:
         self,
         question: str,
         decision: RoutingDecision | None = None,
+        workspace_id: str | None = None,
     ) -> list[EvidenceItem]:
         """Execute the retrieval plan for *question* and return evidence.
 
@@ -243,7 +244,7 @@ class SearchManager:
         live_page_chunks: list[Any] | None = None
 
         if actual_decision.knowledge:
-            knowledge_evidence = self._retrieve_knowledge(question)
+            knowledge_evidence = self._retrieve_knowledge(question, workspace_id=workspace_id)
             # Confidence-based routing: if KB results are low-confidence,
             # automatically fall back to live search
             from ..merger.context_merger import ContextMerger
@@ -333,7 +334,9 @@ class SearchManager:
     # Per-source retrieval
     # ------------------------------------------------------------------
 
-    def _retrieve_knowledge(self, question: str) -> list[dict[str, Any]] | None:
+    def _retrieve_knowledge(
+        self, question: str, workspace_id: str | None = None
+    ) -> list[dict[str, Any]] | None:
         """Query the internal knowledge base (Supabase vector search)."""
         try:
             svc = self._get_knowledge_service()
@@ -347,10 +350,12 @@ class SearchManager:
                 # embeds marginally closer to the question takes every
                 # match_count slot); querying per-product guarantees each
                 # gets a fair share of the results.
-                matches = self._retrieve_knowledge_per_product(svc, question, product_filter)
+                matches = self._retrieve_knowledge_per_product(
+                    svc, question, product_filter, workspace_id=workspace_id
+                )
             else:
                 matches, _similarities, _urls = svc.retrieve_context(
-                    question, product_filter=product_filter
+                    question, product_filter=product_filter, workspace_id=workspace_id
                 )
 
             if matches:
@@ -387,7 +392,7 @@ class SearchManager:
 
     @staticmethod
     def _retrieve_knowledge_per_product(
-        svc: Any, question: str, products: list[str]
+        svc: Any, question: str, products: list[str], workspace_id: str | None = None
     ) -> list[dict[str, Any]]:
         """Query each product in *products* separately and concatenate matches."""
         matches: list[dict[str, Any]] = []
@@ -397,6 +402,7 @@ class SearchManager:
                     question,
                     product_filter=[product],
                     match_count=SearchManager._PER_PRODUCT_MATCH_COUNT,
+                    workspace_id=workspace_id,
                 )
                 matches.extend(SearchManager._dedupe_by_url_prefer_longest(product_matches))
             except Exception as exc:

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 from src.services.saved_items.saved_comparison_service import SavedComparisonService
 from src.services.saved_items.saved_recommendation_service import SavedRecommendationService
+from src.services.workspace.workspace_models import DEFAULT_WORKSPACE_ID
 
 
 def _comparison_row(**overrides):
@@ -36,7 +37,7 @@ class TestSavedComparisonService:
 
         assert row.product_ids == ["SPIDIFY", "ZivaAIRA"]
         client.table.return_value.insert.assert_called_once_with(
-            {"user_id": "u1", "product_ids": ["SPIDIFY", "ZivaAIRA"]}
+            {"user_id": "u1", "product_ids": ["SPIDIFY", "ZivaAIRA"], "workspace_id": DEFAULT_WORKSPACE_ID}
         )
 
     def test_save_uses_authenticated_client_when_token_given(self):

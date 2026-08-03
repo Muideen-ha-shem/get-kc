@@ -13,6 +13,7 @@ from typing import Any
 from supabase import Client
 
 from ...sb import get_authenticated_client, get_client
+from ...services.workspace.workspace_models import DEFAULT_WORKSPACE_ID
 from ...shared.logging import get_logger
 
 logger: logging.Logger = get_logger(__name__)
@@ -48,25 +49,30 @@ class SavedRecommendationService:
         question: str,
         recommendation: str,
         access_token: str | None = None,
+        workspace_id: str = DEFAULT_WORKSPACE_ID,
     ) -> SavedRecommendation:
         payload = {
             "user_id": user_id,
             "products": products,
             "question": question,
             "recommendation": recommendation,
+            "workspace_id": workspace_id,
         }
         response = self._client_for(access_token).table(_TABLE).insert(payload).execute()
         return SavedRecommendation.from_row(response.data[0])
 
-    def list_for_user(self, user_id: str, access_token: str | None = None) -> list[SavedRecommendation]:
-        response = (
+    def list_for_user(
+        self, user_id: str, access_token: str | None = None, workspace_id: str | None = None
+    ) -> list[SavedRecommendation]:
+        query = (
             self._client_for(access_token)
             .table(_TABLE)
             .select("*")
             .eq("user_id", user_id)
-            .order("created_at", desc=True)
-            .execute()
         )
+        if workspace_id is not None:
+            query = query.eq("workspace_id", workspace_id)
+        response = query.order("created_at", desc=True).execute()
         return [SavedRecommendation.from_row(row) for row in response.data]
 
     def delete(self, recommendation_id: str, user_id: str, access_token: str | None = None) -> bool:
