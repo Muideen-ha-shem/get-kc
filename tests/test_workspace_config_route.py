@@ -82,9 +82,9 @@ class TestWorkspaceConfigRoute:
 
         assert response.status_code == 401
 
-    def test_invalid_host_header_returns_401(self, client):
+    def test_invalid_workspace_host_header_returns_401(self, client):
         with patch("src.api.deps._workspace_repository.get_by_host", return_value=None):
-            response = client.get("/workspace/config", headers={"host": "unknown.example.com"})
+            response = client.get("/workspace/config", headers={"x-workspace-host": "unknown.example.com"})
 
         assert response.status_code == 401
 
@@ -128,7 +128,9 @@ class TestGetCurrentWorkspaceStrictUnit:
 
     def test_valid_api_key_returns_context(self):
         with patch("src.api.deps._workspace_repository.get_by_api_key", return_value=_ws()):
-            ctx = get_current_workspace_strict(x_api_key="valid-key")
+            ctx = get_current_workspace_strict(
+                workspace_id=None, workspace_slug=None, x_api_key="valid-key", x_workspace_host=None
+            )
 
         assert ctx.slug == "acme"
         assert ctx.primary_color == "#0055CC"
@@ -138,16 +140,20 @@ class TestGetCurrentWorkspaceStrictUnit:
 
         with patch("src.api.deps._workspace_repository.get_by_api_key", return_value=None):
             with pytest.raises(HTTPException) as exc_info:
-                get_current_workspace_strict(x_api_key="bogus")
+                get_current_workspace_strict(
+                    workspace_id=None, workspace_slug=None, x_api_key="bogus", x_workspace_host=None
+                )
 
         assert exc_info.value.status_code == 401
 
-    def test_invalid_host_raises_401(self):
+    def test_invalid_workspace_host_raises_401(self):
         from fastapi import HTTPException
 
         with patch("src.api.deps._workspace_repository.get_by_host", return_value=None):
             with pytest.raises(HTTPException) as exc_info:
-                get_current_workspace_strict(host="unknown.example.com")
+                get_current_workspace_strict(
+                    workspace_id=None, workspace_slug=None, x_api_key=None, x_workspace_host="unknown.example.com"
+                )
 
         assert exc_info.value.status_code == 401
 
@@ -155,7 +161,9 @@ class TestGetCurrentWorkspaceStrictUnit:
         with patch(
             "src.api.deps.resolve_workspace", return_value="delegated-context"
         ) as mock_resolve:
-            result = get_current_workspace_strict()
+            result = get_current_workspace_strict(
+                workspace_id=None, workspace_slug=None, x_api_key=None, x_workspace_host=None
+            )
 
         assert result == "delegated-context"
         mock_resolve.assert_called_once()
