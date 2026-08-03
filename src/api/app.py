@@ -2,11 +2,13 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .routes.agents import router as agents_router
 from .routes.appointments import router as appointments_router
 from .routes.auth import router as auth_router
 from .routes.chat import router as chat_router
 from .routes.conversations import router as conversations_router
 from .routes.demo_request import router as demo_request_router
+from .routes.escalation import router as escalation_router
 from .routes.feedback import router as feedback_router
 from .routes.notifications import router as notifications_router
 from .routes.profile import router as profile_router
@@ -44,6 +46,8 @@ app.include_router(appointments_router)
 app.include_router(feedback_router)
 app.include_router(notifications_router)
 app.include_router(workspace_router)
+app.include_router(agents_router)
+app.include_router(escalation_router)
 
 
 @app.get("/health")

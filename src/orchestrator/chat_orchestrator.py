@@ -32,6 +32,7 @@ import logging
 from typing import Any
 
 from ..api.schemas import ChatResponse
+from ..services.escalation.decision import decide_escalation
 from ..services.knowledge import KnowledgeService
 from ..services.support import SupportService
 from ..services.routing import SourceRouter, ProductRouter
@@ -235,6 +236,8 @@ class ChatOrchestrator:
             sources=result.get("sources", []),
             next_actions=next_actions,
             session_id=result.get("session_id"),
+            escalation_recommended=result.get("escalation_recommended", False),
+            escalation_reason=result.get("escalation_reason"),
         )
 
     # ------------------------------------------------------------------
@@ -316,6 +319,19 @@ class ChatOrchestrator:
         complementary_products = None
         next_actions: list[dict[str, Any]] = []
 
+        # --- Escalation recommendation (Phase 24, read-only) ---
+        # Reuses the existing confidence signal already computed by
+        # SearchManager (never a second confidence system) plus a
+        # deterministic keyword check against the *original* message (not
+        # the profile-augmented advisory_question). This only recommends —
+        # nothing is written to the escalations table from here; an actual
+        # escalation is created separately via EscalationService, only
+        # when the caller explicitly acts on the recommendation.
+        kb_confidence = getattr(self._search_manager, "kb_confidence", None)
+        escalation_decision = decide_escalation(
+            question=message, kb_confidence=kb_confidence, has_evidence=bool(evidence)
+        )
+
         if self._advisory_layer is not None:
             advisory = self._advisory_layer.build(advisory_question, evidence, product_match=match)
             if advisory.needs_clarification:
@@ -328,6 +344,8 @@ class ChatOrchestrator:
                     "citations": [],
                     "next_actions": [],
                     "session_id": session_id,
+                    "escalation_recommended": escalation_decision.should_escalate,
+                    "escalation_reason": escalation_decision.reason,
                 }
             primary_product = advisory.primary_product
             complementary_products = advisory.complementary_products
@@ -379,6 +397,8 @@ class ChatOrchestrator:
             "citations": citations,
             "next_actions": next_actions,
             "session_id": session_id,
+            "escalation_recommended": escalation_decision.should_escalate,
+            "escalation_reason": escalation_decision.reason,
         }
 
     def _record_session_state(self, session_id: str | None, advisory: Any) -> None:
