@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Depends, Header, HTTPException
 
 from ...services.auth.auth_service import AuthError, AuthService, AuthUser
@@ -7,6 +9,7 @@ from ..schemas import (
     AuthSessionResponse,
     AuthUserSchema,
     PasswordResetRequest,
+    PasswordUpdateRequest,
     SignInRequest,
     SignUpRequest,
 )
@@ -15,6 +18,11 @@ router = APIRouter(prefix="/auth")
 
 _auth_service = AuthService()
 _profile_service = ProfileService()
+
+
+def _password_reset_redirect_url() -> str:
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    return f"{frontend_url.rstrip('/')}/reset-password"
 
 
 @router.post("/sign-up", response_model=AuthSessionResponse)
@@ -74,10 +82,19 @@ def sign_out(authorization: str | None = Header(default=None)) -> dict[str, str]
 @router.post("/password-reset")
 def request_password_reset(request: PasswordResetRequest) -> dict[str, str]:
     try:
-        _auth_service.request_password_reset(request.email)
+        _auth_service.request_password_reset(request.email, redirect_to=_password_reset_redirect_url())
     except AuthError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"status": "reset_email_sent"}
+
+
+@router.post("/update-password")
+def update_password(request: PasswordUpdateRequest) -> dict[str, str]:
+    try:
+        _auth_service.confirm_password_reset(request.access_token, request.new_password)
+    except AuthError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "password_updated"}
 
 
 @router.get("/me", response_model=AuthUserSchema)

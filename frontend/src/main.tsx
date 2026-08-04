@@ -12,6 +12,7 @@ import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 import { AdminAgentsPage } from './pages/admin/AdminAgentsPage';
 import { AdminAuditPage } from './pages/admin/AdminAuditPage';
 import { KnowledgeManagementPage } from './pages/knowledge/KnowledgeManagementPage';
+import { ResetPasswordPage } from './pages/auth/ResetPasswordPage';
 import { AuthProvider } from './lib/authContext';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import './styles.css';
@@ -22,6 +23,7 @@ createRoot(document.getElementById('root')!).render(
       <AuthProvider>
         <Routes>
           <Route path="/" element={<App />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route
             path="/dashboard"
             element={

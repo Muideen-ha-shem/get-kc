@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -143,3 +143,45 @@ class TestGetUser:
         service = AuthService(client=client)
 
         assert service.get_user("token") is None
+
+
+class TestConfirmPasswordReset:
+    def test_updates_password_via_admin_api_using_resolved_user_id(self):
+        client = MagicMock()
+        response = MagicMock()
+        response.user = MagicMock(id="u1", email="a@b.com", user_metadata={})
+        client.auth.get_user.return_value = response
+        service = AuthService(client=client)
+        admin_client = MagicMock()
+
+        with patch("src.services.auth.auth_service.get_admin_client", return_value=admin_client):
+            service.confirm_password_reset("recovery-token", "new-password123")
+
+        admin_client.auth.admin.update_user_by_id.assert_called_once_with(
+            "u1", {"password": "new-password123"}
+        )
+
+    def test_invalid_token_raises_auth_error_without_calling_admin_api(self):
+        client = MagicMock()
+        client.auth.get_user.side_effect = RuntimeError("expired")
+        service = AuthService(client=client)
+        admin_client = MagicMock()
+
+        with patch("src.services.auth.auth_service.get_admin_client", return_value=admin_client):
+            with pytest.raises(AuthError):
+                service.confirm_password_reset("bad-token", "new-password123")
+
+        admin_client.auth.admin.update_user_by_id.assert_not_called()
+
+    def test_admin_api_failure_wrapped_as_auth_error(self):
+        client = MagicMock()
+        response = MagicMock()
+        response.user = MagicMock(id="u1", email="a@b.com", user_metadata={})
+        client.auth.get_user.return_value = response
+        service = AuthService(client=client)
+        admin_client = MagicMock()
+        admin_client.auth.admin.update_user_by_id.side_effect = RuntimeError("boom")
+
+        with patch("src.services.auth.auth_service.get_admin_client", return_value=admin_client):
+            with pytest.raises(AuthError):
+                service.confirm_password_reset("recovery-token", "new-password123")

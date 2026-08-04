@@ -117,6 +117,11 @@ class PasswordResetRequest(BaseModel):
         return value
 
 
+class PasswordUpdateRequest(BaseModel):
+    access_token: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=8, max_length=200)
+
+
 class AuthUserSchema(BaseModel):
     id: str
     email: str | None = None

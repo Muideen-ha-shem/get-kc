@@ -17,6 +17,7 @@ from ...services.agents.agent_service import AgentService
 from ...services.auth.auth_service import AuthService, AuthUser
 from ...services.escalation.escalation_repository import EscalationRepository
 from ..deps import require_super_admin
+from ..routes.auth import _password_reset_redirect_url
 from ..schemas import SupportAgentSchema
 from ..schemas_admin import AdminUserSchema, AgentPerformanceSchema, RoleAssignmentRequest
 
@@ -84,7 +85,7 @@ def reset_user_password(
     """Reuses the existing (anon-client-safe) request_password_reset —
     no admin privileges needed for this one."""
     auth_service = AuthService()
-    auth_service.request_password_reset(email)
+    auth_service.request_password_reset(email, redirect_to=_password_reset_redirect_url())
     _audit_service.record("user.password_reset_requested", user.id, None, {"target_auth_user_id": auth_user_id})
     return {"status": "reset_email_sent"}
 
