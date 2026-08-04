@@ -99,6 +99,23 @@ class AuthService:
             return None
         return self._to_user(response.user)
 
+    def admin_suspend_user(self, auth_user_id: str) -> None:
+        """Phase 26 — requires an admin (service-role) client, e.g.
+        ``AuthService(client=get_admin_client())``. Bans the user
+        indefinitely via Supabase's Admin API; there is no direct
+        ``is_active`` flag on ``auth.users``, so a very long ban duration
+        is the standard way to represent "suspended"."""
+        self._client.auth.admin.update_user_by_id(auth_user_id, {"ban_duration": "876000h"})
+
+    def admin_reactivate_user(self, auth_user_id: str) -> None:
+        """Phase 26 — requires an admin (service-role) client."""
+        self._client.auth.admin.update_user_by_id(auth_user_id, {"ban_duration": "none"})
+
+    def admin_list_users(self) -> list[AuthUser]:
+        """Phase 26 — requires an admin (service-role) client."""
+        response = self._client.auth.admin.list_users()
+        return [self._to_user(u) for u in response]
+
     @staticmethod
     def _to_user(user: Any) -> AuthUser:
         metadata = getattr(user, "user_metadata", None) or {}

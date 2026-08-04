@@ -24,6 +24,12 @@ class AgentService:
     def update_status(self, agent_id: str, status: str) -> SupportAgent:
         return self._repo.update_status(agent_id, status)
 
+    def update_department(self, agent_id: str, department: str) -> SupportAgent:
+        return self._repo.update_department(agent_id, department)
+
+    def delete(self, agent_id: str) -> None:
+        self._repo.delete(agent_id)
+
     def list_available(self, workspace_id: str) -> list[SupportAgent]:
         return self._repo.list_available(workspace_id)
 

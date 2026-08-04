@@ -1,0 +1,250 @@
+"""Super Admin workspace/tenant management routes (Phase 26).
+
+Every route depends on `require_super_admin`. Not workspace-scoped itself
+— a super admin isn't tied to one workspace; individual routes take a
+workspace_id path param to know which tenant they're operating on.
+"""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException
+
+from ...services.admin.audit_service import AuditService
+from ...services.admin.feature_flag_service import FeatureFlagService
+from ...services.admin.product_service import ProductService
+from ...services.admin.settings_service import SettingsService
+from ...services.admin.tenant_service import TenantService
+from ...services.auth.auth_service import AuthUser
+from ..deps import require_super_admin
+from ..schemas_admin import (
+    ApiKeyRegenerateResponse,
+    AuditLogEntrySchema,
+    FeatureFlagSchema,
+    FeatureFlagsUpdateRequest,
+    PlatformDashboardSchema,
+    WorkspaceAdminSchema,
+    WorkspaceAnalyticsSchema,
+    WorkspaceBrandingUpdateRequest,
+    WorkspaceCreateRequest,
+    WorkspaceCreateResponse,
+    WorkspaceProductSchema,
+    WorkspaceProductsUpdateRequest,
+    WorkspaceSettingsSchema,
+    WorkspaceSettingsUpdateRequest,
+)
+
+router = APIRouter()
+
+_tenant_service = TenantService()
+_settings_service = SettingsService()
+_feature_flag_service = FeatureFlagService()
+_product_service = ProductService()
+_audit_service = AuditService()
+
+
+def _to_workspace_schema(workspace) -> WorkspaceAdminSchema:
+    return WorkspaceAdminSchema(
+        id=workspace.id, slug=workspace.slug, name=workspace.name, host=workspace.host,
+        is_active=workspace.is_active, logo=workspace.logo, primary_color=workspace.primary_color,
+        welcome_message=workspace.welcome_message, quick_actions=workspace.quick_actions,
+        archived_at=workspace.archived_at, deleted_at=workspace.deleted_at,
+        created_at=workspace.created_at, updated_at=workspace.updated_at,
+    )
+
+
+def _to_settings_schema(settings) -> WorkspaceSettingsSchema:
+    return WorkspaceSettingsSchema(
+        workspace_id=settings.workspace_id,
+        ai_enabled=settings.ai_enabled,
+        confidence_threshold=settings.confidence_threshold,
+        live_search_enabled=settings.live_search_enabled,
+        human_escalation_enabled=settings.human_escalation_enabled,
+        ai_personality=settings.ai_personality,
+        welcome_prompt=settings.welcome_prompt,
+        chat_enabled=settings.chat_enabled,
+        offline_mode=settings.offline_mode,
+        greeting_message=settings.greeting_message,
+        working_hours=settings.working_hours,
+        escalation_timeout_minutes=settings.escalation_timeout_minutes,
+        auto_assignment_enabled=settings.auto_assignment_enabled,
+        secondary_color=settings.secondary_color,
+        chat_avatar=settings.chat_avatar,
+        company_name=settings.company_name,
+        footer_text=settings.footer_text,
+    )
+
+
+def _get_workspace_or_404(workspace_id: str):
+    workspace = _tenant_service.get_workspace(workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return workspace
+
+
+@router.get("/admin/me")
+def get_admin_me(user: AuthUser = Depends(require_super_admin)) -> dict:
+    return {"is_super_admin": True, "auth_user_id": user.id}
+
+
+@router.get("/admin/workspaces", response_model=list[WorkspaceAdminSchema])
+def list_workspaces(user: AuthUser = Depends(require_super_admin)) -> list[WorkspaceAdminSchema]:
+    return [_to_workspace_schema(w) for w in _tenant_service.list_workspaces()]
+
+
+@router.post("/admin/workspaces", response_model=WorkspaceCreateResponse)
+def create_workspace(
+    request: WorkspaceCreateRequest, user: AuthUser = Depends(require_super_admin)
+) -> WorkspaceCreateResponse:
+    workspace = _tenant_service.create_workspace(request.slug, request.name, request.host, user.id)
+    return WorkspaceCreateResponse(workspace=_to_workspace_schema(workspace), api_key=workspace.api_key)
+
+
+@router.get("/admin/workspaces/{workspace_id}", response_model=WorkspaceAdminSchema)
+def get_workspace(workspace_id: str, user: AuthUser = Depends(require_super_admin)) -> WorkspaceAdminSchema:
+    return _to_workspace_schema(_get_workspace_or_404(workspace_id))
+
+
+@router.get("/admin/workspaces/{workspace_id}/analytics", response_model=WorkspaceAnalyticsSchema)
+def get_workspace_analytics(
+    workspace_id: str, user: AuthUser = Depends(require_super_admin)
+) -> WorkspaceAnalyticsSchema:
+    _get_workspace_or_404(workspace_id)
+    return WorkspaceAnalyticsSchema(**_tenant_service.workspace_analytics(workspace_id))
+
+
+@router.patch("/admin/workspaces/{workspace_id}/branding", response_model=WorkspaceAdminSchema)
+def update_workspace_branding(
+    workspace_id: str, request: WorkspaceBrandingUpdateRequest, user: AuthUser = Depends(require_super_admin)
+) -> WorkspaceAdminSchema:
+    _get_workspace_or_404(workspace_id)
+    fields = {k: v for k, v in request.model_dump().items() if v is not None}
+    workspace = _tenant_service.update_branding(workspace_id, user.id, **fields)
+    return _to_workspace_schema(workspace)
+
+
+@router.get("/admin/workspaces/{workspace_id}/settings", response_model=WorkspaceSettingsSchema)
+def get_workspace_settings(
+    workspace_id: str, user: AuthUser = Depends(require_super_admin)
+) -> WorkspaceSettingsSchema:
+    _get_workspace_or_404(workspace_id)
+    settings = _settings_service.get(workspace_id)
+    return _to_settings_schema(settings)
+
+
+@router.patch("/admin/workspaces/{workspace_id}/settings", response_model=WorkspaceSettingsSchema)
+def update_workspace_settings(
+    workspace_id: str, request: WorkspaceSettingsUpdateRequest, user: AuthUser = Depends(require_super_admin)
+) -> WorkspaceSettingsSchema:
+    _get_workspace_or_404(workspace_id)
+    fields = {k: v for k, v in request.model_dump().items() if v is not None}
+    settings = _settings_service.update(workspace_id, **fields)
+    _audit_service.record("workspace.settings_changed", user.id, workspace_id, fields)
+    return _to_settings_schema(settings)
+
+
+@router.get("/admin/workspaces/{workspace_id}/products", response_model=list[WorkspaceProductSchema])
+def get_workspace_products(
+    workspace_id: str, user: AuthUser = Depends(require_super_admin)
+) -> list[WorkspaceProductSchema]:
+    _get_workspace_or_404(workspace_id)
+    return [
+        WorkspaceProductSchema(product_id=p.product_id, enabled=p.enabled)
+        for p in _product_service.list_for_workspace(workspace_id)
+    ]
+
+
+@router.patch("/admin/workspaces/{workspace_id}/products", response_model=list[WorkspaceProductSchema])
+def update_workspace_products(
+    workspace_id: str, request: WorkspaceProductsUpdateRequest, user: AuthUser = Depends(require_super_admin)
+) -> list[WorkspaceProductSchema]:
+    _get_workspace_or_404(workspace_id)
+    updated = []
+    for item in request.products:
+        try:
+            flag = _product_service.set_enabled(workspace_id, item.product_id, item.enabled)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        updated.append(WorkspaceProductSchema(product_id=flag.product_id, enabled=flag.enabled))
+    _audit_service.record(
+        "workspace.products_changed", user.id, workspace_id,
+        {"products": [p.model_dump() for p in request.products]},
+    )
+    return updated
+
+
+@router.get("/admin/workspaces/{workspace_id}/flags", response_model=list[FeatureFlagSchema])
+def get_workspace_flags(
+    workspace_id: str, user: AuthUser = Depends(require_super_admin)
+) -> list[FeatureFlagSchema]:
+    _get_workspace_or_404(workspace_id)
+    return [
+        FeatureFlagSchema(flag_key=f.flag_key, enabled=f.enabled)
+        for f in _feature_flag_service.list_for_workspace(workspace_id)
+    ]
+
+
+@router.patch("/admin/workspaces/{workspace_id}/flags", response_model=list[FeatureFlagSchema])
+def update_workspace_flags(
+    workspace_id: str, request: FeatureFlagsUpdateRequest, user: AuthUser = Depends(require_super_admin)
+) -> list[FeatureFlagSchema]:
+    _get_workspace_or_404(workspace_id)
+    updated = []
+    for item in request.flags:
+        flag = _feature_flag_service.set_flag(workspace_id, item.flag_key, item.enabled)
+        updated.append(FeatureFlagSchema(flag_key=flag.flag_key, enabled=flag.enabled))
+    _audit_service.record(
+        "workspace.flags_changed", user.id, workspace_id, {"flags": [f.model_dump() for f in request.flags]}
+    )
+    return updated
+
+
+@router.post("/admin/workspaces/{workspace_id}/apikey/regenerate", response_model=ApiKeyRegenerateResponse)
+def regenerate_workspace_api_key(
+    workspace_id: str, user: AuthUser = Depends(require_super_admin)
+) -> ApiKeyRegenerateResponse:
+    _get_workspace_or_404(workspace_id)
+    new_key = _tenant_service.regenerate_api_key(workspace_id, user.id)
+    return ApiKeyRegenerateResponse(api_key=new_key)
+
+
+@router.post("/admin/workspaces/{workspace_id}/suspend", response_model=WorkspaceAdminSchema)
+def suspend_workspace(workspace_id: str, user: AuthUser = Depends(require_super_admin)) -> WorkspaceAdminSchema:
+    _get_workspace_or_404(workspace_id)
+    return _to_workspace_schema(_tenant_service.suspend(workspace_id, user.id))
+
+
+@router.post("/admin/workspaces/{workspace_id}/reactivate", response_model=WorkspaceAdminSchema)
+def reactivate_workspace(workspace_id: str, user: AuthUser = Depends(require_super_admin)) -> WorkspaceAdminSchema:
+    _get_workspace_or_404(workspace_id)
+    return _to_workspace_schema(_tenant_service.reactivate(workspace_id, user.id))
+
+
+@router.post("/admin/workspaces/{workspace_id}/archive", response_model=WorkspaceAdminSchema)
+def archive_workspace(workspace_id: str, user: AuthUser = Depends(require_super_admin)) -> WorkspaceAdminSchema:
+    _get_workspace_or_404(workspace_id)
+    return _to_workspace_schema(_tenant_service.archive(workspace_id, user.id))
+
+
+@router.post("/admin/workspaces/{workspace_id}/delete", response_model=WorkspaceAdminSchema)
+def soft_delete_workspace(workspace_id: str, user: AuthUser = Depends(require_super_admin)) -> WorkspaceAdminSchema:
+    _get_workspace_or_404(workspace_id)
+    return _to_workspace_schema(_tenant_service.soft_delete(workspace_id, user.id))
+
+
+@router.get("/admin/dashboard", response_model=PlatformDashboardSchema)
+def get_admin_dashboard(user: AuthUser = Depends(require_super_admin)) -> PlatformDashboardSchema:
+    return PlatformDashboardSchema(**_tenant_service.platform_dashboard())
+
+
+@router.get("/admin/audit", response_model=list[AuditLogEntrySchema])
+def get_audit_log(
+    workspace_id: str | None = None, limit: int = 100, user: AuthUser = Depends(require_super_admin)
+) -> list[AuditLogEntrySchema]:
+    entries = _audit_service.list_recent(workspace_id=workspace_id, limit=limit)
+    return [
+        AuditLogEntrySchema(
+            id=e.id, workspace_id=e.workspace_id, actor_auth_user_id=e.actor_auth_user_id,
+            action=e.action, metadata=e.metadata, created_at=e.created_at,
+        )
+        for e in entries
+    ]

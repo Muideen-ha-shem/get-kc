@@ -2,6 +2,8 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .routes.admin_users import router as admin_users_router
+from .routes.admin_workspaces import router as admin_workspaces_router
 from .routes.agents import router as agents_router
 from .routes.appointments import router as appointments_router
 from .routes.auth import router as auth_router
@@ -48,6 +50,8 @@ app.include_router(notifications_router)
 app.include_router(workspace_router)
 app.include_router(agents_router)
 app.include_router(escalation_router)
+app.include_router(admin_workspaces_router)
+app.include_router(admin_users_router)
 
 
 @app.get("/health")
