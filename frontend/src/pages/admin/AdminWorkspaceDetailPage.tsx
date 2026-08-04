@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { apiJson } from '../../lib/apiClient';
 import { AdminGuard } from './AdminGuard';
 import { AdminLayout } from './AdminLayout';
@@ -325,6 +325,12 @@ function AdminWorkspaceDetailContent() {
           <p className="text-xs text-gray-500">{workspace.slug}</p>
         </div>
         <div className="flex gap-2">
+          <Link
+            to={`/admin/workspaces/${workspaceId}/knowledge`}
+            className="text-xs bg-blue-600 text-white rounded px-3 py-2 flex items-center"
+          >
+            Knowledge
+          </Link>
           {workspace.is_active ? (
             <button onClick={() => lifecycleAction('suspend')} className="text-xs bg-gray-200 rounded px-3 py-2">
               Suspend
