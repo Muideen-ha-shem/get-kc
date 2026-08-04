@@ -12,6 +12,7 @@ from __future__ import annotations
 from fastapi import Depends, Header, HTTPException, Query
 
 from ..services.admin.platform_admin_service import PlatformAdminService
+from ..services.admin.workspace_admin_service import WorkspaceAdminService
 from ..services.auth.auth_service import AuthService, AuthUser
 from ..services.workspace.workspace_context import WorkspaceContext
 from ..services.workspace.workspace_repository import WorkspaceRepository
@@ -20,6 +21,7 @@ from ..services.workspace.workspace_resolver import resolve_workspace, to_contex
 _auth_service = AuthService()
 _workspace_repository = WorkspaceRepository()
 _platform_admin_service = PlatformAdminService()
+_workspace_admin_service = WorkspaceAdminService()
 
 
 def extract_bearer_token(authorization: str | None) -> str | None:
@@ -134,4 +136,18 @@ def require_super_admin(user: AuthUser = Depends(get_current_user_required)) -> 
     route's ``user`` param."""
     if not _platform_admin_service.is_super_admin(user.id):
         raise HTTPException(status_code=403, detail="Super admin access required")
+    return user
+
+
+def require_workspace_admin(
+    workspace_id: str, user: AuthUser = Depends(get_current_user_required)
+) -> AuthUser:
+    """Phase 27 — gates every /workspaces/{workspace_id}/knowledge/* route.
+    A Super Admin may act on any workspace; a workspace_admin only on the
+    one(s) they're scoped to. ``workspace_id`` is resolved automatically
+    from the route's own path parameter of the same name."""
+    if _platform_admin_service.is_super_admin(user.id):
+        return user
+    if not _workspace_admin_service.is_workspace_admin(user.id, workspace_id):
+        raise HTTPException(status_code=403, detail="Workspace admin access required")
     return user

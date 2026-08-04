@@ -12,6 +12,7 @@ from .routes.conversations import router as conversations_router
 from .routes.demo_request import router as demo_request_router
 from .routes.escalation import router as escalation_router
 from .routes.feedback import router as feedback_router
+from .routes.knowledge_management import router as knowledge_management_router
 from .routes.notifications import router as notifications_router
 from .routes.profile import router as profile_router
 from .routes.saved_items import router as saved_items_router
@@ -52,6 +53,7 @@ app.include_router(agents_router)
 app.include_router(escalation_router)
 app.include_router(admin_workspaces_router)
 app.include_router(admin_users_router)
+app.include_router(knowledge_management_router)
 
 
 @app.get("/health")

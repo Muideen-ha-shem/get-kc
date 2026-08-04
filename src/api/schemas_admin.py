@@ -146,7 +146,7 @@ class AdminUserSchema(BaseModel):
 
 
 class RoleAssignmentRequest(BaseModel):
-    role: Literal["agent", "admin"]
+    role: Literal["agent", "admin", "workspace_admin"]
     workspace_id: str | None = None
     department: str | None = None
     name: str | None = None

@@ -31,6 +31,9 @@ class PlatformAdminRepository:
         return [PlatformAdmin.from_row(row) for row in response.data]
 
     def add(self, auth_user_id: str) -> PlatformAdmin:
+        existing = self.get_by_auth_user_id(auth_user_id)
+        if existing is not None:
+            return existing
         response = self._client.table(_TABLE).insert({"auth_user_id": auth_user_id}).execute()
         return PlatformAdmin.from_row(response.data[0])
 

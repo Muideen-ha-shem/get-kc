@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from ...sb import get_admin_client
 from ...services.admin.audit_service import AuditService
 from ...services.admin.platform_admin_service import PlatformAdminService
+from ...services.admin.workspace_admin_service import WorkspaceAdminService
 from ...services.agents.agent_service import AgentService
 from ...services.auth.auth_service import AuthService, AuthUser
 from ...services.escalation.escalation_repository import EscalationRepository
@@ -23,6 +24,7 @@ router = APIRouter()
 
 _agent_service = AgentService()
 _platform_admin_service = PlatformAdminService()
+_workspace_admin_service = WorkspaceAdminService()
 _audit_service = AuditService()
 _escalation_repository = EscalationRepository()
 
@@ -95,6 +97,16 @@ def assign_role(
         _platform_admin_service.add_admin(auth_user_id)
         _audit_service.record("user.role_assigned", user.id, None, {"target_auth_user_id": auth_user_id, "role": "admin"})
         return {"status": "admin_assigned"}
+
+    if request.role == "workspace_admin":
+        if not request.workspace_id:
+            raise HTTPException(status_code=400, detail="workspace_id is required to assign the workspace_admin role")
+        _workspace_admin_service.add_admin(request.workspace_id, auth_user_id)
+        _audit_service.record(
+            "user.role_assigned", user.id, request.workspace_id,
+            {"target_auth_user_id": auth_user_id, "role": "workspace_admin"},
+        )
+        return {"status": "workspace_admin_assigned"}
 
     if not request.workspace_id:
         raise HTTPException(status_code=400, detail="workspace_id is required to assign the agent role")
