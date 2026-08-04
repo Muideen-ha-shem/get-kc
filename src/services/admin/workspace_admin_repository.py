@@ -32,6 +32,9 @@ class WorkspaceAdminRepository:
         return response.data
 
     def add(self, workspace_id: str, auth_user_id: str) -> dict:
+        existing = self.get_by_auth_user_id(auth_user_id, workspace_id)
+        if existing is not None:
+            return existing
         response = (
             self._client.table(_TABLE)
             .insert({"workspace_id": workspace_id, "auth_user_id": auth_user_id})

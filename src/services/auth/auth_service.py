@@ -18,7 +18,7 @@ from typing import Any
 
 from supabase import Client
 
-from ...sb import get_client
+from ...sb import get_admin_client, get_client
 from ...shared.logging import get_logger
 
 logger: logging.Logger = get_logger(__name__)
@@ -87,6 +87,25 @@ class AuthService:
             self._client.auth.reset_password_for_email(email, options)
         except Exception as exc:
             logger.warning("request_password_reset failed: %s", exc)
+            raise AuthError(str(exc)) from exc
+
+    def confirm_password_reset(self, access_token: str, new_password: str) -> None:
+        """Completes a reset flow started by ``request_password_reset``.
+
+        The recovery email link hands the frontend an ``access_token``
+        Supabase minted for that user; possessing it already proves the
+        request came from someone who followed the emailed link, so this
+        resolves the user via the existing anon-safe ``get_user`` and then
+        sets the new password with the Admin API — no refresh_token or
+        client-side session needed.
+        """
+        user = self.get_user(access_token)
+        if user is None:
+            raise AuthError("This reset link is invalid or has expired.")
+        try:
+            get_admin_client().auth.admin.update_user_by_id(user.id, {"password": new_password})
+        except Exception as exc:
+            logger.warning("confirm_password_reset failed: %s", exc)
             raise AuthError(str(exc)) from exc
 
     def get_user(self, access_token: str) -> AuthUser | None:

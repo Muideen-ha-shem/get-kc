@@ -179,6 +179,32 @@ class TestAuthRoutes:
             response = client.post("/auth/password-reset", json={"email": "a@b.com"})
         assert response.status_code == 200
 
+    def test_password_reset_passes_redirect_to_frontend_reset_page(self, client):
+        with patch("src.api.routes.auth._auth_service.request_password_reset") as mock_reset:
+            client.post("/auth/password-reset", json={"email": "a@b.com"})
+        assert mock_reset.call_args.kwargs["redirect_to"].endswith("/reset-password")
+
+    def test_update_password_returns_200(self, client):
+        with patch("src.api.routes.auth._auth_service.confirm_password_reset"):
+            response = client.post(
+                "/auth/update-password",
+                json={"access_token": "recovery-token", "new_password": "new-password123"},
+            )
+        assert response.status_code == 200
+
+    def test_update_password_invalid_token_returns_400(self, client):
+        from src.services.auth.auth_service import AuthError
+
+        with patch(
+            "src.api.routes.auth._auth_service.confirm_password_reset",
+            side_effect=AuthError("This reset link is invalid or has expired."),
+        ):
+            response = client.post(
+                "/auth/update-password",
+                json={"access_token": "bad-token", "new_password": "new-password123"},
+            )
+        assert response.status_code == 400
+
     def test_me_without_token_returns_401(self, client):
         response = client.get("/auth/me")
         assert response.status_code == 401
