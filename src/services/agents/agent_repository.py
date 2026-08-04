@@ -75,6 +75,21 @@ class AgentRepository:
         )
         return SupportAgent.from_row(response.data[0])
 
+    def update_department(self, agent_id: str, department: str) -> SupportAgent:
+        from datetime import datetime, timezone
+
+        response = (
+            self._client.table(_TABLE)
+            .update({"department": department, "updated_at": datetime.now(timezone.utc).isoformat()})
+            .eq("id", agent_id)
+            .execute()
+        )
+        return SupportAgent.from_row(response.data[0])
+
+    def delete(self, agent_id: str) -> None:
+        """Phase 26 — admin-only removal of an agent."""
+        self._client.table(_TABLE).delete().eq("id", agent_id).execute()
+
     def list_available(self, workspace_id: str) -> list[SupportAgent]:
         response = (
             self._client.table(_TABLE)

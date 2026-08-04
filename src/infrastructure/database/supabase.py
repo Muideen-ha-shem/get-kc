@@ -14,6 +14,24 @@ def get_client() -> Client:
     return create_client(url, key)
 
 
+def get_admin_client() -> Client:
+    """Service-role Supabase client — bypasses RLS and can call
+    ``auth.admin.*`` (suspend/reactivate/list users).
+
+    NEVER expose ``SUPABASE_SERVICE_ROLE_KEY`` or a client built from it
+    outside server-side admin-only service code (``src/services/admin/``,
+    and ``AuthService``'s admin-facing methods). No response model may ever
+    serialize this key. Distinct from ``get_client()``/
+    ``get_authenticated_client()``, which remain anon-key-only and
+    untouched — this function is purely additive (Phase 26).
+    """
+    url: str = os.environ.get("SUPABASE_URL")
+    key: str = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    if not url or not key:
+        raise ValueError("Missing Supabase service-role credentials")
+    return create_client(url, key)
+
+
 def get_authenticated_client(access_token: str) -> Client:
     """A fresh Supabase client whose PostgREST requests carry *access_token*.
 

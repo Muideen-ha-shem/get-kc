@@ -9,8 +9,9 @@ protected routes (profile, conversations, dashboard data) use
 
 from __future__ import annotations
 
-from fastapi import Header, HTTPException, Query
+from fastapi import Depends, Header, HTTPException, Query
 
+from ..services.admin.platform_admin_service import PlatformAdminService
 from ..services.auth.auth_service import AuthService, AuthUser
 from ..services.workspace.workspace_context import WorkspaceContext
 from ..services.workspace.workspace_repository import WorkspaceRepository
@@ -18,6 +19,7 @@ from ..services.workspace.workspace_resolver import resolve_workspace, to_contex
 
 _auth_service = AuthService()
 _workspace_repository = WorkspaceRepository()
+_platform_admin_service = PlatformAdminService()
 
 
 def extract_bearer_token(authorization: str | None) -> str | None:
@@ -123,3 +125,13 @@ def get_current_workspace_strict(
         host=None,
         repository=_workspace_repository,
     )
+
+
+def require_super_admin(user: AuthUser = Depends(get_current_user_required)) -> AuthUser:
+    """Phase 26 — gates every /admin/* route. Returns the AuthUser (not
+    just a bool) so route handlers get actor_auth_user_id for audit
+    logging directly from the dependency, same shape as every other
+    route's ``user`` param."""
+    if not _platform_admin_service.is_super_admin(user.id):
+        raise HTTPException(status_code=403, detail="Super admin access required")
+    return user

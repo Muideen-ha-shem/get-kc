@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>HavisIQ SDK — local test page</title>
+</head>
+<body>
+  <h1>Any normal website</h1>
+  <p>The widget should appear as a floating button in the bottom-right corner.</p>
+
+  <!-- Locally-built SDK bundle (run `npm run build` in sdk/ first) -->
+  <script src="./dist/havisiq-sdk.js"></script>
+  <script>
+    HavisIQ.init({
+      apiKey: "PASTE_YOUR_WORKSPACE_API_KEY_HERE",
+      apiBaseUrl: "http://localhost:8000", // your local backend — production would omit this
+    });
+  </script>
+</body>
+</html>
