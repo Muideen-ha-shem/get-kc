@@ -100,6 +100,17 @@ class TestWorkspaceCrud:
         assert response.status_code == 200
         assert response.json()["api_key"] == "brand-new-key"
 
+    def test_create_workspace_duplicate_slug_returns_400_not_500(self, client):
+        _authenticate_as_admin()
+        with patch(
+            "src.api.routes.admin_workspaces._tenant_service.create_workspace",
+            side_effect=ValueError("Workspace slug 'acme' already exists"),
+        ):
+            response = client.post("/admin/workspaces", json={"slug": "acme", "name": "Acme"})
+
+        assert response.status_code == 400
+        assert "already exists" in response.json()["detail"]
+
     def test_get_workspace_404s_when_missing(self, client):
         _authenticate_as_admin()
         with patch("src.api.routes.admin_workspaces._tenant_service.get_workspace", return_value=None):

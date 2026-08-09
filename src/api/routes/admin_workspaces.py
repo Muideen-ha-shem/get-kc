@@ -95,7 +95,10 @@ def list_workspaces(user: AuthUser = Depends(require_super_admin)) -> list[Works
 def create_workspace(
     request: WorkspaceCreateRequest, user: AuthUser = Depends(require_super_admin)
 ) -> WorkspaceCreateResponse:
-    workspace = _tenant_service.create_workspace(request.slug, request.name, request.host, user.id)
+    try:
+        workspace = _tenant_service.create_workspace(request.slug, request.name, request.host, user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return WorkspaceCreateResponse(workspace=_to_workspace_schema(workspace), api_key=workspace.api_key)
 
 

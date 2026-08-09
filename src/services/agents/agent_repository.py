@@ -37,6 +37,26 @@ class AgentRepository:
             return None
         return SupportAgent.from_row(response.data[0])
 
+    def get_by_auth_user_id_any_workspace(self, auth_user_id: str) -> SupportAgent | None:
+        """Looks up this user's agent membership without already knowing
+        which workspace to filter by — needed for identity-based agent
+        routes (``/agent/*``, ``/agents/me``), which must resolve *the
+        agent's own* workspace rather than trust ambient request context
+        (see ``get_current_agent`` in ``deps.py`` for why: request-context
+        resolution silently misroutes every non-default-workspace agent).
+        A user is expected to hold at most one active agent membership in
+        practice, so this returns the first match."""
+        response = (
+            self._client.table(_TABLE)
+            .select("*")
+            .eq("auth_user_id", auth_user_id)
+            .limit(1)
+            .execute()
+        )
+        if not response.data:
+            return None
+        return SupportAgent.from_row(response.data[0])
+
     def get_by_id(self, agent_id: str) -> SupportAgent | None:
         response = self._client.table(_TABLE).select("*").eq("id", agent_id).limit(1).execute()
         if not response.data:

@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.app import app
-from src.api.deps import get_current_user_required, get_current_workspace
+from src.api.deps import get_current_agent, get_current_user_required, get_current_workspace
 from src.services.agents.agent_models import SupportAgent
 from src.services.auth.auth_service import AuthUser
 from src.services.workspace.workspace_context import WorkspaceContext
@@ -41,15 +41,14 @@ def _clear_overrides():
 class TestCustomerTimelineRoute:
     def test_requires_registered_agent(self, client):
         app.dependency_overrides[get_current_user_required] = lambda: _FAKE_USER
-        app.dependency_overrides[get_current_workspace] = lambda: _FAKE_WORKSPACE
-        with patch("src.api.routes.escalation._agent_service.get_by_auth_user_id", return_value=None):
+        with patch("src.api.deps._agent_service.get_by_auth_user_id_any_workspace", return_value=None):
             response = client.get("/agent/customers/u2/timeline")
 
         assert response.status_code == 404
 
     def test_returns_aggregated_timeline(self, client):
         app.dependency_overrides[get_current_user_required] = lambda: _FAKE_USER
-        app.dependency_overrides[get_current_workspace] = lambda: _FAKE_WORKSPACE
+        app.dependency_overrides[get_current_agent] = lambda: _agent()
         fake_timeline = {
             "profile": None,
             "conversations": [],
@@ -60,8 +59,7 @@ class TestCustomerTimelineRoute:
             "demo_requests": [],
             "demo_requests_note": "Matched by email only — demo_requests has no direct customer link.",
         }
-        with patch("src.api.routes.escalation._agent_service.get_by_auth_user_id", return_value=_agent()), \
-             patch("src.api.routes.escalation.build_customer_timeline", return_value=fake_timeline) as mock_build:
+        with patch("src.api.routes.escalation.build_customer_timeline", return_value=fake_timeline) as mock_build:
             response = client.get("/agent/customers/u2/timeline")
 
         assert response.status_code == 200

@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.app import app
-from src.api.deps import get_current_user_required, get_current_workspace
+from src.api.deps import get_current_agent, get_current_user_required, get_current_workspace
 from src.orchestrator.chat_orchestrator import ChatOrchestrator
 from src.services.advisory.advisory_layer import AdvisoryResult
 from src.services.advisory.intent_engine import BusinessIntent
@@ -124,12 +124,11 @@ def _escalation(**overrides) -> Escalation:
 class TestRejoinAiRoute:
     def test_rejoin_marks_resolved_and_returns_recap(self, client):
         app.dependency_overrides[get_current_user_required] = lambda: _FAKE_USER
-        app.dependency_overrides[get_current_workspace] = lambda: _FAKE_WORKSPACE
+        app.dependency_overrides[get_current_agent] = lambda: _agent()
         message = EscalationMessage(
             id="m1", escalation_id="e1", sender_type="agent", sender_auth_user_id="u1", content="I fixed it"
         )
-        with patch("src.api.routes.escalation._agent_service.get_by_auth_user_id", return_value=_agent()), \
-             patch("src.api.routes.escalation._escalation_repository.get", return_value=_escalation()), \
+        with patch("src.api.routes.escalation._escalation_repository.get", return_value=_escalation()), \
              patch("src.api.routes.escalation._escalation_repository.list_messages", return_value=[message]), \
              patch("src.api.routes.escalation._escalation_repository.list_notes", return_value=[]), \
              patch(

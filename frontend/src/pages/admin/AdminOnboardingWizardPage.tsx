@@ -24,16 +24,22 @@ function AdminOnboardingWizardContent() {
   const [companyName, setCompanyName] = useState('');
   const [aiEnabled, setAiEnabled] = useState(true);
   const [humanEscalationEnabled, setHumanEscalationEnabled] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
 
   async function submitDetails(event: FormEvent) {
     event.preventDefault();
-    const result = await apiJson<{ workspace: WorkspaceAdmin; api_key: string }>('/admin/workspaces', {
-      method: 'POST',
-      body: JSON.stringify({ slug, name, host: host || null }),
-    });
-    setWorkspace(result.workspace);
-    setApiKey(result.api_key);
-    setStep('branding');
+    setErrorMessage('');
+    try {
+      const result = await apiJson<{ workspace: WorkspaceAdmin; api_key: string }>('/admin/workspaces', {
+        method: 'POST',
+        body: JSON.stringify({ slug, name, host: host || null }),
+      });
+      setWorkspace(result.workspace);
+      setApiKey(result.api_key);
+      setStep('branding');
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to create workspace.');
+    }
   }
 
   async function submitBranding(event: FormEvent) {
@@ -93,6 +99,7 @@ function AdminOnboardingWizardContent() {
             Domain / host (optional)
             <input value={host} onChange={(e) => setHost(e.target.value)} className="w-full border rounded px-3 py-2 mt-1" />
           </label>
+          {errorMessage && <p className="text-sm text-red-600">{errorMessage}</p>}
           <button type="submit" className="bg-blue-600 text-white rounded px-4 py-2 text-sm self-start">
             Create Workspace
           </button>

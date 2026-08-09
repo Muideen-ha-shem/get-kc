@@ -72,6 +72,8 @@ export function DashboardPage() {
   const [compareModal, setCompareModal] = useState<{ open: boolean; productIds?: string[] }>({ open: false });
   const [demoModal, setDemoModal] = useState<{ open: boolean; solution?: Solution }>({ open: false });
   const [unreadCount, setUnreadCount] = useState(0);
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
+  const [isSupportAgent, setIsSupportAgent] = useState(false);
 
   const loadConversations = (search?: string) => {
     setIsLoadingList(true);
@@ -87,6 +89,16 @@ export function DashboardPage() {
     apiJson<{ count: number }>('/notifications/unread-count')
       .then((r) => setUnreadCount(r.count))
       .catch(() => setUnreadCount(0));
+    // Cheap 403-probes (same pattern as AdminGuard/AgentDashboardPage) so the
+    // sidebar can surface Admin/Agent links only to users who actually have
+    // those roles, instead of leaving those routes reachable only by typing
+    // the URL directly.
+    apiJson('/admin/me')
+      .then(() => setIsPlatformAdmin(true))
+      .catch(() => setIsPlatformAdmin(false));
+    apiJson('/agents/me')
+      .then(() => setIsSupportAgent(true))
+      .catch(() => setIsSupportAgent(false));
   }, []);
 
   // Debounce search-as-you-type so every keystroke doesn't fire a request.
@@ -297,6 +309,21 @@ export function DashboardPage() {
                 </div>
               ))}
             </div>
+          </div>
+        ) : null}
+
+        {isPlatformAdmin || isSupportAgent ? (
+          <div className="flex flex-col gap-1 border-t border-ink/10 pt-3 text-sm font-medium text-ink/70">
+            {isPlatformAdmin ? (
+              <Link to="/admin" className="rounded-xl px-3 py-2 transition hover:bg-paper hover:text-ink">
+                Admin Dashboard
+              </Link>
+            ) : null}
+            {isSupportAgent ? (
+              <Link to="/agent" className="rounded-xl px-3 py-2 transition hover:bg-paper hover:text-ink">
+                Agent Dashboard
+              </Link>
+            ) : null}
           </div>
         ) : null}
 
