@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.app import app
-from src.api.deps import get_current_user_required, get_current_workspace
+from src.api.deps import get_current_agent, get_current_user_required, get_current_workspace
 from src.services.agents.agent_models import SupportAgent
 from src.services.auth.auth_service import AuthUser
 from src.services.escalation.escalation_models import Escalation, EscalationMessage
@@ -82,18 +82,16 @@ def _clear_overrides():
 class TestWaitForCustomerRoute:
     def test_requires_in_progress_status(self, client):
         app.dependency_overrides[get_current_user_required] = lambda: _FAKE_USER
-        app.dependency_overrides[get_current_workspace] = lambda: _FAKE_WORKSPACE
-        with patch("src.api.routes.escalation._agent_service.get_by_auth_user_id", return_value=_agent()), \
-             patch("src.api.routes.escalation._escalation_repository.get", return_value=_escalation(status="waiting")):
+        app.dependency_overrides[get_current_agent] = lambda: _agent()
+        with patch("src.api.routes.escalation._escalation_repository.get", return_value=_escalation(status="waiting")):
             response = client.post("/agent/escalations/e1/wait-for-customer")
 
         assert response.status_code == 409
 
     def test_transitions_active_to_waiting_for_customer(self, client):
         app.dependency_overrides[get_current_user_required] = lambda: _FAKE_USER
-        app.dependency_overrides[get_current_workspace] = lambda: _FAKE_WORKSPACE
-        with patch("src.api.routes.escalation._agent_service.get_by_auth_user_id", return_value=_agent()), \
-             patch("src.api.routes.escalation._escalation_repository.get", return_value=_escalation(status="active")), \
+        app.dependency_overrides[get_current_agent] = lambda: _agent()
+        with patch("src.api.routes.escalation._escalation_repository.get", return_value=_escalation(status="active")), \
              patch(
                  "src.api.routes.escalation._escalation_repository.set_waiting_for_customer",
                  return_value=_escalation(status="waiting_for_customer"),
@@ -114,7 +112,7 @@ class TestMessageAutoFlipsBackToActive:
         with patch(
             "src.api.routes.escalation._escalation_repository.get",
             return_value=_escalation(status="waiting_for_customer", assigned_agent_id="a-other"),
-        ), patch("src.api.routes.escalation._agent_service.get_by_auth_user_id", return_value=None), \
+        ), patch("src.api.routes.escalation._agent_service.get_by_auth_user_id_any_workspace", return_value=None), \
            patch("src.api.routes.escalation._escalation_repository.mark_active_if_first_message"), \
            patch("src.api.routes.escalation._escalation_repository.set_active") as mock_set_active, \
            patch("src.api.routes.escalation._escalation_repository.add_message", return_value=message_row):
@@ -132,7 +130,7 @@ class TestMessageAutoFlipsBackToActive:
         with patch(
             "src.api.routes.escalation._escalation_repository.get",
             return_value=_escalation(status="waiting_for_customer", assigned_agent_id="a1"),
-        ), patch("src.api.routes.escalation._agent_service.get_by_auth_user_id", return_value=_agent()), \
+        ), patch("src.api.routes.escalation._agent_service.get_by_auth_user_id_any_workspace", return_value=_agent()), \
            patch("src.api.routes.escalation._escalation_repository.mark_active_if_first_message"), \
            patch("src.api.routes.escalation._escalation_repository.set_active") as mock_set_active, \
            patch("src.api.routes.escalation._escalation_repository.add_message", return_value=message_row):

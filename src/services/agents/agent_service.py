@@ -13,6 +13,9 @@ class AgentService:
     def get_by_auth_user_id(self, auth_user_id: str, workspace_id: str) -> SupportAgent | None:
         return self._repo.get_by_auth_user_id(auth_user_id, workspace_id)
 
+    def get_by_auth_user_id_any_workspace(self, auth_user_id: str) -> SupportAgent | None:
+        return self._repo.get_by_auth_user_id_any_workspace(auth_user_id)
+
     def get_by_id(self, agent_id: str) -> SupportAgent | None:
         return self._repo.get_by_id(agent_id)
 

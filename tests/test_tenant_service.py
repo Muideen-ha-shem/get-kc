@@ -6,6 +6,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+from postgrest.exceptions import APIError
+
 from src.services.admin.tenant_repository import AdminWorkspaceRepository
 from src.services.admin.tenant_service import TenantService
 
@@ -32,6 +35,64 @@ class TestAdminWorkspaceRepository:
         payload = client.table.return_value.insert.call_args[0][0]
         assert payload["slug"] == "acme"
         assert len(payload["api_key"]) > 20
+
+    def test_create_duplicate_slug_raises_value_error_not_raw_api_error(self):
+        client = MagicMock()
+        client.table.return_value.insert.return_value.execute.side_effect = APIError(
+            {"message": "duplicate key value violates unique constraint \"workspaces_slug_key\"", "code": "23505"}
+        )
+        repo = AdminWorkspaceRepository(client=client)
+
+        with pytest.raises(ValueError, match="already exists"):
+            repo.create("acme", "Acme")
+
+    def test_create_other_api_error_propagates_unchanged(self):
+        client = MagicMock()
+        client.table.return_value.insert.return_value.execute.side_effect = APIError(
+            {"message": "some other failure", "code": "99999"}
+        )
+        repo = AdminWorkspaceRepository(client=client)
+
+        with pytest.raises(APIError):
+            repo.create("acme", "Acme")
+
+    def test_archive_also_sets_is_active_false(self):
+        client = MagicMock()
+        client.table.return_value.update.return_value.eq.return_value.execute.return_value.data = [
+            _workspace_row(is_active=False, archived_at="2026-01-01T00:00:00Z")
+        ]
+        repo = AdminWorkspaceRepository(client=client)
+
+        repo.archive("w1")
+
+        payload = client.table.return_value.update.call_args[0][0]
+        assert payload["is_active"] is False
+        assert "archived_at" in payload
+
+    def test_reactivate_clears_archived_at(self):
+        client = MagicMock()
+        client.table.return_value.update.return_value.eq.return_value.execute.return_value.data = [
+            _workspace_row(is_active=True, archived_at=None)
+        ]
+        repo = AdminWorkspaceRepository(client=client)
+
+        repo.set_active("w1", True)
+
+        payload = client.table.return_value.update.call_args[0][0]
+        assert payload["is_active"] is True
+        assert payload["archived_at"] is None
+
+    def test_suspend_does_not_touch_archived_at(self):
+        client = MagicMock()
+        client.table.return_value.update.return_value.eq.return_value.execute.return_value.data = [
+            _workspace_row(is_active=False)
+        ]
+        repo = AdminWorkspaceRepository(client=client)
+
+        repo.set_active("w1", False)
+
+        payload = client.table.return_value.update.call_args[0][0]
+        assert "archived_at" not in payload
 
     def test_regenerate_api_key_returns_new_key_and_updates_row(self):
         client = MagicMock()

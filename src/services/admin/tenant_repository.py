@@ -13,12 +13,14 @@ from __future__ import annotations
 import secrets
 from datetime import datetime, timezone
 
+from postgrest.exceptions import APIError
 from supabase import Client
 
 from ...sb import get_client
 from .admin_models import AdminWorkspace
 
 _TABLE = "workspaces"
+_UNIQUE_VIOLATION = "23505"
 
 
 class AdminWorkspaceRepository:
@@ -43,7 +45,12 @@ class AdminWorkspaceRepository:
             "api_key": secrets.token_urlsafe(32),
             "is_active": True,
         }
-        response = self._client.table(_TABLE).insert(payload).execute()
+        try:
+            response = self._client.table(_TABLE).insert(payload).execute()
+        except APIError as exc:
+            if exc.code == _UNIQUE_VIOLATION:
+                raise ValueError(f"Workspace slug '{slug}' already exists") from exc
+            raise
         return AdminWorkspace.from_row(response.data[0])
 
     def update_branding(self, workspace_id: str, **fields) -> AdminWorkspace:
@@ -58,9 +65,16 @@ class AdminWorkspaceRepository:
         return AdminWorkspace.from_row(response.data[0])
 
     def set_active(self, workspace_id: str, is_active: bool) -> AdminWorkspace:
+        payload: dict = {"is_active": is_active, "updated_at": datetime.now(timezone.utc).isoformat()}
+        if is_active:
+            # Reactivating must also lift a prior archive — otherwise the
+            # workspace flips is_active back to True but list/dashboard
+            # views (which key off archived_at) keep showing it as archived
+            # forever, since nothing else ever clears this column.
+            payload["archived_at"] = None
         response = (
             self._client.table(_TABLE)
-            .update({"is_active": is_active, "updated_at": datetime.now(timezone.utc).isoformat()})
+            .update(payload)
             .eq("id", workspace_id)
             .execute()
         )
@@ -69,7 +83,7 @@ class AdminWorkspaceRepository:
     def archive(self, workspace_id: str) -> AdminWorkspace:
         response = (
             self._client.table(_TABLE)
-            .update({"archived_at": datetime.now(timezone.utc).isoformat()})
+            .update({"archived_at": datetime.now(timezone.utc).isoformat(), "is_active": False})
             .eq("id", workspace_id)
             .execute()
         )

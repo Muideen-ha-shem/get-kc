@@ -254,6 +254,13 @@ function ApiKeyTab({ workspaceId }: { workspaceId: string }) {
         <div className="mt-4 text-xs bg-yellow-50 border border-yellow-200 rounded p-3">
           <p className="font-semibold text-yellow-700 mb-1">New key — copy it now, it won't be shown again:</p>
           <code>{newKey}</code>
+          <p className="font-semibold text-yellow-700 mt-3 mb-1">Embed snippet:</p>
+          <pre className="bg-gray-900 text-gray-100 rounded p-3 overflow-x-auto whitespace-pre-wrap">
+{`<script src="https://cdn.havisiq.com/sdk.js"></script>
+<script>
+  HavisIQ.init({ apiKey: "${newKey}" });
+</script>`}
+          </pre>
         </div>
       )}
     </div>

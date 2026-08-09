@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.app import app
-from src.api.deps import get_current_user_optional, get_current_user_required, get_current_workspace
+from src.api.deps import get_current_agent, get_current_user_optional, get_current_user_required, get_current_workspace
 from src.services.agents.agent_models import SupportAgent
 from src.services.auth.auth_service import AuthUser
 from src.services.escalation.escalation_models import Escalation, EscalationNote
@@ -78,18 +78,16 @@ def _clear_overrides():
 class TestEscalationNotesRoute:
     def test_add_note_requires_registered_agent(self):
         app.dependency_overrides[get_current_user_required] = lambda: _FAKE_USER
-        app.dependency_overrides[get_current_workspace] = lambda: _FAKE_WORKSPACE
-        with patch("src.api.routes.escalation._agent_service.get_by_auth_user_id", return_value=None):
+        with patch("src.api.deps._agent_service.get_by_auth_user_id_any_workspace", return_value=None):
             response = TestClient(app).post("/agent/escalations/e1/notes", json={"content": "note"})
 
         assert response.status_code == 404
 
     def test_add_note_succeeds_for_registered_agent(self):
         app.dependency_overrides[get_current_user_required] = lambda: _FAKE_USER
-        app.dependency_overrides[get_current_workspace] = lambda: _FAKE_WORKSPACE
+        app.dependency_overrides[get_current_agent] = lambda: _agent()
         note = EscalationNote(id="n1", escalation_id="e1", workspace_id="w1", author_agent_id="a1", content="note")
-        with patch("src.api.routes.escalation._agent_service.get_by_auth_user_id", return_value=_agent()), \
-             patch("src.api.routes.escalation._escalation_repository.get", return_value=_escalation()), \
+        with patch("src.api.routes.escalation._escalation_repository.get", return_value=_escalation()), \
              patch("src.api.routes.escalation._escalation_repository.add_note", return_value=note) as mock_add:
             response = TestClient(app).post("/agent/escalations/e1/notes", json={"content": "note"})
 
@@ -99,10 +97,9 @@ class TestEscalationNotesRoute:
 
     def test_detail_endpoint_inlines_notes(self):
         app.dependency_overrides[get_current_user_required] = lambda: _FAKE_USER
-        app.dependency_overrides[get_current_workspace] = lambda: _FAKE_WORKSPACE
+        app.dependency_overrides[get_current_agent] = lambda: _agent()
         note = EscalationNote(id="n1", escalation_id="e1", workspace_id="w1", author_agent_id="a1", content="note")
-        with patch("src.api.routes.escalation._agent_service.get_by_auth_user_id", return_value=_agent()), \
-             patch("src.api.routes.escalation._escalation_repository.get", return_value=_escalation()), \
+        with patch("src.api.routes.escalation._escalation_repository.get", return_value=_escalation()), \
              patch("src.api.routes.escalation._escalation_repository.list_messages", return_value=[]), \
              patch("src.api.routes.escalation._escalation_repository.list_notes", return_value=[note]):
             response = TestClient(app).get("/agent/escalations/e1")

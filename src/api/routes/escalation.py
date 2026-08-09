@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from ...services.agents.agent_models import SupportAgent
 from ...services.agents.agent_service import AgentService
 from ...services.auth.auth_service import AuthUser
 from ...services.escalation.copilot import suggest_reply
@@ -20,7 +21,13 @@ from ...services.escalation.escalation_repository import EscalationRepository
 from ...services.escalation.escalation_service import EscalationService
 from ...services.profile.profile_service import ProfileService
 from ...services.workspace.workspace_context import WorkspaceContext
-from ..deps import get_current_user_optional, get_current_user_required, get_current_workspace
+from ..deps import (
+    get_current_agent,
+    get_current_chat_workspace,
+    get_current_user_optional,
+    get_current_user_required,
+    get_current_workspace,
+)
 from ..schemas import (
     AgentDashboardStatsSchema,
     CopilotSuggestReplyRequest,
@@ -109,16 +116,9 @@ def _to_schema(escalation, messages=None, notes=None) -> EscalationSchema:
     )
 
 
-def _require_agent(user: AuthUser, workspace: WorkspaceContext):
-    agent = _agent_service.get_by_auth_user_id(user.id, workspace.workspace_id)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="Not a registered agent for this workspace")
-    return agent
-
-
-def _get_escalation_or_404(escalation_id: str, workspace: WorkspaceContext):
+def _get_escalation_or_404(escalation_id: str, workspace_id: str):
     escalation = _escalation_repository.get(escalation_id)
-    if escalation is None or escalation.workspace_id != workspace.workspace_id:
+    if escalation is None or escalation.workspace_id != workspace_id:
         raise HTTPException(status_code=404, detail="Escalation not found")
     return escalation
 
@@ -127,7 +127,7 @@ def _get_escalation_or_404(escalation_id: str, workspace: WorkspaceContext):
 def escalate_conversation(
     request: EscalationCreateRequest,
     user: AuthUser | None = Depends(get_current_user_optional),
-    workspace: WorkspaceContext = Depends(get_current_workspace),
+    workspace: WorkspaceContext = Depends(get_current_chat_workspace),
 ) -> EscalationSchema:
     escalation = _escalation_service.create_direct(
         workspace_id=workspace.workspace_id,
@@ -140,33 +140,22 @@ def escalate_conversation(
 
 
 @router.get("/agent/queue", response_model=list[EscalationSchema])
-def get_agent_queue(
-    user: AuthUser = Depends(get_current_user_required),
-    workspace: WorkspaceContext = Depends(get_current_workspace),
-) -> list[EscalationSchema]:
-    _require_agent(user, workspace)
-    escalations = _escalation_repository.list_waiting(workspace.workspace_id)
+def get_agent_queue(agent: SupportAgent = Depends(get_current_agent)) -> list[EscalationSchema]:
+    escalations = _escalation_repository.list_waiting(agent.workspace_id)
     return [_to_schema(e) for e in escalations]
 
 
 @router.get("/agent/conversations", response_model=list[EscalationSchema])
-def get_my_agent_conversations(
-    user: AuthUser = Depends(get_current_user_required),
-    workspace: WorkspaceContext = Depends(get_current_workspace),
-) -> list[EscalationSchema]:
-    agent = _require_agent(user, workspace)
+def get_my_agent_conversations(agent: SupportAgent = Depends(get_current_agent)) -> list[EscalationSchema]:
     escalations = _escalation_repository.list_assigned_to(agent.id)
     return [_to_schema(e) for e in escalations]
 
 
 @router.post("/agent/accept", response_model=EscalationSchema)
 def accept_escalation(
-    request: EscalationActionRequest,
-    user: AuthUser = Depends(get_current_user_required),
-    workspace: WorkspaceContext = Depends(get_current_workspace),
+    request: EscalationActionRequest, agent: SupportAgent = Depends(get_current_agent)
 ) -> EscalationSchema:
-    agent = _require_agent(user, workspace)
-    escalation = _get_escalation_or_404(request.escalation_id, workspace)
+    escalation = _get_escalation_or_404(request.escalation_id, agent.workspace_id)
     if escalation.status != "waiting":
         raise HTTPException(status_code=409, detail="Escalation is not waiting for assignment")
     updated = _escalation_repository.assign(request.escalation_id, agent.id)
@@ -175,12 +164,9 @@ def accept_escalation(
 
 @router.post("/agent/resolve", response_model=EscalationSchema)
 def resolve_escalation(
-    request: EscalationActionRequest,
-    user: AuthUser = Depends(get_current_user_required),
-    workspace: WorkspaceContext = Depends(get_current_workspace),
+    request: EscalationActionRequest, agent: SupportAgent = Depends(get_current_agent)
 ) -> EscalationSchema:
-    _require_agent(user, workspace)
-    escalation = _get_escalation_or_404(request.escalation_id, workspace)
+    escalation = _get_escalation_or_404(request.escalation_id, agent.workspace_id)
     if escalation.status not in ("assigned", "active", "waiting_for_customer"):
         raise HTTPException(status_code=409, detail="Escalation is not in an active/assigned state")
     updated = _escalation_repository.mark_resolved(request.escalation_id)
@@ -189,12 +175,9 @@ def resolve_escalation(
 
 @router.post("/agent/escalations/{escalation_id}/wait-for-customer", response_model=EscalationSchema)
 def wait_for_customer(
-    escalation_id: str,
-    user: AuthUser = Depends(get_current_user_required),
-    workspace: WorkspaceContext = Depends(get_current_workspace),
+    escalation_id: str, agent: SupportAgent = Depends(get_current_agent)
 ) -> EscalationSchema:
-    _require_agent(user, workspace)
-    escalation = _get_escalation_or_404(escalation_id, workspace)
+    escalation = _get_escalation_or_404(escalation_id, agent.workspace_id)
     if escalation.status != "active":
         raise HTTPException(status_code=409, detail="Escalation is not in progress")
     updated = _escalation_repository.set_waiting_for_customer(escalation_id)
@@ -203,12 +186,9 @@ def wait_for_customer(
 
 @router.get("/agent/escalations/{escalation_id}", response_model=EscalationSchema)
 def get_escalation_detail(
-    escalation_id: str,
-    user: AuthUser = Depends(get_current_user_required),
-    workspace: WorkspaceContext = Depends(get_current_workspace),
+    escalation_id: str, agent: SupportAgent = Depends(get_current_agent)
 ) -> EscalationSchema:
-    _require_agent(user, workspace)
-    escalation = _get_escalation_or_404(escalation_id, workspace)
+    escalation = _get_escalation_or_404(escalation_id, agent.workspace_id)
     messages = _escalation_repository.list_messages(escalation_id)
     notes = _escalation_repository.list_notes(escalation_id)
     return _to_schema(escalation, messages=messages, notes=notes)
@@ -221,9 +201,17 @@ def send_escalation_message(
     user: AuthUser = Depends(get_current_user_required),
     workspace: WorkspaceContext = Depends(get_current_workspace),
 ) -> EscalationMessageSchema:
-    escalation = _get_escalation_or_404(escalation_id, workspace)
+    # This route is shared by both agents and customers, so it can't
+    # depend on get_current_agent outright (that 404s non-agents). Instead:
+    # resolve the caller's own agent identity by-user (workspace-agnostic —
+    # see get_current_agent's docstring for why ambient request context
+    # can't be trusted for an agent's workspace) and use THAT workspace to
+    # scope the escalation lookup when they are one; only a genuine
+    # customer falls back to the ambient get_current_workspace resolution.
+    agent = _agent_service.get_by_auth_user_id_any_workspace(user.id)
+    workspace_id = agent.workspace_id if agent is not None else workspace.workspace_id
+    escalation = _get_escalation_or_404(escalation_id, workspace_id)
 
-    agent = _agent_service.get_by_auth_user_id(user.id, workspace.workspace_id)
     is_assigned_agent = agent is not None and agent.id == escalation.assigned_agent_id
     sender_type = "agent" if is_assigned_agent else "customer"
 
@@ -249,12 +237,10 @@ def send_escalation_message(
 def add_escalation_note(
     escalation_id: str,
     request: EscalationNoteCreateRequest,
-    user: AuthUser = Depends(get_current_user_required),
-    workspace: WorkspaceContext = Depends(get_current_workspace),
+    agent: SupportAgent = Depends(get_current_agent),
 ) -> EscalationNoteSchema:
-    agent = _require_agent(user, workspace)
-    _get_escalation_or_404(escalation_id, workspace)
-    note = _escalation_repository.add_note(workspace.workspace_id, escalation_id, agent.id, request.content)
+    _get_escalation_or_404(escalation_id, agent.workspace_id)
+    note = _escalation_repository.add_note(agent.workspace_id, escalation_id, agent.id, request.content)
     return EscalationNoteSchema(
         id=note.id, author_agent_id=note.author_agent_id, content=note.content, created_at=note.created_at
     )
@@ -266,30 +252,25 @@ def add_escalation_note(
 def copilot_suggest_reply(
     escalation_id: str,
     request: CopilotSuggestReplyRequest,
-    user: AuthUser = Depends(get_current_user_required),
-    workspace: WorkspaceContext = Depends(get_current_workspace),
+    agent: SupportAgent = Depends(get_current_agent),
 ) -> CopilotSuggestReplySchema:
     """Drafts a suggested reply — never sent automatically. The agent
     reviews/edits it and sends it explicitly via POST .../messages."""
-    _require_agent(user, workspace)
-    _get_escalation_or_404(escalation_id, workspace)
-    result = suggest_reply(workspace_id=workspace.workspace_id, question=request.question)
+    _get_escalation_or_404(escalation_id, agent.workspace_id)
+    result = suggest_reply(workspace_id=agent.workspace_id, question=request.question)
     return CopilotSuggestReplySchema(draft=result["draft"], citations=result["citations"])
 
 
 @router.post("/agent/escalations/{escalation_id}/rejoin-ai", response_model=RejoinAiResponseSchema)
 def rejoin_ai(
-    escalation_id: str,
-    user: AuthUser = Depends(get_current_user_required),
-    workspace: WorkspaceContext = Depends(get_current_workspace),
+    escalation_id: str, agent: SupportAgent = Depends(get_current_agent)
 ) -> RejoinAiResponseSchema:
     """Hands the conversation back to the AI: marks the escalation resolved
     and flips ai_engaged back on. /chat itself never reads escalation state
     — the frontend passes the returned handoff_recap as ChatRequest.
     handoff_context on the next turn so the AI resumes without the customer
     repeating themselves."""
-    _require_agent(user, workspace)
-    escalation = _get_escalation_or_404(escalation_id, workspace)
+    escalation = _get_escalation_or_404(escalation_id, agent.workspace_id)
     messages = _escalation_repository.list_messages(escalation_id)
     notes = _escalation_repository.list_notes(escalation_id)
 
@@ -310,11 +291,8 @@ def rejoin_ai(
 
 @router.get("/agent/customers/{auth_user_id}/timeline", response_model=CustomerTimelineSchema)
 def get_customer_timeline(
-    auth_user_id: str,
-    user: AuthUser = Depends(get_current_user_required),
-    workspace: WorkspaceContext = Depends(get_current_workspace),
+    auth_user_id: str, agent: SupportAgent = Depends(get_current_agent)
 ) -> CustomerTimelineSchema:
-    _require_agent(user, workspace)
     timeline = build_customer_timeline(auth_user_id)
 
     profile = timeline["profile"]
@@ -356,11 +334,7 @@ def get_customer_timeline(
 
 
 @router.get("/agent/dashboard/stats", response_model=AgentDashboardStatsSchema)
-def get_agent_dashboard_stats(
-    user: AuthUser = Depends(get_current_user_required),
-    workspace: WorkspaceContext = Depends(get_current_workspace),
-) -> AgentDashboardStatsSchema:
-    agent = _require_agent(user, workspace)
+def get_agent_dashboard_stats(agent: SupportAgent = Depends(get_current_agent)) -> AgentDashboardStatsSchema:
     workload = _escalation_repository.count_active_for_agent(agent.id)
 
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
