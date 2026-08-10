@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -143,3 +143,111 @@ class TestGetUser:
         service = AuthService(client=client)
 
         assert service.get_user("token") is None
+
+
+class TestConfirmPasswordReset:
+    def test_updates_password_via_admin_api_using_resolved_user_id(self):
+        client = MagicMock()
+        response = MagicMock()
+        response.user = MagicMock(id="u1", email="a@b.com", user_metadata={})
+        client.auth.get_user.return_value = response
+        service = AuthService(client=client)
+        admin_client = MagicMock()
+
+        with patch("src.services.auth.auth_service.get_admin_client", return_value=admin_client):
+            service.confirm_password_reset("recovery-token", "new-password123")
+
+        admin_client.auth.admin.update_user_by_id.assert_called_once_with(
+            "u1", {"password": "new-password123"}
+        )
+
+    def test_invalid_token_raises_auth_error_without_calling_admin_api(self):
+        client = MagicMock()
+        client.auth.get_user.side_effect = RuntimeError("expired")
+        service = AuthService(client=client)
+        admin_client = MagicMock()
+
+        with patch("src.services.auth.auth_service.get_admin_client", return_value=admin_client):
+            with pytest.raises(AuthError):
+                service.confirm_password_reset("bad-token", "new-password123")
+
+        admin_client.auth.admin.update_user_by_id.assert_not_called()
+
+    def test_admin_api_failure_wrapped_as_auth_error(self):
+        client = MagicMock()
+        response = MagicMock()
+        response.user = MagicMock(id="u1", email="a@b.com", user_metadata={})
+        client.auth.get_user.return_value = response
+        service = AuthService(client=client)
+        admin_client = MagicMock()
+        admin_client.auth.admin.update_user_by_id.side_effect = RuntimeError("boom")
+
+        with patch("src.services.auth.auth_service.get_admin_client", return_value=admin_client):
+            with pytest.raises(AuthError):
+                service.confirm_password_reset("recovery-token", "new-password123")
+
+
+class TestAdminCreateUser:
+    def test_creates_pre_confirmed_user(self):
+        client = MagicMock()
+        client.auth.admin.create_user.return_value = MagicMock(
+            user=MagicMock(id="u1", email="a@acme.com", user_metadata={"full_name": "Ada"})
+        )
+        service = AuthService(client=client)
+
+        user = service.admin_create_user("a@acme.com", "password123", "Ada")
+
+        assert user.id == "u1"
+        assert user.full_name == "Ada"
+        call_args = client.auth.admin.create_user.call_args[0][0]
+        assert call_args["email"] == "a@acme.com"
+        assert call_args["email_confirm"] is True
+        assert call_args["user_metadata"] == {"full_name": "Ada"}
+
+    def test_no_full_name_omits_user_metadata(self):
+        client = MagicMock()
+        client.auth.admin.create_user.return_value = MagicMock(
+            user=MagicMock(id="u1", email="a@acme.com", user_metadata={})
+        )
+        service = AuthService(client=client)
+
+        service.admin_create_user("a@acme.com", "password123")
+
+        call_args = client.auth.admin.create_user.call_args[0][0]
+        assert "user_metadata" not in call_args
+
+    def test_supabase_exception_wrapped_as_auth_error(self):
+        client = MagicMock()
+        client.auth.admin.create_user.side_effect = RuntimeError("already registered")
+        service = AuthService(client=client)
+
+        with pytest.raises(AuthError, match="already registered"):
+            service.admin_create_user("a@acme.com", "password123", "Ada")
+
+
+class TestAdminInviteUser:
+    def test_sends_invite_with_redirect_to(self):
+        client = MagicMock()
+        service = AuthService(client=client)
+
+        service.admin_invite_user("teammate@acme.com", redirect_to="https://x/accept-invite")
+
+        client.auth.admin.invite_user_by_email.assert_called_once_with(
+            "teammate@acme.com", {"redirect_to": "https://x/accept-invite"}
+        )
+
+    def test_no_redirect_to_passes_none_options(self):
+        client = MagicMock()
+        service = AuthService(client=client)
+
+        service.admin_invite_user("teammate@acme.com")
+
+        client.auth.admin.invite_user_by_email.assert_called_once_with("teammate@acme.com", None)
+
+    def test_supabase_exception_wrapped_as_auth_error(self):
+        client = MagicMock()
+        client.auth.admin.invite_user_by_email.side_effect = RuntimeError("rate limited")
+        service = AuthService(client=client)
+
+        with pytest.raises(AuthError, match="rate limited"):
+            service.admin_invite_user("teammate@acme.com")

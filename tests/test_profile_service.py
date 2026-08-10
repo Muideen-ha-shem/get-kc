@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from src.services.profile.profile_service import ProfileService
 
 
@@ -84,3 +86,31 @@ class TestRecordLogin:
         client.table.return_value.update.assert_called_once()
         payload = client.table.return_value.update.call_args[0][0]
         assert "last_login" in payload
+
+
+class TestSetWorkspaceId:
+    """Regression coverage for a live-confirmed cross-tenant leak: the
+    on_auth_user_created trigger creates a blank profile (workspace_id=
+    null) before org-signup/invite-acceptance know the real workspace —
+    get_or_create alone can't fix an already-existing row, so this method
+    must be called explicitly to force-correct it."""
+
+    def test_updates_workspace_id(self):
+        client = MagicMock()
+        client.table.return_value.update.return_value.eq.return_value.execute.return_value.data = [
+            _row(workspace_id="w1")
+        ]
+        service = ProfileService(client=client)
+
+        profile = service.set_workspace_id("u1", "w1")
+
+        assert profile.workspace_id == "w1"
+        client.table.return_value.update.assert_called_once_with({"workspace_id": "w1"})
+
+    def test_missing_profile_raises(self):
+        client = MagicMock()
+        client.table.return_value.update.return_value.eq.return_value.execute.return_value.data = []
+        service = ProfileService(client=client)
+
+        with pytest.raises(ValueError, match="No profile found"):
+            service.set_workspace_id("u1", "w1")

@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 from src.services.conversation.conversation_repository import ConversationRepository
 from src.services.conversation.conversation_service import ConversationService
+from src.services.workspace.workspace_models import DEFAULT_WORKSPACE_ID
 
 
 def _conv_row(**overrides):
@@ -24,7 +25,32 @@ class TestConversationRepository:
         row = repo.create_conversation("u1", title="New conversation")
 
         assert row.id == "c1"
-        client.table.return_value.insert.assert_called_once_with({"user_id": "u1", "title": "New conversation"})
+        client.table.return_value.insert.assert_called_once_with(
+            {"user_id": "u1", "title": "New conversation", "workspace_id": DEFAULT_WORKSPACE_ID}
+        )
+
+    def test_list_conversations_applies_search_filter(self):
+        client = MagicMock()
+        client.table.return_value.select.return_value.eq.return_value.ilike.return_value.order.return_value.limit.return_value.execute.return_value.data = [
+            _conv_row()
+        ]
+        repo = ConversationRepository(client=client)
+
+        rows = repo.list_conversations("u1", search="SPIDIFY")
+
+        assert len(rows) == 1
+        client.table.return_value.select.return_value.eq.return_value.ilike.assert_called_once_with(
+            "title", "%SPIDIFY%"
+        )
+
+    def test_list_conversations_without_search_skips_ilike(self):
+        client = MagicMock()
+        client.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value.data = []
+        repo = ConversationRepository(client=client)
+
+        repo.list_conversations("u1")
+
+        client.table.return_value.select.return_value.eq.return_value.ilike.assert_not_called()
 
     def test_get_conversation_not_found_returns_none(self):
         client = MagicMock()
@@ -56,7 +82,20 @@ class TestConversationService:
 
         service.start_conversation("u1", "Tell me about SPIDIFY")
 
-        repo.create_conversation.assert_called_once_with("u1", title="Tell me about SPIDIFY", access_token=None)
+        repo.create_conversation.assert_called_once_with(
+            "u1", title="Tell me about SPIDIFY", access_token=None, workspace_id=DEFAULT_WORKSPACE_ID
+        )
+
+    def test_list_conversations_forwards_search_to_repository(self):
+        repo = MagicMock()
+        repo.list_conversations.return_value = []
+        service = ConversationService(repository=repo)
+
+        service.list_conversations("u1", search="SPIDIFY")
+
+        repo.list_conversations.assert_called_once_with(
+            "u1", access_token=None, search="SPIDIFY", workspace_id=None
+        )
 
     def test_start_conversation_long_first_message_truncated(self):
         repo = MagicMock()

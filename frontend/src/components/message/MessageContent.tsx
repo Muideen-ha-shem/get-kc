@@ -182,7 +182,10 @@ function PricingCards({
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {plans.map((plan, index) => (
-        <div key={`${plan.name}-${index}`} className="flex flex-col rounded-xl border border-ink/10 bg-white p-4 shadow-sm">
+        <div
+          key={`${plan.name}-${index}`}
+          className="flex flex-col rounded-xl border border-ink/10 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-gold-300 hover:shadow-md"
+        >
           <p className="text-[13px] font-semibold uppercase tracking-wide text-ink/50">{plan.name}</p>
           {plan.price ? <p className="mt-1 text-lg font-bold text-ink">{plan.price}</p> : null}
           <div className="mt-2.5 space-y-1.5">
@@ -206,12 +209,12 @@ function DataTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
   return (
     <>
       {/* md+: real table, its own scroll container so the page never scrolls sideways */}
-      <div className="hidden overflow-x-auto rounded-xl border border-ink/10 sm:block">
+      <div className="hidden max-h-96 overflow-auto rounded-xl border border-ink/10 sm:block">
         <table className="w-full border-collapse text-left text-[12.5px]">
-          <thead>
+          <thead className="sticky top-0 z-10">
             <tr className="bg-paper">
               {headers.map((h, i) => (
-                <th key={`${h}-${i}`} className="border-b border-ink/10 px-3 py-2 font-semibold text-ink/70">
+                <th key={`${h}-${i}`} className="border-b border-ink/10 bg-paper px-3 py-2 font-semibold text-ink/70">
                   {h}
                 </th>
               ))}
@@ -219,7 +222,7 @@ function DataTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
           </thead>
           <tbody>
             {rows.map((row, rowIndex) => (
-              <tr key={rowIndex} className={rowIndex % 2 ? 'bg-white' : 'bg-paper/40'}>
+              <tr key={rowIndex} className={`transition-colors hover:bg-gold-50/60 ${rowIndex % 2 ? 'bg-white' : 'bg-paper/40'}`}>
                 {row.map((cell, cellIndex) => (
                   <td key={cellIndex} className="border-b border-ink/5 px-3 py-2 align-top text-ink/75">
                     {renderInlineText(cell, `td-${rowIndex}-${cellIndex}`)}

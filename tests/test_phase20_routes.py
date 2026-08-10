@@ -20,6 +20,7 @@ from src.api.deps import (
     get_current_user_required,
 )
 from src.services.auth.auth_service import AuthUser
+from src.services.workspace.workspace_models import DEFAULT_WORKSPACE_ID
 
 
 @pytest.fixture()
@@ -53,7 +54,9 @@ class TestChatBackwardCompatibility:
         body = response.json()
         assert body["answer"] == "ok"
         assert body["session_id"] == "generated-1"
-        mock_process.assert_called_once_with("hello", session_id=None, profile_context=None)
+        mock_process.assert_called_once_with(
+            "hello", session_id=None, profile_context=None, workspace_id=DEFAULT_WORKSPACE_ID, handoff_context=None
+        )
 
     def test_old_style_request_without_new_fields_is_accepted(self, client):
         with patch("src.api.routes.chat.chat_orchestrator.process_request_response") as mock_process:
@@ -74,7 +77,10 @@ class TestChatSessionIdPassthrough:
 
             client.post("/chat", json={"message": "How much does it cost?", "session_id": "s1"})
 
-        mock_process.assert_called_once_with("How much does it cost?", session_id="s1", profile_context=None)
+        mock_process.assert_called_once_with(
+            "How much does it cost?", session_id="s1", profile_context=None,
+            workspace_id=DEFAULT_WORKSPACE_ID, handoff_context=None
+        )
 
 
 class TestChatAuthenticatedPersonalizationAndPersistence:
@@ -172,6 +178,32 @@ class TestAuthRoutes:
         with patch("src.api.routes.auth._auth_service.request_password_reset"):
             response = client.post("/auth/password-reset", json={"email": "a@b.com"})
         assert response.status_code == 200
+
+    def test_password_reset_passes_redirect_to_frontend_reset_page(self, client):
+        with patch("src.api.routes.auth._auth_service.request_password_reset") as mock_reset:
+            client.post("/auth/password-reset", json={"email": "a@b.com"})
+        assert mock_reset.call_args.kwargs["redirect_to"].endswith("/reset-password")
+
+    def test_update_password_returns_200(self, client):
+        with patch("src.api.routes.auth._auth_service.confirm_password_reset"):
+            response = client.post(
+                "/auth/update-password",
+                json={"access_token": "recovery-token", "new_password": "new-password123"},
+            )
+        assert response.status_code == 200
+
+    def test_update_password_invalid_token_returns_400(self, client):
+        from src.services.auth.auth_service import AuthError
+
+        with patch(
+            "src.api.routes.auth._auth_service.confirm_password_reset",
+            side_effect=AuthError("This reset link is invalid or has expired."),
+        ):
+            response = client.post(
+                "/auth/update-password",
+                json={"access_token": "bad-token", "new_password": "new-password123"},
+            )
+        assert response.status_code == 400
 
     def test_me_without_token_returns_401(self, client):
         response = client.get("/auth/me")

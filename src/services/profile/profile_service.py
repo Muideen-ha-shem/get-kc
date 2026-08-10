@@ -24,6 +24,7 @@ from typing import Any
 from supabase import Client
 
 from ...sb import get_authenticated_client, get_client
+from ...services.workspace.workspace_models import DEFAULT_WORKSPACE_ID
 from ...shared.logging import get_logger
 
 logger: logging.Logger = get_logger(__name__)
@@ -43,6 +44,7 @@ class CustomerProfile:
     created_at: str | None = None
     updated_at: str | None = None
     last_login: str | None = None
+    workspace_id: str | None = None
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "CustomerProfile":
@@ -57,24 +59,37 @@ class ProfileService:
         return get_authenticated_client(access_token) if access_token else self._client
 
     def get_or_create(
-        self, auth_user_id: str, email: str, full_name: str | None = None, access_token: str | None = None
+        self,
+        auth_user_id: str,
+        email: str,
+        full_name: str | None = None,
+        access_token: str | None = None,
+        workspace_id: str = DEFAULT_WORKSPACE_ID,
     ) -> CustomerProfile:
         existing = self.get_by_auth_user_id(auth_user_id, access_token=access_token)
         if existing is not None:
             return existing
-        payload = {"auth_user_id": auth_user_id, "email": email, "full_name": full_name}
+        payload = {
+            "auth_user_id": auth_user_id,
+            "email": email,
+            "full_name": full_name,
+            "workspace_id": workspace_id,
+        }
         response = self._client_for(access_token).table(_TABLE).insert(payload).execute()
         return CustomerProfile.from_row(response.data[0])
 
-    def get_by_auth_user_id(self, auth_user_id: str, access_token: str | None = None) -> CustomerProfile | None:
-        response = (
+    def get_by_auth_user_id(
+        self, auth_user_id: str, access_token: str | None = None, workspace_id: str | None = None
+    ) -> CustomerProfile | None:
+        query = (
             self._client_for(access_token)
             .table(_TABLE)
             .select("*")
             .eq("auth_user_id", auth_user_id)
-            .limit(1)
-            .execute()
         )
+        if workspace_id is not None:
+            query = query.eq("workspace_id", workspace_id)
+        response = query.limit(1).execute()
         if not response.data:
             return None
         return CustomerProfile.from_row(response.data[0])
@@ -91,6 +106,35 @@ class ProfileService:
             self._client_for(access_token)
             .table(_TABLE)
             .update(payload)
+            .eq("auth_user_id", auth_user_id)
+            .execute()
+        )
+        if not response.data:
+            raise ValueError(f"No profile found for auth_user_id={auth_user_id}")
+        return CustomerProfile.from_row(response.data[0])
+
+    def set_workspace_id(
+        self, auth_user_id: str, workspace_id: str, access_token: str | None = None
+    ) -> CustomerProfile:
+        """Force-corrects which workspace this profile belongs to.
+
+        Deliberately separate from ``update()``'s generic field allowlist —
+        the ``on_auth_user_created`` DB trigger (see module docstring)
+        creates a blank profile row with ``workspace_id=null`` the instant
+        an auth user is inserted, which happens *before* a caller like
+        org-signup or invite-acceptance has created/known the real
+        workspace. ``get_or_create`` then finds that row already exists and
+        returns it unchanged — silently leaving ``workspace_id`` null,
+        which makes ``get_current_chat_workspace`` fall through to the
+        default (Ha-Shem) workspace for that customer's every future chat
+        request. Callers that just resolved/created the *real* workspace
+        for a user must call this immediately after ``get_or_create`` to
+        guarantee it's actually applied, not just attempted.
+        """
+        response = (
+            self._client_for(access_token)
+            .table(_TABLE)
+            .update({"workspace_id": workspace_id})
             .eq("auth_user_id", auth_user_id)
             .execute()
         )

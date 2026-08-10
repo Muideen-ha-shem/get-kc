@@ -1,5 +1,7 @@
 import asyncio
 import os
+from typing import Callable, Optional
+
 from dotenv import load_dotenv
 from crawl4ai import AsyncWebCrawler
 from crawl4ai.async_configs import BrowserConfig, CrawlerRunConfig, CacheMode
@@ -22,6 +24,7 @@ async def crawl_site(
     wait_until: str = "domcontentloaded",
     delay_before_return_html: float = 2.0,
     page_timeout: int = 60000,
+    on_result: Optional[Callable[[dict], None]] = None,
 ):
     """Crawl *url* (BFS, up to *max_depth*) and store each page in Supabase.
 
@@ -39,6 +42,13 @@ async def crawl_site(
             JS finishes rendering and returns near-empty markdown) need
             ``wait_until="load"`` and a longer delay; see crawl_spidify.py
             / crawl_zivaaira.py.
+        on_result: Phase 27 — optional callback invoked once per
+            successfully-crawled page (same dict shape as the row written
+            to ``crawled_pages``), letting a caller ingest results
+            in-process without polling the staging table. ``None`` (the
+            default) preserves the exact prior behaviour for every
+            existing caller — none of the 13 ``crawl_*.py`` scripts pass
+            this argument.
     """
     browser_cfg = BrowserConfig(
         headless=headless,
@@ -77,10 +87,10 @@ async def crawl_site(
         undetected_browser=True,
     ) as crawler:
         async for result in await crawler.arun(url=url, config=run_cfg):
-            process_result(result)
+            process_result(result, on_result=on_result)
 
 
-def process_result(result):
+def process_result(result, on_result: Optional[Callable[[dict], None]] = None):
     if result.success:
         result_json = result_dict(result)
         sb_client = get_client()
@@ -90,6 +100,9 @@ def process_result(result):
             sb_client.table(table_name).insert(result_json).execute()
         except PostgrestAPIError as e:
             print(f"Error inserting into Supabase: {e}")
+
+        if on_result is not None:
+            on_result(result_json)
     else:
         print(f"Crawl failed: {result.error_message}")
 

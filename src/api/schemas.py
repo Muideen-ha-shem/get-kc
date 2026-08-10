@@ -1,6 +1,7 @@
 import re
+from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ChatRequest(BaseModel):
@@ -13,6 +14,12 @@ class ChatRequest(BaseModel):
     conversation_id: str | None = Field(
         None, description="An existing conversation (Phase 20, authenticated users "
         "only) to persist this turn into. Ignored for anonymous requests."
+    )
+    handoff_context: str | None = Field(
+        None, description="Phase 25: an optional recap from a just-resolved human "
+        "escalation (returned by POST /agent/escalations/{id}/rejoin-ai), prepended "
+        "to the question exactly like profile_context — lets the AI resume without "
+        "the customer repeating themselves. Omit for the exact prior behaviour."
     )
 
 
@@ -34,6 +41,17 @@ class ChatResponse(BaseModel):
         None, description="Echoes the request's session_id, or a freshly generated "
         "one when none was supplied — Phase 20 clients should persist this and send "
         "it on the next turn."
+    )
+    escalation_recommended: bool = Field(
+        False, description="Phase 24: true when the escalation engine recommends human "
+        "handoff for this turn (explicit request, critical intent, low confidence, or no "
+        "evidence at all). Recommending is read-only — nothing is escalated until the "
+        "caller explicitly calls POST /chat/escalate. Old clients that ignore this field "
+        "see identical behaviour to before this phase."
+    )
+    escalation_reason: str | None = Field(
+        None, description="One of 'explicit_request' | 'critical_intent' | 'low_confidence' "
+        "| 'unresolved' when escalation_recommended is true, else None."
     )
 
 
@@ -97,6 +115,11 @@ class PasswordResetRequest(BaseModel):
         if not _EMAIL_RE.match(value):
             raise ValueError("must be a valid email address")
         return value
+
+
+class PasswordUpdateRequest(BaseModel):
+    access_token: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=8, max_length=200)
 
 
 class AuthUserSchema(BaseModel):
@@ -170,6 +193,22 @@ class SolutionSummary(BaseModel):
     learn_more_url: str
 
 
+class WorkspaceConfigSchema(BaseModel):
+    """Public branding config for the embeddable SDK (``GET /workspace/config``,
+    Phase 23). Deliberately excludes ``api_key``/``host``/``is_active`` —
+    internal resolution fields never exposed to a browser-embedded widget."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str
+    slug: str
+    name: str
+    logo: str | None = None
+    primary_color: str | None = Field(None, alias="primaryColor")
+    welcome_message: str | None = Field(None, alias="welcomeMessage")
+    quick_actions: list[dict] | None = Field(None, alias="quickActions")
+
+
 class SaveComparisonRequest(BaseModel):
     product_ids: list[str] = Field(..., min_length=2, max_length=10)
 
@@ -227,3 +266,155 @@ class AppointmentSchema(BaseModel):
     name: str
     email: str
     status: str
+
+
+class SubmitFeedbackRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=2000)
+    answer: str = Field(..., min_length=1, max_length=8000)
+    rating: str = Field(..., pattern="^(helpful|not_helpful)$")
+    comment: str | None = Field(None, max_length=2000)
+    session_id: str | None = None
+    conversation_id: str | None = None
+
+
+class FeedbackSchema(BaseModel):
+    id: str
+    question: str
+    answer: str
+    rating: str
+    comment: str | None = None
+    created_at: str | None = None
+
+
+class NotificationSchema(BaseModel):
+    id: str
+    type: str
+    title: str
+    body: str | None = None
+    is_read: bool
+    created_at: str | None = None
+
+
+class UnreadCountSchema(BaseModel):
+    count: int
+
+
+class SupportAgentSchema(BaseModel):
+    """One `support_agents` row (Phase 24) — never includes internal
+    fields beyond what an agent needs to see about themselves or teammates."""
+
+    id: str
+    workspace_id: str
+    name: str
+    email: str
+    department: str
+    status: str
+    created_at: str | None = None
+
+
+class AgentStatusUpdate(BaseModel):
+    status: Literal["available", "away", "offline"]
+
+
+class EscalationSummarySchema(BaseModel):
+    customer: str
+    workspace: str
+    intent: list[str]
+    sentiment: str
+    products: list[str]
+    problem: str
+    actions_already_taken: list[dict]
+    suggested_resolution: list[dict]
+
+
+class EscalationMessageSchema(BaseModel):
+    id: str
+    sender_type: str
+    sender_auth_user_id: str | None = None
+    content: str
+    created_at: str | None = None
+
+
+class EscalationNoteSchema(BaseModel):
+    id: str
+    author_agent_id: str | None = None
+    content: str
+    created_at: str | None = None
+
+
+class EscalationSchema(BaseModel):
+    id: str
+    workspace_id: str
+    conversation_id: str | None = None
+    status: str
+    assigned_agent_id: str | None = None
+    assigned_agent_name: str | None = Field(
+        None, description="Phase 25: populated by the route from the assigned agent's "
+        "name — lets the AI-to-human handoff message read '<name> from <department> "
+        "has been assigned' without a second lookup on the client."
+    )
+    trigger_reason: str
+    department: str | None = None
+    ai_engaged: bool = True
+    summary: EscalationSummarySchema | None = None
+    created_at: str | None = None
+    assigned_at: str | None = None
+    resolved_at: str | None = None
+    closed_at: str | None = None
+    messages: list[EscalationMessageSchema] | None = Field(
+        None, description="Only populated by the escalation detail endpoint."
+    )
+    notes: list[EscalationNoteSchema] | None = Field(
+        None, description="Only populated by the escalation detail endpoint. "
+        "Never returned to any customer-facing endpoint."
+    )
+
+
+class EscalationCreateRequest(BaseModel):
+    conversation_id: str | None = None
+    question: str = Field(..., min_length=1)
+
+
+class EscalationActionRequest(BaseModel):
+    escalation_id: str
+
+
+class EscalationMessageCreateRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=5000)
+
+
+class EscalationNoteCreateRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=5000)
+
+
+class CopilotSuggestReplyRequest(BaseModel):
+    question: str = Field(..., min_length=1)
+
+
+class CopilotSuggestReplySchema(BaseModel):
+    draft: str
+    citations: list[dict]
+
+
+class RejoinAiResponseSchema(BaseModel):
+    escalation: EscalationSchema
+    handoff_recap: str
+
+
+class CustomerTimelineSchema(BaseModel):
+    profile: dict | None = None
+    conversations: list[ConversationSummary] = Field(default_factory=list)
+    saved_recommendations: list[SavedRecommendationSchema] = Field(default_factory=list)
+    saved_comparisons: list[SavedComparisonSchema] = Field(default_factory=list)
+    appointments: list[AppointmentSchema] = Field(default_factory=list)
+    past_escalations: list[EscalationSchema] = Field(default_factory=list)
+    demo_requests: list[dict] = Field(default_factory=list)
+    demo_requests_note: str
+
+
+class AgentDashboardStatsSchema(BaseModel):
+    status: str
+    department: str
+    current_workload: int
+    resolved_today: int
+    average_resolution_minutes: float | None = None

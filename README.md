@@ -120,9 +120,11 @@ once a visitor signs in.
   steered toward SPIDIFY without extra clarifying questions) — implemented by
   lightly annotating the question text handed to the (unmodified) advisory
   engines, not by changing their logic.
-- **Customer Dashboard**: `/dashboard` (React Router, auth-protected) with
-  Recent Conversations, Continue/New Conversation, Profile, Saved
-  Recommendations, Saved Comparisons, and a Notifications placeholder.
+- **Customer Dashboard**: `/dashboard` (React Router, auth-protected) with a
+  sticky sidebar (avatar/name/email/nav always visible, content scrolls
+  independently), Recent Conversations (search-as-you-type, resume/rename/
+  delete), Continue/New Conversation, Profile, Saved Recommendations, Saved
+  Comparisons, and a real Notifications inbox with an unread-count badge.
 
 ### ⭐ Saved Comparisons & Recommendations
 
@@ -149,6 +151,35 @@ resets the next day" true, with no cron job or explicit reset step anywhere.
 requests); a `unique (appointment_date, time_slot)` database constraint is the
 real guard against two people booking the same slot at once, not just the
 pre-check the API also does.
+
+### 💬 Chat Experience (Phase 21)
+
+- **Copy / Regenerate / Export**: every grounded answer gets a Copy button
+  (clipboard), a Regenerate button (re-asks the same underlying question and
+  replaces that message in place — no new bubble), and a header-level Export
+  button that downloads the whole conversation as a clean Markdown file (the
+  floating widget and the Dashboard's conversation view both use the same
+  `messagesToMarkdown` helper — one implementation, not two).
+- **👍/👎 Feedback**: every real Q&A turn (not the static greeting) gets a
+  thumbs up/down; thumbs-down reveals an optional comment field before
+  submitting. Public — works for anonymous visitors too, same precedent as
+  demo requests — `user_id` is recorded when the rater happens to be signed
+  in. Stored in `message_feedback` for future analytics.
+- **Improved loading state**: an animated three-dot indicator instead of
+  static "thinking..." text, and it only shows before any text has started
+  streaming in, instead of stacking a second bubble under a growing one.
+- **Richer tables**: comparison/pricing tables (already Markdown-driven —
+  see Rich AI Responses below) now have a sticky header and row-hover
+  highlighting for longer tables.
+
+### 🔔 In-App Notifications (Phase 21)
+
+A signed-in customer gets a notification — visible via a bell badge in the
+Dashboard sidebar and a real Notifications inbox — whenever they book an
+appointment, save a recommendation, or submit a demo request while signed
+in. `NotificationService` is the one seam all of that goes through
+(`notify`/`list_for_user`/`mark_read`), so swapping polling for a realtime
+push later touches nothing outside that class.
 
 ### 🎯 Retrieval Quality & Performance
 

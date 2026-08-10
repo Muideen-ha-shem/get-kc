@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { FormEvent, useEffect, useState } from 'react';
 import { CheckCircle2, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/authContext';
 
 type Mode = 'sign-in' | 'sign-up' | 'reset';
@@ -14,6 +15,7 @@ type AuthModalProps = {
 
 export function AuthModal({ isOpen, onClose, initialMode = 'sign-in' }: AuthModalProps) {
   const { signIn, signUp, requestPasswordReset } = useAuth();
+  const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>(initialMode);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -39,9 +41,11 @@ export function AuthModal({ isOpen, onClose, initialMode = 'sign-in' }: AuthModa
       if (mode === 'sign-in') {
         await signIn(email.trim(), password);
         onClose();
+        navigate('/dashboard');
       } else if (mode === 'sign-up') {
         await signUp(email.trim(), password, fullName.trim() || undefined);
         onClose();
+        navigate('/dashboard');
       } else {
         await requestPasswordReset(email.trim());
         setStatus('reset-sent');
@@ -185,6 +189,22 @@ export function AuthModal({ isOpen, onClose, initialMode = 'sign-in' }: AuthModa
                     </button>
                   )}
                 </div>
+
+                {mode === 'sign-up' ? (
+                  <p className="text-center text-xs text-ink/50">
+                    Setting up on behalf of a company?{' '}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        navigate('/signup');
+                      }}
+                      className="font-semibold text-ink hover:underline"
+                    >
+                      Create an organization instead
+                    </button>
+                  </p>
+                ) : null}
               </form>
             )}
           </motion.div>

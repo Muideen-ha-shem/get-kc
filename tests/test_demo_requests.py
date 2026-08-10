@@ -115,7 +115,11 @@ class TestDemoRequestRoute:
             "src.api.routes.demo_request.submit_demo_request",
             return_value={"id": 7, "name": "Ada", "email": "ada@example.com", "company": "Acme", "use_case": "KYC", "product": "SPIDIFY"},
         ) as mock_submit:
-            result = create_demo_request(DemoRequest(name="Ada", email="ada@example.com", company="Acme", use_case="KYC", product="SPIDIFY"))
+            result = create_demo_request(
+                DemoRequest(name="Ada", email="ada@example.com", company="Acme", use_case="KYC", product="SPIDIFY"),
+                user=None,
+                access_token=None,
+            )
 
         assert result.id == 7
         assert result.status == "received"
@@ -132,7 +136,7 @@ class TestDemoRequestRoute:
             side_effect=DemoRequestTableMissingError("table missing"),
         ):
             with pytest.raises(HTTPException) as exc_info:
-                create_demo_request(DemoRequest(name="Ada", email="ada@example.com"))
+                create_demo_request(DemoRequest(name="Ada", email="ada@example.com"), user=None, access_token=None)
 
         assert exc_info.value.status_code == 503
 
@@ -146,6 +150,6 @@ class TestDemoRequestRoute:
             side_effect=RuntimeError("boom"),
         ):
             with pytest.raises(HTTPException) as exc_info:
-                create_demo_request(DemoRequest(name="Ada", email="ada@example.com"))
+                create_demo_request(DemoRequest(name="Ada", email="ada@example.com"), user=None, access_token=None)
 
         assert exc_info.value.status_code == 500

@@ -2,10 +2,12 @@ import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Bell,
+  Check,
   GitCompare,
   LogOut,
   MessageSquarePlus,
   Pencil,
+  Search,
   SendHorizonal,
   Star,
   Trash2,
@@ -14,12 +16,14 @@ import {
 import { HavisIQMark } from '../components/HavisIQMark';
 import { MessageContent } from '../components/message/MessageContent';
 import { SourceChips } from '../components/message/SourceChips';
+import { MessageActions } from '../components/message/MessageActions';
 import { CompareSolutionsModal } from '../components/CompareSolutionsModal';
 import { DemoRequestModal } from '../components/DemoRequestModal';
 import { useAuth } from '../lib/authContext';
 import { apiJson } from '../lib/apiClient';
 import { useSolutions } from '../lib/useSolutions';
 import { getSessionId } from '../lib/sessionId';
+import { downloadMarkdown, messagesToMarkdown } from '../lib/exportConversation';
 import type { Solution } from '../solutions';
 
 type ConversationSummary = {
@@ -60,16 +64,22 @@ export function DashboardPage() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [selected, setSelected] = useState<ConversationDetail | null>(null);
   const [isLoadingList, setIsLoadingList] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
   const [input, setInput] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [compareModal, setCompareModal] = useState<{ open: boolean; productIds?: string[] }>({ open: false });
   const [demoModal, setDemoModal] = useState<{ open: boolean; solution?: Solution }>({ open: false });
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
+  const [isSupportAgent, setIsSupportAgent] = useState(false);
+  const [adminWorkspaces, setAdminWorkspaces] = useState<{ id: string; slug: string; name: string }[]>([]);
 
-  const loadConversations = () => {
+  const loadConversations = (search?: string) => {
     setIsLoadingList(true);
-    apiJson<ConversationSummary[]>('/conversations')
+    const query = search ? `?search=${encodeURIComponent(search)}` : '';
+    apiJson<ConversationSummary[]>(`/conversations${query}`)
       .then(setConversations)
       .catch(() => setConversations([]))
       .finally(() => setIsLoadingList(false));
@@ -77,7 +87,35 @@ export function DashboardPage() {
 
   useEffect(() => {
     loadConversations();
+    apiJson<{ count: number }>('/notifications/unread-count')
+      .then((r) => setUnreadCount(r.count))
+      .catch(() => setUnreadCount(0));
+    // Cheap 403-probes (same pattern as AdminGuard/AgentDashboardPage) so the
+    // sidebar can surface Admin/Agent links only to users who actually have
+    // those roles, instead of leaving those routes reachable only by typing
+    // the URL directly.
+    apiJson('/admin/me')
+      .then(() => setIsPlatformAdmin(true))
+      .catch(() => setIsPlatformAdmin(false));
+    apiJson('/agents/me')
+      .then(() => setIsSupportAgent(true))
+      .catch(() => setIsSupportAgent(false));
+    // A workspace_admin (e.g. someone who self-signed-up their own
+    // organization, Phase 28) is scoped to specific workspace(s), not a
+    // platform-wide role, so it can't use the same true/false 403-probe
+    // as isPlatformAdmin/isSupportAgent above — this always succeeds and
+    // just returns whichever workspace(s), if any, the user administers.
+    apiJson<{ workspaces: { id: string; slug: string; name: string }[] }>('/workspace-admins/me')
+      .then((r) => setAdminWorkspaces(r.workspaces))
+      .catch(() => setAdminWorkspaces([]));
   }, []);
+
+  // Debounce search-as-you-type so every keystroke doesn't fire a request.
+  useEffect(() => {
+    const handle = window.setTimeout(() => loadConversations(searchTerm || undefined), 300);
+    return () => window.clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchTerm]);
 
   const openConversation = async (id: string) => {
     const detail = await apiJson<ConversationDetail>(`/conversations/${id}`);
@@ -157,27 +195,59 @@ export function DashboardPage() {
     }
   };
 
+  const handleExport = () => {
+    if (!selected || selected.messages.length === 0) return;
+    const markdown = messagesToMarkdown(
+      selected.conversation.title,
+      selected.messages.map((m) => ({ role: m.role, content: m.content, sources: m.citations }))
+    );
+    downloadMarkdown(`${selected.conversation.title.slice(0, 40)}.md`, markdown);
+  };
+
   return (
     <div className="flex h-screen overflow-hidden bg-paper text-ink">
       <aside className="sticky top-0 flex h-screen w-72 shrink-0 flex-col gap-6 border-r border-ink/10 bg-white/70 px-5 py-6">
-        <Link to="/" className="flex items-center gap-3">
-          <HavisIQMark size={36} />
-          <div>
-            <p className="font-display text-base tracking-tight">HavisIQ</p>
-            <p className="text-[10px] uppercase tracking-[0.28em] text-ink/50">Customer Dashboard</p>
-          </div>
-        </Link>
+        <div className="flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-3">
+            <HavisIQMark size={36} />
+            <div>
+              <p className="font-display text-base tracking-tight">HavisIQ</p>
+              <p className="text-[10px] uppercase tracking-[0.28em] text-ink/50">Customer Dashboard</p>
+            </div>
+          </Link>
+          <button
+            onClick={() => setSection('notifications')}
+            className="relative rounded-full p-1.5 text-ink/50 transition hover:bg-paper hover:text-ink"
+            aria-label={unreadCount > 0 ? `${unreadCount} unread notifications` : 'Notifications'}
+          >
+            <Bell size={18} />
+            {unreadCount > 0 ? (
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-gold-500 px-1 text-[9px] font-bold text-ink">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            ) : null}
+          </button>
+        </div>
 
         <nav className="flex flex-col gap-1 text-sm font-medium text-ink/70">
           {SECTIONS.map((item) => (
             <button
               key={item.id}
               onClick={() => setSection(item.id)}
-              className={`rounded-xl px-3 py-2 text-left transition ${
+              className={`flex items-center justify-between rounded-xl px-3 py-2 text-left transition ${
                 section === item.id ? 'bg-ink text-paper' : 'hover:bg-paper'
               }`}
             >
               {item.label}
+              {item.id === 'notifications' && unreadCount > 0 ? (
+                <span
+                  className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                    section === item.id ? 'bg-white/20 text-paper' : 'bg-gold-100 text-gold-700'
+                  }`}
+                >
+                  {unreadCount}
+                </span>
+              ) : null}
             </button>
           ))}
         </nav>
@@ -190,10 +260,22 @@ export function DashboardPage() {
             >
               <MessageSquarePlus size={16} /> New conversation
             </button>
+            <div className="relative">
+              <Search size={13} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink/30" />
+              <input
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search conversations..."
+                aria-label="Search conversations"
+                className="w-full rounded-xl border border-ink/10 bg-white py-2 pl-8 pr-3 text-xs outline-none focus:border-gold-400"
+              />
+            </div>
             <div className="flex-1 space-y-1 overflow-y-auto">
-              {isLoadingList ? <p className="px-2 py-3 text-xs text-ink/40">Loading...</p> : null}
+              {isLoadingList ? <SkeletonRows count={4} /> : null}
               {!isLoadingList && conversations.length === 0 ? (
-                <p className="px-2 py-3 text-xs text-ink/40">No conversations yet.</p>
+                <p className="px-2 py-3 text-xs text-ink/40">
+                  {searchTerm ? `No conversations match "${searchTerm}".` : 'No conversations yet.'}
+                </p>
               ) : null}
               {conversations.map((c) => (
                 <div
@@ -222,20 +304,44 @@ export function DashboardPage() {
                       setRenameValue(c.title);
                     }}
                     className="hidden rounded p-1 text-ink/40 hover:text-ink group-hover:block"
-                    aria-label="Rename"
+                    aria-label={`Rename ${c.title}`}
                   >
                     <Pencil size={13} />
                   </button>
                   <button
                     onClick={() => deleteConversation(c.id)}
                     className="hidden rounded p-1 text-ink/40 hover:text-red-600 group-hover:block"
-                    aria-label="Delete"
+                    aria-label={`Delete ${c.title}`}
                   >
                     <Trash2 size={13} />
                   </button>
                 </div>
               ))}
             </div>
+          </div>
+        ) : null}
+
+        {isPlatformAdmin || isSupportAgent || adminWorkspaces.length > 0 ? (
+          <div className="flex flex-col gap-1 border-t border-ink/10 pt-3 text-sm font-medium text-ink/70">
+            {isPlatformAdmin ? (
+              <Link to="/admin" className="rounded-xl px-3 py-2 transition hover:bg-paper hover:text-ink">
+                Admin Dashboard
+              </Link>
+            ) : null}
+            {isSupportAgent ? (
+              <Link to="/agent" className="rounded-xl px-3 py-2 transition hover:bg-paper hover:text-ink">
+                Agent Dashboard
+              </Link>
+            ) : null}
+            {adminWorkspaces.map((workspace) => (
+              <Link
+                key={workspace.id}
+                to={`/admin/workspaces/${workspace.id}`}
+                className="rounded-xl px-3 py-2 transition hover:bg-paper hover:text-ink"
+              >
+                {workspace.name} (Admin)
+              </Link>
+            ))}
           </div>
         ) : null}
 
@@ -260,29 +366,54 @@ export function DashboardPage() {
         {section === 'conversations' ? (
           selected ? (
             <div className="flex h-full flex-col">
-              <h2 className="mb-4 font-display text-xl">{selected.conversation.title}</h2>
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h2 className="font-display text-xl">{selected.conversation.title}</h2>
+                {selected.messages.length > 0 ? (
+                  <button
+                    onClick={handleExport}
+                    className="shrink-0 rounded-full border border-ink/15 px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-gold-400 hover:text-gold-700"
+                  >
+                    Export
+                  </button>
+                ) : null}
+              </div>
               <div className="flex-1 space-y-4 overflow-y-auto rounded-2xl border border-ink/10 bg-white p-5">
                 {selected.messages.length === 0 ? (
                   <p className="text-sm text-ink/50">Ask HavisIQ anything to continue this conversation.</p>
                 ) : null}
-                {selected.messages.map((m) => (
-                  <div key={m.id} className={m.role === 'user' ? 'text-right' : 'text-left'}>
-                    <div
-                      className={`inline-block max-w-2xl rounded-2xl px-4 py-2.5 text-sm ${
-                        m.role === 'user' ? 'bg-ink text-paper' : 'bg-paper text-ink'
-                      }`}
-                    >
+                {selected.messages.map((m) => {
+                  const precedingQuestion =
+                    m.role === 'assistant'
+                      ? selected.messages[selected.messages.indexOf(m) - 1]?.content ?? ''
+                      : '';
+                  return (
+                    <div key={m.id} className={m.role === 'user' ? 'text-right' : 'text-left'}>
+                      <div
+                        className={`inline-block max-w-2xl rounded-2xl px-4 py-2.5 text-sm ${
+                          m.role === 'user' ? 'bg-ink text-paper' : 'bg-paper text-ink'
+                        }`}
+                      >
+                        {m.role === 'assistant' ? (
+                          <MessageContent content={m.content} solutions={solutions} />
+                        ) : (
+                          m.content
+                        )}
+                      </div>
+                      {m.role === 'assistant' && m.citations.length > 0 ? (
+                        <div className="mt-1"><SourceChips sources={m.citations} /></div>
+                      ) : null}
                       {m.role === 'assistant' ? (
-                        <MessageContent content={m.content} solutions={solutions} />
-                      ) : (
-                        m.content
-                      )}
+                        <div className="flex justify-start">
+                          <MessageActions
+                            question={precedingQuestion}
+                            answer={m.content}
+                            conversationId={selected.conversation.id}
+                          />
+                        </div>
+                      ) : null}
                     </div>
-                    {m.role === 'assistant' && m.citations.length > 0 ? (
-                      <div className="mt-1"><SourceChips sources={m.citations} /></div>
-                    ) : null}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               <form onSubmit={handleSend} className="mt-4 flex items-center gap-2">
                 <input
@@ -315,7 +446,7 @@ export function DashboardPage() {
         {section === 'profile' ? <ProfileSection /> : null}
 
         {section === 'notifications' ? (
-          <EmptyState icon={<Bell size={28} />} title="Notifications" body="Nothing to show yet." />
+          <NotificationsSection onUnreadCountChange={setUnreadCount} />
         ) : null}
       </main>
 
@@ -332,6 +463,109 @@ export function DashboardPage() {
         product={demoModal.solution?.id}
         productLabel={demoModal.solution?.name}
       />
+    </div>
+  );
+}
+
+function SkeletonRows({ count }: { count: number }) {
+  return (
+    <div className="space-y-1.5" aria-hidden="true">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="h-9 animate-pulse rounded-xl bg-ink/5" />
+      ))}
+    </div>
+  );
+}
+
+function SkeletonCards({ count }: { count: number }) {
+  return (
+    <div className="max-w-2xl space-y-3" aria-hidden="true">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="h-16 animate-pulse rounded-2xl bg-ink/5" />
+      ))}
+    </div>
+  );
+}
+
+type Notification = { id: string; type: string; title: string; body: string | null; is_read: boolean; created_at: string | null };
+
+const NOTIFICATION_ICON: Record<string, string> = {
+  demo_request: '📅',
+  appointment: '🗓️',
+  saved_recommendation: '⭐',
+  support_update: '💬',
+};
+
+function NotificationsSection({ onUnreadCountChange }: { onUnreadCountChange: (count: number) => void }) {
+  const [items, setItems] = useState<Notification[] | null>(null);
+
+  const load = () => {
+    apiJson<Notification[]>('/notifications')
+      .then(setItems)
+      .catch(() => setItems([]));
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const markRead = async (id: string) => {
+    await apiJson(`/notifications/${id}/read`, { method: 'POST' });
+    setItems((prev) => {
+      const next = prev ? prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)) : prev;
+      onUnreadCountChange(next ? next.filter((n) => !n.is_read).length : 0);
+      return next;
+    });
+  };
+
+  const markAllRead = async () => {
+    await apiJson('/notifications/read-all', { method: 'POST' });
+    setItems((prev) => (prev ? prev.map((n) => ({ ...n, is_read: true })) : prev));
+    onUnreadCountChange(0);
+  };
+
+  if (items === null) return <SkeletonCards count={3} />;
+  if (items.length === 0) {
+    return (
+      <EmptyState
+        icon={<Bell size={28} />}
+        title="Notifications"
+        body="Updates on demo requests, appointments, and saved recommendations will show up here."
+      />
+    );
+  }
+
+  const hasUnread = items.some((n) => !n.is_read);
+
+  return (
+    <div className="max-w-2xl space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="font-display text-xl text-ink">Notifications</h2>
+        {hasUnread ? (
+          <button onClick={markAllRead} className="flex items-center gap-1 text-xs font-semibold text-ink/60 hover:text-ink">
+            <Check size={13} /> Mark all read
+          </button>
+        ) : null}
+      </div>
+      {items.map((item) => (
+        <button
+          key={item.id}
+          onClick={() => !item.is_read && markRead(item.id)}
+          className={`flex w-full items-start gap-3 rounded-2xl border p-4 text-left transition ${
+            item.is_read ? 'border-ink/10 bg-white' : 'border-gold-300 bg-gold-50/60'
+          }`}
+        >
+          <span className="text-lg" aria-hidden="true">{NOTIFICATION_ICON[item.type] ?? '🔔'}</span>
+          <div className="min-w-0 flex-1">
+            <p className="font-medium text-ink">{item.title}</p>
+            {item.body ? <p className="mt-0.5 text-sm text-ink/60">{item.body}</p> : null}
+            {item.created_at ? (
+              <p className="mt-1 text-xs text-ink/35">{new Date(item.created_at).toLocaleString()}</p>
+            ) : null}
+          </div>
+          {!item.is_read ? <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-gold-500" aria-hidden="true" /> : null}
+        </button>
+      ))}
     </div>
   );
 }
@@ -357,7 +591,7 @@ function SavedComparisonsSection({ onOpen }: { onOpen: (productIds: string[]) =>
     setItems((prev) => (prev ? prev.filter((c) => c.id !== id) : prev));
   };
 
-  if (items === null) return <p className="text-sm text-ink/50">Loading...</p>;
+  if (items === null) return <SkeletonCards count={3} />;
   if (items.length === 0) {
     return (
       <EmptyState
@@ -391,7 +625,7 @@ function SavedComparisonsSection({ onOpen }: { onOpen: (productIds: string[]) =>
             <button
               onClick={() => remove(item.id)}
               className="rounded-lg p-1.5 text-ink/40 hover:text-red-600"
-              aria-label="Remove"
+              aria-label={`Remove comparison of ${item.product_ids.map(nameFor).join(', ')}`}
             >
               <Trash2 size={14} />
             </button>
@@ -425,7 +659,7 @@ function SavedRecommendationsSection() {
     setItems((prev) => (prev ? prev.filter((r) => r.id !== id) : prev));
   };
 
-  if (items === null) return <p className="text-sm text-ink/50">Loading...</p>;
+  if (items === null) return <SkeletonCards count={3} />;
   if (items.length === 0) {
     return (
       <EmptyState
@@ -444,14 +678,18 @@ function SavedRecommendationsSection() {
         return (
           <div key={item.id} className="rounded-2xl border border-ink/10 bg-white p-4">
             <div className="flex items-start justify-between gap-3">
-              <button onClick={() => setExpandedId(isOpen ? null : item.id)} className="flex-1 text-left">
+              <button
+                onClick={() => setExpandedId(isOpen ? null : item.id)}
+                className="flex-1 text-left"
+                aria-expanded={isOpen}
+              >
                 <p className="font-medium text-ink">{item.products.join(', ')}</p>
                 <p className="mt-0.5 truncate text-xs text-ink/50">{item.question}</p>
               </button>
               <button
                 onClick={() => remove(item.id)}
                 className="shrink-0 rounded-lg p-1.5 text-ink/40 hover:text-red-600"
-                aria-label="Remove"
+                aria-label={`Remove recommendation for ${item.products.join(', ')}`}
               >
                 <Trash2 size={14} />
               </button>
@@ -491,7 +729,16 @@ function ProfileSection() {
     apiJson<Profile>('/profile').then(setProfile);
   }, []);
 
-  if (!profile) return <p className="text-sm text-ink/50">Loading...</p>;
+  if (!profile) {
+    return (
+      <div className="max-w-md space-y-4" aria-hidden="true">
+        <div className="h-6 w-40 animate-pulse rounded bg-ink/5" />
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="h-12 animate-pulse rounded-2xl bg-ink/5" />
+        ))}
+      </div>
+    );
+  }
 
   const handleSave = async (event: FormEvent) => {
     event.preventDefault();

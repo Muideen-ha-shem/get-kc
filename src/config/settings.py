@@ -8,6 +8,7 @@ class Settings:
 
     supabase_url: str | None = None
     supabase_key: str | None = None
+    supabase_service_role_key: str | None = None
     groq_api_key: str | None = None
     google_api_key: str | None = None
     # Live web search providers (at least one must be set to use SearchService)
@@ -27,6 +28,7 @@ class Settings:
         return cls(
             supabase_url=os.getenv("SUPABASE_URL"),
             supabase_key=os.getenv("SUPABASE_KEY"),
+            supabase_service_role_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY"),
             groq_api_key=os.getenv("GROQ_API_KEY"),
             google_api_key=os.getenv("GOOGLE_API_KEY"),
             tavily_api_key=os.getenv("TAVILY_API_KEY"),

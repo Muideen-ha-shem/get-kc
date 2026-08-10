@@ -22,22 +22,24 @@ from typing import Mapping, Sequence
 
 from ...shared.business_themes import BUSINESS_THEMES, BusinessTheme
 from ...shared.logging import get_logger
-from ...shared.product_registry import PRODUCT_REGISTRY
+from .workspace_product_registry import get_product_registry
 
 logger: logging.Logger = get_logger(__name__)
 
 
-# Product name aliases and intent keywords are derived from PRODUCT_REGISTRY
-# (the single source of truth also used by the crawl/metadata pipeline) —
-# adding product #12 means adding one entry there, nothing here. Matching
+# Product name aliases and intent keywords are derived from the (currently
+# single-workspace) product registry via get_product_registry() — the Phase
+# 22 seam for a future per-workspace catalog (see workspace_product_registry.py)
+# — the single source of truth also used by the crawl/metadata pipeline.
+# Adding product #12 means adding one entry there, nothing here. Matching
 # any alias mentions the product by name directly, taking priority over
 # intent-keyword matching below.
 _DEFAULT_PRODUCT_NAMES: dict[str, tuple[str, ...]] = {
-    name: info["aliases"] for name, info in PRODUCT_REGISTRY.items()
+    name: info["aliases"] for name, info in get_product_registry().items()
 }
 
 _DEFAULT_PRODUCT_KEYWORDS: dict[str, tuple[str, ...]] = {
-    name: info["keywords"] for name, info in PRODUCT_REGISTRY.items()
+    name: info["keywords"] for name, info in get_product_registry().items()
 }
 
 

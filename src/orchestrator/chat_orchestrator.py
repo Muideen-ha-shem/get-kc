@@ -32,6 +32,7 @@ import logging
 from typing import Any
 
 from ..api.schemas import ChatResponse
+from ..services.escalation.decision import decide_escalation
 from ..services.knowledge import KnowledgeService
 from ..services.support import SupportService
 from ..services.routing import SourceRouter, ProductRouter
@@ -161,6 +162,8 @@ class ChatOrchestrator:
         *,
         session_id: str | None = None,
         profile_context: str | None = None,
+        workspace_id: str | None = None,
+        handoff_context: str | None = None,
     ) -> dict[str, Any]:
         """Process a user message and return a response.
 
@@ -192,7 +195,13 @@ class ChatOrchestrator:
                     using the new pipeline).
         """
         if self._using_new_pipeline:
-            return self._chat_new_pipeline(message, session_id=session_id, profile_context=profile_context)
+            return self._chat_new_pipeline(
+                message,
+                session_id=session_id,
+                profile_context=profile_context,
+                workspace_id=workspace_id,
+                handoff_context=handoff_context,
+            )
         return self._chat_legacy(message)
 
     def process_request(self, message: str) -> dict[str, Any]:
@@ -209,6 +218,8 @@ class ChatOrchestrator:
         *,
         session_id: str | None = None,
         profile_context: str | None = None,
+        workspace_id: str | None = None,
+        handoff_context: str | None = None,
     ) -> ChatResponse:
         """Process a request and return a Pydantic ``ChatResponse``.
 
@@ -218,17 +229,26 @@ class ChatOrchestrator:
             message: The user's natural-language message.
             session_id: See :meth:`chat`.
             profile_context: See :meth:`chat`.
+            handoff_context: See :meth:`chat`.
 
         Returns:
             A :class:`~api.schemas.ChatResponse` instance.
         """
-        result = self.chat(message, session_id=session_id, profile_context=profile_context)
+        result = self.chat(
+            message,
+            session_id=session_id,
+            profile_context=profile_context,
+            workspace_id=workspace_id,
+            handoff_context=handoff_context,
+        )
         next_actions = result.get("next_actions") or None
         return ChatResponse(
             answer=result["answer"],
             sources=result.get("sources", []),
             next_actions=next_actions,
             session_id=result.get("session_id"),
+            escalation_recommended=result.get("escalation_recommended", False),
+            escalation_reason=result.get("escalation_reason"),
         )
 
     # ------------------------------------------------------------------
@@ -260,6 +280,8 @@ class ChatOrchestrator:
         *,
         session_id: str | None = None,
         profile_context: str | None = None,
+        workspace_id: str | None = None,
+        handoff_context: str | None = None,
     ) -> dict[str, Any]:
         """Full multi-source pipeline with router, manager, merger, generator."""
         # --- Step 0: Session wiring (Phase 20, optional) ---
@@ -276,6 +298,13 @@ class ChatOrchestrator:
         advisory_question = message
         if profile_context:
             advisory_question = f"{profile_context}. {message}"
+        # Phase 25: an optional recap from a just-resolved human escalation
+        # (see ChatRequest.handoff_context), prepended the same way — lets
+        # the AI resume without the customer repeating themselves. No
+        # Business Advisor logic changes; this only widens what text
+        # reaches it, exactly like profile_context already does.
+        if handoff_context:
+            advisory_question = f"{handoff_context}. {advisory_question}"
 
         # --- Step 1: Route (SourceRouter) ---
         if self._source_router:
@@ -287,7 +316,7 @@ class ChatOrchestrator:
 
         # --- Step 2: Retrieve (SearchManager) ---
         if self._search_manager:
-            evidence = self._search_manager.retrieve(message, decision=decision)
+            evidence = self._search_manager.retrieve(message, decision=decision, workspace_id=workspace_id)
         else:
             # Fallback: use legacy knowledge service
             matches, _, _ = self._knowledge_service.retrieve_context(message)
@@ -309,6 +338,19 @@ class ChatOrchestrator:
         complementary_products = None
         next_actions: list[dict[str, Any]] = []
 
+        # --- Escalation recommendation (Phase 24, read-only) ---
+        # Reuses the existing confidence signal already computed by
+        # SearchManager (never a second confidence system) plus a
+        # deterministic keyword check against the *original* message (not
+        # the profile-augmented advisory_question). This only recommends —
+        # nothing is written to the escalations table from here; an actual
+        # escalation is created separately via EscalationService, only
+        # when the caller explicitly acts on the recommendation.
+        kb_confidence = getattr(self._search_manager, "kb_confidence", None)
+        escalation_decision = decide_escalation(
+            question=message, kb_confidence=kb_confidence, has_evidence=bool(evidence)
+        )
+
         if self._advisory_layer is not None:
             advisory = self._advisory_layer.build(advisory_question, evidence, product_match=match)
             if advisory.needs_clarification:
@@ -321,6 +363,8 @@ class ChatOrchestrator:
                     "citations": [],
                     "next_actions": [],
                     "session_id": session_id,
+                    "escalation_recommended": escalation_decision.should_escalate,
+                    "escalation_reason": escalation_decision.reason,
                 }
             primary_product = advisory.primary_product
             complementary_products = advisory.complementary_products
@@ -372,6 +416,8 @@ class ChatOrchestrator:
             "citations": citations,
             "next_actions": next_actions,
             "session_id": session_id,
+            "escalation_recommended": escalation_decision.should_escalate,
+            "escalation_reason": escalation_decision.reason,
         }
 
     def _record_session_state(self, session_id: str | None, advisory: Any) -> None:

@@ -27,3 +27,18 @@ export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<
   }
   return response.json() as Promise<T>;
 }
+
+/** Phase 27: for multipart/form-data uploads (knowledge source file
+ * ingestion) — does NOT force Content-Type: application/json like
+ * apiFetch does, so the browser can set its own multipart boundary. */
+export async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
+  const token = getStoredToken();
+  const headers = new Headers();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const response = await fetch(`${API_BASE_URL}${path}`, { method: 'POST', headers, body: formData });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.detail || `Upload failed (${response.status})`);
+  }
+  return response.json() as Promise<T>;
+}

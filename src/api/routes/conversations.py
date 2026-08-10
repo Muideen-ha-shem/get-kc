@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ...services.auth.auth_service import AuthUser
 from ...services.conversation.conversation_service import ConversationService
-from ..deps import get_current_access_token_required, get_current_user_required
+from ...services.workspace.workspace_context import WorkspaceContext
+from ..deps import get_current_access_token_required, get_current_user_required, get_current_workspace
 from ..schemas import (
     ConversationDetail,
     ConversationMessageSchema,
@@ -22,10 +23,15 @@ def _to_summary(row) -> ConversationSummary:
 
 @router.get("", response_model=list[ConversationSummary])
 def list_conversations(
+    search: str | None = None,
     user: AuthUser = Depends(get_current_user_required),
     access_token: str = Depends(get_current_access_token_required),
+    workspace: WorkspaceContext = Depends(get_current_workspace),
 ) -> list[ConversationSummary]:
-    return [_to_summary(row) for row in _conversation_service.list_conversations(user.id, access_token=access_token)]
+    rows = _conversation_service.list_conversations(
+        user.id, access_token=access_token, search=search, workspace_id=workspace.workspace_id
+    )
+    return [_to_summary(row) for row in rows]
 
 
 @router.post("", response_model=ConversationSummary)
@@ -33,8 +39,11 @@ def create_conversation(
     request: CreateConversationRequest,
     user: AuthUser = Depends(get_current_user_required),
     access_token: str = Depends(get_current_access_token_required),
+    workspace: WorkspaceContext = Depends(get_current_workspace),
 ) -> ConversationSummary:
-    row = _conversation_service.start_conversation(user.id, request.first_message, access_token=access_token)
+    row = _conversation_service.start_conversation(
+        user.id, request.first_message, access_token=access_token, workspace_id=workspace.workspace_id
+    )
     return _to_summary(row)
 
 
@@ -43,8 +52,11 @@ def get_conversation(
     conversation_id: str,
     user: AuthUser = Depends(get_current_user_required),
     access_token: str = Depends(get_current_access_token_required),
+    workspace: WorkspaceContext = Depends(get_current_workspace),
 ) -> ConversationDetail:
-    conversation = _conversation_service.get_conversation(conversation_id, user.id, access_token=access_token)
+    conversation = _conversation_service.get_conversation(
+        conversation_id, user.id, access_token=access_token, workspace_id=workspace.workspace_id
+    )
     if conversation is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     messages = _conversation_service.get_messages(conversation_id, user.id, access_token=access_token) or []
