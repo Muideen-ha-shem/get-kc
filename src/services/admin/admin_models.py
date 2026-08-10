@@ -27,6 +27,8 @@ class AdminWorkspace:
     deleted_at: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+    owner_auth_user_id: str | None = None
+    plan: str = "free"
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> "AdminWorkspace":

@@ -27,6 +27,8 @@ class WorkspaceAdminSchema(BaseModel):
     deleted_at: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+    owner_auth_user_id: str | None = None
+    plan: str = "free"
 
 
 class WorkspaceCreateRequest(BaseModel):

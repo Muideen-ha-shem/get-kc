@@ -74,6 +74,7 @@ export function DashboardPage() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   const [isSupportAgent, setIsSupportAgent] = useState(false);
+  const [adminWorkspaces, setAdminWorkspaces] = useState<{ id: string; slug: string; name: string }[]>([]);
 
   const loadConversations = (search?: string) => {
     setIsLoadingList(true);
@@ -99,6 +100,14 @@ export function DashboardPage() {
     apiJson('/agents/me')
       .then(() => setIsSupportAgent(true))
       .catch(() => setIsSupportAgent(false));
+    // A workspace_admin (e.g. someone who self-signed-up their own
+    // organization, Phase 28) is scoped to specific workspace(s), not a
+    // platform-wide role, so it can't use the same true/false 403-probe
+    // as isPlatformAdmin/isSupportAgent above — this always succeeds and
+    // just returns whichever workspace(s), if any, the user administers.
+    apiJson<{ workspaces: { id: string; slug: string; name: string }[] }>('/workspace-admins/me')
+      .then((r) => setAdminWorkspaces(r.workspaces))
+      .catch(() => setAdminWorkspaces([]));
   }, []);
 
   // Debounce search-as-you-type so every keystroke doesn't fire a request.
@@ -312,7 +321,7 @@ export function DashboardPage() {
           </div>
         ) : null}
 
-        {isPlatformAdmin || isSupportAgent ? (
+        {isPlatformAdmin || isSupportAgent || adminWorkspaces.length > 0 ? (
           <div className="flex flex-col gap-1 border-t border-ink/10 pt-3 text-sm font-medium text-ink/70">
             {isPlatformAdmin ? (
               <Link to="/admin" className="rounded-xl px-3 py-2 transition hover:bg-paper hover:text-ink">
@@ -324,6 +333,15 @@ export function DashboardPage() {
                 Agent Dashboard
               </Link>
             ) : null}
+            {adminWorkspaces.map((workspace) => (
+              <Link
+                key={workspace.id}
+                to={`/admin/workspaces/${workspace.id}`}
+                className="rounded-xl px-3 py-2 transition hover:bg-paper hover:text-ink"
+              >
+                {workspace.name} (Admin)
+              </Link>
+            ))}
           </div>
         ) : null}
 

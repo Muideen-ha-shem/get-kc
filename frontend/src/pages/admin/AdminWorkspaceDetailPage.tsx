@@ -1,7 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { apiJson } from '../../lib/apiClient';
-import { AdminGuard } from './AdminGuard';
 import { AdminLayout } from './AdminLayout';
 import type {
   FeatureFlag,
@@ -310,16 +309,39 @@ function AdminWorkspaceDetailContent() {
   const { workspaceId } = useParams<{ workspaceId: string }>();
   const [workspace, setWorkspace] = useState<WorkspaceAdmin | null>(null);
   const [tab, setTab] = useState<Tab>('branding');
+  const [forbidden, setForbidden] = useState(false);
+  // Lifecycle actions (suspend/archive/delete) and the Flags tab stay
+  // super-admin-only even after Phase 28 widened the rest of this page to
+  // workspace_admins — best-effort probe, not a hard gate (mirrors
+  // DashboardPage's isPlatformAdmin probe).
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
 
   useEffect(() => {
     if (!workspaceId) return;
-    apiJson<WorkspaceAdmin>(`/admin/workspaces/${workspaceId}`).then(setWorkspace).catch(() => {});
+    apiJson<WorkspaceAdmin>(`/admin/workspaces/${workspaceId}`)
+      .then((w) => {
+        setWorkspace(w);
+        setForbidden(false);
+      })
+      .catch(() => setForbidden(true));
+    apiJson('/admin/me')
+      .then(() => setIsPlatformAdmin(true))
+      .catch(() => setIsPlatformAdmin(false));
   }, [workspaceId]);
 
   async function lifecycleAction(action: 'suspend' | 'reactivate' | 'archive' | 'delete') {
     if (!workspaceId) return;
     const updated = await apiJson<WorkspaceAdmin>(`/admin/workspaces/${workspaceId}/${action}`, { method: 'POST' });
     setWorkspace(updated);
+  }
+
+  if (forbidden) {
+    return (
+      <div className="p-8 text-center">
+        <p className="text-lg font-medium">You don't have admin access to this workspace.</p>
+        <Link to="/admin" className="text-blue-600 underline">Back to Admin</Link>
+      </div>
+    );
   }
 
   if (!workspace || !workspaceId) return <p className="text-sm text-gray-400">Loading…</p>;
@@ -338,26 +360,36 @@ function AdminWorkspaceDetailContent() {
           >
             Knowledge
           </Link>
-          {workspace.is_active ? (
-            <button onClick={() => lifecycleAction('suspend')} className="text-xs bg-gray-200 rounded px-3 py-2">
-              Suspend
-            </button>
-          ) : (
-            <button onClick={() => lifecycleAction('reactivate')} className="text-xs bg-green-600 text-white rounded px-3 py-2">
-              Reactivate
-            </button>
-          )}
-          <button onClick={() => lifecycleAction('archive')} className="text-xs bg-gray-200 rounded px-3 py-2">
-            Archive
-          </button>
-          <button onClick={() => lifecycleAction('delete')} className="text-xs bg-red-100 text-red-700 rounded px-3 py-2">
-            Delete
-          </button>
+          <Link
+            to={`/admin/workspaces/${workspaceId}/team`}
+            className="text-xs bg-blue-600 text-white rounded px-3 py-2 flex items-center"
+          >
+            Team
+          </Link>
+          {isPlatformAdmin ? (
+            <>
+              {workspace.is_active ? (
+                <button onClick={() => lifecycleAction('suspend')} className="text-xs bg-gray-200 rounded px-3 py-2">
+                  Suspend
+                </button>
+              ) : (
+                <button onClick={() => lifecycleAction('reactivate')} className="text-xs bg-green-600 text-white rounded px-3 py-2">
+                  Reactivate
+                </button>
+              )}
+              <button onClick={() => lifecycleAction('archive')} className="text-xs bg-gray-200 rounded px-3 py-2">
+                Archive
+              </button>
+              <button onClick={() => lifecycleAction('delete')} className="text-xs bg-red-100 text-red-700 rounded px-3 py-2">
+                Delete
+              </button>
+            </>
+          ) : null}
         </div>
       </div>
 
       <div className="flex gap-2 mb-6 border-b">
-        {TABS.map((t) => (
+        {TABS.filter((t) => t !== 'flags' || isPlatformAdmin).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -380,10 +412,8 @@ function AdminWorkspaceDetailContent() {
 
 export function AdminWorkspaceDetailPage() {
   return (
-    <AdminGuard>
-      <AdminLayout>
-        <AdminWorkspaceDetailContent />
-      </AdminLayout>
-    </AdminGuard>
+    <AdminLayout>
+      <AdminWorkspaceDetailContent />
+    </AdminLayout>
   );
 }

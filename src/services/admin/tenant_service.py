@@ -33,9 +33,15 @@ class TenantService:
         return self._repo.get_by_id(workspace_id)
 
     def create_workspace(
-        self, slug: str, name: str, host: str | None, actor_auth_user_id: str
+        self,
+        slug: str,
+        name: str,
+        host: str | None,
+        actor_auth_user_id: str,
+        owner_auth_user_id: str | None = None,
+        plan: str = "free",
     ) -> AdminWorkspace:
-        workspace = self._repo.create(slug, name, host)
+        workspace = self._repo.create(slug, name, host, owner_auth_user_id=owner_auth_user_id, plan=plan)
         self._audit.record("workspace.created", actor_auth_user_id, workspace.id, {"slug": slug, "name": name})
         return workspace
 

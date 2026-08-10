@@ -37,13 +37,22 @@ class AdminWorkspaceRepository:
             return None
         return AdminWorkspace.from_row(response.data[0])
 
-    def create(self, slug: str, name: str, host: str | None = None) -> AdminWorkspace:
+    def create(
+        self,
+        slug: str,
+        name: str,
+        host: str | None = None,
+        owner_auth_user_id: str | None = None,
+        plan: str = "free",
+    ) -> AdminWorkspace:
         payload = {
             "slug": slug,
             "name": name,
             "host": host,
             "api_key": secrets.token_urlsafe(32),
             "is_active": True,
+            "owner_auth_user_id": owner_auth_user_id,
+            "plan": plan,
         }
         try:
             response = self._client.table(_TABLE).insert(payload).execute()

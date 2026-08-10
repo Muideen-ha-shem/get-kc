@@ -31,6 +31,17 @@ class WorkspaceAdminRepository:
         response = self._client.table(_TABLE).select("*").eq("workspace_id", workspace_id).execute()
         return response.data
 
+    def list_for_auth_user_id(self, auth_user_id: str) -> list[dict]:
+        """Every workspace this user administers — identity-first lookup
+        (Phase 28), same rationale as AgentRepository's
+        get_by_auth_user_id_any_workspace: a signed-in workspace_admin's
+        own dashboard has no ambient workspace context to check against,
+        so discovering "which workspace(s) am I an admin of" has to be
+        resolved from the user's own membership rows, not request context.
+        """
+        response = self._client.table(_TABLE).select("*").eq("auth_user_id", auth_user_id).execute()
+        return response.data
+
     def add(self, workspace_id: str, auth_user_id: str) -> dict:
         existing = self.get_by_auth_user_id(auth_user_id, workspace_id)
         if existing is not None:

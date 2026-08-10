@@ -17,6 +17,9 @@ class WorkspaceAdminService:
     def list_for_workspace(self, workspace_id: str) -> list[dict]:
         return self._repo.list_for_workspace(workspace_id)
 
+    def list_workspace_ids_for_admin(self, auth_user_id: str) -> list[str]:
+        return [row["workspace_id"] for row in self._repo.list_for_auth_user_id(auth_user_id)]
+
     def add_admin(self, workspace_id: str, auth_user_id: str) -> dict:
         return self._repo.add(workspace_id, auth_user_id)
 

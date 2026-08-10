@@ -12,8 +12,11 @@ from .routes.conversations import router as conversations_router
 from .routes.demo_request import router as demo_request_router
 from .routes.escalation import router as escalation_router
 from .routes.feedback import router as feedback_router
+from .routes.invitations import router as invitations_router
 from .routes.knowledge_management import router as knowledge_management_router
 from .routes.notifications import router as notifications_router
+from .routes.org_signup import router as org_signup_router
+from .routes.workspace_admins import router as workspace_admins_router
 from .routes.profile import router as profile_router
 from .routes.saved_items import router as saved_items_router
 from .routes.solutions import router as solutions_router
@@ -54,6 +57,9 @@ app.include_router(escalation_router)
 app.include_router(admin_workspaces_router)
 app.include_router(admin_users_router)
 app.include_router(knowledge_management_router)
+app.include_router(org_signup_router)
+app.include_router(invitations_router)
+app.include_router(workspace_admins_router)
 
 
 @app.get("/health")
