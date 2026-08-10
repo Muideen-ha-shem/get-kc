@@ -7,7 +7,7 @@ export type AuthUser = {
   full_name: string | null;
 };
 
-type AuthSessionResponse = {
+export type AuthSessionResponse = {
   access_token: string;
   refresh_token: string;
   user: AuthUser;
@@ -20,6 +20,7 @@ type AuthContextValue = {
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   requestPasswordReset: (email: string) => Promise<void>;
+  applySession: (session: AuthSessionResponse) => void;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -71,8 +72,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await apiJson('/auth/password-reset', { method: 'POST', body: JSON.stringify({ email }) });
   }, []);
 
+  /** Stores a session obtained from a route other than /auth/sign-up or
+   * /auth/sign-in (Phase 28: org signup, invite acceptance) — same
+   * setStoredToken + setUser tail those two already share. */
+  const applySession = useCallback((session: AuthSessionResponse) => {
+    setStoredToken(session.access_token);
+    setUser(session.user);
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, isLoading, signUp, signIn, signOut, requestPasswordReset }}>
+    <AuthContext.Provider
+      value={{ user, isLoading, signUp, signIn, signOut, requestPasswordReset, applySession }}
+    >
       {children}
     </AuthContext.Provider>
   );

@@ -1,8 +1,14 @@
-"""Super Admin workspace/tenant management routes (Phase 26).
+"""Workspace/tenant management routes (Phase 26, extended Phase 28).
 
-Every route depends on `require_super_admin`. Not workspace-scoped itself
-— a super admin isn't tied to one workspace; individual routes take a
-workspace_id path param to know which tenant they're operating on.
+Cross-tenant and destructive-lifecycle routes (list all, create, suspend/
+reactivate/archive/delete, platform dashboard, audit, feature flags)
+depend on `require_super_admin` only. Per-workspace read/edit routes
+(get/analytics/branding/settings/products/api-key) additionally accept a
+matching `workspace_admin` (Phase 28) — a self-service org owner manages
+their own workspace's settings the same way a super admin would, just
+scoped to that one workspace. `require_workspace_admin` already allows
+either; widening these routes to it is a strict widening (super admins
+still pass everywhere), never a narrowing.
 """
 
 from __future__ import annotations
@@ -15,7 +21,7 @@ from ...services.admin.product_service import ProductService
 from ...services.admin.settings_service import SettingsService
 from ...services.admin.tenant_service import TenantService
 from ...services.auth.auth_service import AuthUser
-from ..deps import require_super_admin
+from ..deps import require_super_admin, require_workspace_admin
 from ..schemas_admin import (
     ApiKeyRegenerateResponse,
     AuditLogEntrySchema,
@@ -49,6 +55,7 @@ def _to_workspace_schema(workspace) -> WorkspaceAdminSchema:
         welcome_message=workspace.welcome_message, quick_actions=workspace.quick_actions,
         archived_at=workspace.archived_at, deleted_at=workspace.deleted_at,
         created_at=workspace.created_at, updated_at=workspace.updated_at,
+        owner_auth_user_id=workspace.owner_auth_user_id, plan=workspace.plan,
     )
 
 
@@ -103,13 +110,13 @@ def create_workspace(
 
 
 @router.get("/admin/workspaces/{workspace_id}", response_model=WorkspaceAdminSchema)
-def get_workspace(workspace_id: str, user: AuthUser = Depends(require_super_admin)) -> WorkspaceAdminSchema:
+def get_workspace(workspace_id: str, user: AuthUser = Depends(require_workspace_admin)) -> WorkspaceAdminSchema:
     return _to_workspace_schema(_get_workspace_or_404(workspace_id))
 
 
 @router.get("/admin/workspaces/{workspace_id}/analytics", response_model=WorkspaceAnalyticsSchema)
 def get_workspace_analytics(
-    workspace_id: str, user: AuthUser = Depends(require_super_admin)
+    workspace_id: str, user: AuthUser = Depends(require_workspace_admin)
 ) -> WorkspaceAnalyticsSchema:
     _get_workspace_or_404(workspace_id)
     return WorkspaceAnalyticsSchema(**_tenant_service.workspace_analytics(workspace_id))
@@ -117,7 +124,7 @@ def get_workspace_analytics(
 
 @router.patch("/admin/workspaces/{workspace_id}/branding", response_model=WorkspaceAdminSchema)
 def update_workspace_branding(
-    workspace_id: str, request: WorkspaceBrandingUpdateRequest, user: AuthUser = Depends(require_super_admin)
+    workspace_id: str, request: WorkspaceBrandingUpdateRequest, user: AuthUser = Depends(require_workspace_admin)
 ) -> WorkspaceAdminSchema:
     _get_workspace_or_404(workspace_id)
     fields = {k: v for k, v in request.model_dump().items() if v is not None}
@@ -127,7 +134,7 @@ def update_workspace_branding(
 
 @router.get("/admin/workspaces/{workspace_id}/settings", response_model=WorkspaceSettingsSchema)
 def get_workspace_settings(
-    workspace_id: str, user: AuthUser = Depends(require_super_admin)
+    workspace_id: str, user: AuthUser = Depends(require_workspace_admin)
 ) -> WorkspaceSettingsSchema:
     _get_workspace_or_404(workspace_id)
     settings = _settings_service.get(workspace_id)
@@ -136,7 +143,7 @@ def get_workspace_settings(
 
 @router.patch("/admin/workspaces/{workspace_id}/settings", response_model=WorkspaceSettingsSchema)
 def update_workspace_settings(
-    workspace_id: str, request: WorkspaceSettingsUpdateRequest, user: AuthUser = Depends(require_super_admin)
+    workspace_id: str, request: WorkspaceSettingsUpdateRequest, user: AuthUser = Depends(require_workspace_admin)
 ) -> WorkspaceSettingsSchema:
     _get_workspace_or_404(workspace_id)
     fields = {k: v for k, v in request.model_dump().items() if v is not None}
@@ -147,7 +154,7 @@ def update_workspace_settings(
 
 @router.get("/admin/workspaces/{workspace_id}/products", response_model=list[WorkspaceProductSchema])
 def get_workspace_products(
-    workspace_id: str, user: AuthUser = Depends(require_super_admin)
+    workspace_id: str, user: AuthUser = Depends(require_workspace_admin)
 ) -> list[WorkspaceProductSchema]:
     _get_workspace_or_404(workspace_id)
     return [
@@ -158,7 +165,7 @@ def get_workspace_products(
 
 @router.patch("/admin/workspaces/{workspace_id}/products", response_model=list[WorkspaceProductSchema])
 def update_workspace_products(
-    workspace_id: str, request: WorkspaceProductsUpdateRequest, user: AuthUser = Depends(require_super_admin)
+    workspace_id: str, request: WorkspaceProductsUpdateRequest, user: AuthUser = Depends(require_workspace_admin)
 ) -> list[WorkspaceProductSchema]:
     _get_workspace_or_404(workspace_id)
     updated = []
@@ -203,7 +210,7 @@ def update_workspace_flags(
 
 @router.post("/admin/workspaces/{workspace_id}/apikey/regenerate", response_model=ApiKeyRegenerateResponse)
 def regenerate_workspace_api_key(
-    workspace_id: str, user: AuthUser = Depends(require_super_admin)
+    workspace_id: str, user: AuthUser = Depends(require_workspace_admin)
 ) -> ApiKeyRegenerateResponse:
     _get_workspace_or_404(workspace_id)
     new_key = _tenant_service.regenerate_api_key(workspace_id, user.id)

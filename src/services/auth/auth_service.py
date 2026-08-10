@@ -108,6 +108,40 @@ class AuthService:
             logger.warning("confirm_password_reset failed: %s", exc)
             raise AuthError(str(exc)) from exc
 
+    def admin_create_user(self, email: str, password: str, full_name: str | None = None) -> AuthUser:
+        """Creates a pre-confirmed auth user via the Admin API
+        (``email_confirm=True``), bypassing Supabase's email-confirmation
+        gate. Used by self-service org signup (Phase 28) so a new tenant
+        can sign in immediately rather than needing to click a
+        confirmation email first. Requires an admin (service-role) client,
+        e.g. ``AuthService(client=get_admin_client())`` — same precedent
+        as ``admin_suspend_user``/``admin_reactivate_user``.
+        """
+        attributes: dict[str, Any] = {"email": email, "password": password, "email_confirm": True}
+        if full_name:
+            attributes["user_metadata"] = {"full_name": full_name}
+        try:
+            response = self._client.auth.admin.create_user(attributes)
+        except Exception as exc:
+            logger.warning("admin_create_user failed: %s", exc)
+            raise AuthError(str(exc)) from exc
+        return self._to_user(response.user)
+
+    def admin_invite_user(self, email: str, redirect_to: str | None = None) -> None:
+        """Sends Supabase Auth's own hosted invite email — the mechanism
+        Phase 28's team-invitation flow uses instead of adding a new
+        third-party email provider. Requires an admin (service-role)
+        client.
+        """
+        options: dict[str, Any] = {}
+        if redirect_to:
+            options["redirect_to"] = redirect_to
+        try:
+            self._client.auth.admin.invite_user_by_email(email, options or None)
+        except Exception as exc:
+            logger.warning("admin_invite_user failed: %s", exc)
+            raise AuthError(str(exc)) from exc
+
     def get_user(self, access_token: str) -> AuthUser | None:
         try:
             response = self._client.auth.get_user(access_token)

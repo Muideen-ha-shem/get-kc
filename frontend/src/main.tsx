@@ -12,7 +12,10 @@ import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 import { AdminAgentsPage } from './pages/admin/AdminAgentsPage';
 import { AdminAuditPage } from './pages/admin/AdminAuditPage';
 import { KnowledgeManagementPage } from './pages/knowledge/KnowledgeManagementPage';
+import { WorkspaceTeamPage } from './pages/team/WorkspaceTeamPage';
 import { ResetPasswordPage } from './pages/auth/ResetPasswordPage';
+import { OrgSignupPage } from './pages/signup/OrgSignupPage';
+import { AcceptInvitePage } from './pages/signup/AcceptInvitePage';
 import { AuthProvider } from './lib/authContext';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import './styles.css';
@@ -24,6 +27,8 @@ createRoot(document.getElementById('root')!).render(
         <Routes>
           <Route path="/" element={<App />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/signup" element={<OrgSignupPage />} />
+          <Route path="/accept-invite" element={<AcceptInvitePage />} />
           <Route
             path="/dashboard"
             element={
@@ -77,6 +82,14 @@ createRoot(document.getElementById('root')!).render(
             element={
               <ProtectedRoute>
                 <KnowledgeManagementPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/workspaces/:workspaceId/team"
+            element={
+              <ProtectedRoute>
+                <WorkspaceTeamPage />
               </ProtectedRoute>
             }
           />

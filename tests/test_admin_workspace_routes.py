@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.app import app
-from src.api.deps import get_current_user_required, require_super_admin
+from src.api.deps import get_current_user_required, require_super_admin, require_workspace_admin
 from src.services.auth.auth_service import AuthUser
 
 _FAKE_ADMIN = AuthUser(id="admin-1", email="admin@example.com", full_name="Admin")
@@ -30,6 +30,11 @@ def _clear_overrides():
 
 def _authenticate_as_admin():
     app.dependency_overrides[require_super_admin] = lambda: _FAKE_ADMIN
+    # Phase 28: get/analytics/branding/settings/products/apikey routes now
+    # accept require_workspace_admin too (a strict widening — see
+    # admin_workspaces.py's module docstring) — both must be overridden so
+    # tests authenticate regardless of which dependency a given route uses.
+    app.dependency_overrides[require_workspace_admin] = lambda: _FAKE_ADMIN
     app.dependency_overrides[get_current_user_required] = lambda: _FAKE_ADMIN
 
 
@@ -40,6 +45,7 @@ def _workspace(**overrides):
         id="w1", slug="acme", host=None, is_active=True, logo=None,
         primary_color=None, welcome_message=None, quick_actions=None, archived_at=None,
         deleted_at=None, created_at=None, updated_at=None, api_key="raw-key-value",
+        owner_auth_user_id=None, plan="free",
     )
     base.configure_mock(name="Acme")
     for key, value in overrides.items():
@@ -75,6 +81,58 @@ class TestAuthorization:
         _authenticate_as_non_admin()
         with patch("src.api.deps._platform_admin_service.is_super_admin", return_value=False):
             response = client.get("/admin/audit")
+        assert response.status_code == 403
+
+
+class TestWorkspaceAdminAccess:
+    """Phase 28 — a workspace_admin (not a super admin) can now reach the
+    per-workspace read/edit routes for their OWN workspace, but not a
+    different one, and still can't reach cross-tenant/lifecycle routes."""
+
+    def test_workspace_admin_can_get_their_own_workspace(self, client):
+        _authenticate_as_non_admin()
+        with patch("src.api.deps._platform_admin_service.is_super_admin", return_value=False), \
+             patch("src.api.deps._workspace_admin_service.is_workspace_admin", return_value=True), \
+             patch("src.api.routes.admin_workspaces._tenant_service.get_workspace", return_value=_workspace()):
+            response = client.get("/admin/workspaces/w1")
+
+        assert response.status_code == 200
+
+    def test_workspace_admin_403s_for_a_different_workspace(self, client):
+        _authenticate_as_non_admin()
+        with patch("src.api.deps._platform_admin_service.is_super_admin", return_value=False), \
+             patch("src.api.deps._workspace_admin_service.is_workspace_admin", return_value=False):
+            response = client.get("/admin/workspaces/w2")
+
+        assert response.status_code == 403
+
+    def test_workspace_admin_can_regenerate_own_api_key(self, client):
+        _authenticate_as_non_admin()
+        with patch("src.api.deps._platform_admin_service.is_super_admin", return_value=False), \
+             patch("src.api.deps._workspace_admin_service.is_workspace_admin", return_value=True), \
+             patch("src.api.routes.admin_workspaces._tenant_service.get_workspace", return_value=_workspace()), \
+             patch(
+                 "src.api.routes.admin_workspaces._tenant_service.regenerate_api_key",
+                 return_value="new-key",
+             ):
+            response = client.post("/admin/workspaces/w1/apikey/regenerate")
+
+        assert response.status_code == 200
+
+    def test_workspace_admin_still_403s_on_suspend(self, client):
+        """Destructive lifecycle actions stay super-admin-only even for
+        this workspace's own admin."""
+        _authenticate_as_non_admin()
+        with patch("src.api.deps._platform_admin_service.is_super_admin", return_value=False):
+            response = client.post("/admin/workspaces/w1/suspend")
+
+        assert response.status_code == 403
+
+    def test_workspace_admin_still_403s_on_list_all_workspaces(self, client):
+        _authenticate_as_non_admin()
+        with patch("src.api.deps._platform_admin_service.is_super_admin", return_value=False):
+            response = client.get("/admin/workspaces")
+
         assert response.status_code == 403
 
 
