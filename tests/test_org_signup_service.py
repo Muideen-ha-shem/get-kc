@@ -68,6 +68,14 @@ class TestSignUpOrganizationHappyPath:
         profile_service.get_or_create.assert_called_once_with(
             "u1", "a@acme.com", "Ada", access_token="access-1", workspace_id="w1"
         )
+        # Regression guard for the live-confirmed cross-tenant leak: the
+        # on_auth_user_created trigger creates a blank profile row (with
+        # workspace_id=null) the instant admin_create_user runs, before
+        # this workspace exists — get_or_create alone finds that row and
+        # returns it unchanged. set_workspace_id must be called explicitly
+        # to force-correct it, or the customer's every future chat request
+        # silently falls back to the default (Ha-Shem) workspace.
+        profile_service.set_workspace_id.assert_called_once_with("u1", "w1", access_token="access-1")
         assert result.workspace.id == "w1"
         assert result.session.access_token == "access-1"
 

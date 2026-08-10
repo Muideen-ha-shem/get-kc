@@ -89,6 +89,13 @@ class OrgSignupService:
             self._profile_service.get_or_create(
                 user.id, email, full_name, access_token=session.access_token, workspace_id=workspace.id
             )
+            # get_or_create alone is not enough: admin_create_user (step 1)
+            # already fired the on_auth_user_created trigger, which creates
+            # a blank profile row with workspace_id=null before this
+            # workspace existed — get_or_create finds that row and returns
+            # it unchanged. Force-correct it explicitly (see
+            # ProfileService.set_workspace_id's docstring for why).
+            self._profile_service.set_workspace_id(user.id, workspace.id, access_token=session.access_token)
         except Exception:
             pass
 

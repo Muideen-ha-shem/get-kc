@@ -83,6 +83,12 @@ class InvitationService:
                 user.id, user.email, user.full_name, access_token=access_token,
                 workspace_id=invitation.workspace_id,
             )
+            # Same fix as OrgSignupService: auth.admin.invite_user_by_email
+            # provisions the auth.users row up front, firing the
+            # on_auth_user_created trigger before this invitation's real
+            # workspace_id can be known — get_or_create alone won't correct
+            # an already-existing blank-workspace_id row.
+            self._profile_service.set_workspace_id(user.id, invitation.workspace_id, access_token=access_token)
         except Exception:
             pass
 
