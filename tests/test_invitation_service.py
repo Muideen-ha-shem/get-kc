@@ -120,6 +120,13 @@ class TestAcceptInvitation:
         )
         workspace_admin_service.add_admin.assert_not_called()
         repo.mark_accepted.assert_called_once_with("i1")
+        # Regression guard for the same live-confirmed cross-tenant leak as
+        # OrgSignupService: invite_user_by_email also provisions auth.users
+        # up front, firing the trigger that creates a blank profile row
+        # before this invitation's workspace is known.
+        profile_service.set_workspace_id.assert_called_once_with(
+            "u2", "w1", access_token="recovery-token"
+        )
         assert result.status == "accepted"
 
     def test_workspace_admin_invitation_creates_admin_row(self):

@@ -118,6 +118,14 @@ def seed_workspace(
         customer_email = f"{_slugify(customer_name)}@{email_domain}"
         customer_user_id = get_or_create_auth_user(customer_email, customer_name)
         profile_service.get_or_create(customer_user_id, customer_email, customer_name, workspace_id=workspace.id)
+        # get_or_create alone isn't enough: get_or_create_auth_user already
+        # created the auth.users row above, firing the on_auth_user_created
+        # trigger, which inserts a blank customer_profiles row (workspace_id
+        # left null) before this workspace context is known — get_or_create
+        # finds that row and returns it unchanged. Force-correct it (this
+        # was a real, live-confirmed cross-tenant leak — see ProfileService
+        # .set_workspace_id's docstring).
+        profile_service.set_workspace_id(customer_user_id, workspace.id)
         created_accounts.append(
             {"role": "customer", "workspace": name, "name": customer_name, "email": customer_email}
         )
