@@ -78,3 +78,35 @@ class TestUploadService:
 
         with pytest.raises(ValueError, match="Unknown source"):
             service.ingest_upload("s1", "notes.txt", b"data")
+
+    def test_successful_ingest_marks_source_ready(self):
+        """Regression guard: ingest_document only updates the DOCUMENT's
+        status — nothing previously updated the SOURCE, leaving every
+        upload source stuck at 'pending' forever even after a fully
+        successful ingest (live-confirmed bug)."""
+        sources = MagicMock()
+        sources.get.return_value = _source(source_type="txt")
+        documents = MagicMock()
+        documents.create.return_value = MagicMock(id="d1")
+        documents.get.return_value = MagicMock(id="d1", status="ready")
+        service = UploadService(source_repository=sources, document_repository=documents)
+
+        with patch("src.services.knowledge_management.upload_service.ingest_document"):
+            service.ingest_upload("s1", "notes.txt", b"data")
+
+        sources.mark_indexed.assert_called_once_with("s1")
+        sources.set_status.assert_called_once_with("s1", "ready")
+
+    def test_failed_ingest_marks_source_failed(self):
+        sources = MagicMock()
+        sources.get.return_value = _source(source_type="txt")
+        documents = MagicMock()
+        documents.create.return_value = MagicMock(id="d1")
+        documents.get.return_value = MagicMock(id="d1", status="failed")
+        service = UploadService(source_repository=sources, document_repository=documents)
+
+        with patch("src.services.knowledge_management.upload_service.ingest_document"):
+            service.ingest_upload("s1", "notes.txt", b"data")
+
+        sources.mark_indexed.assert_not_called()
+        sources.set_status.assert_called_once_with("s1", "failed")
