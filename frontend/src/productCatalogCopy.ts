@@ -27,6 +27,25 @@ export const HIGHLIGHTS_BY_PRODUCT: Record<string, string[]> = {
   PayCheq: ['Staff payroll self-service', 'Admin payroll control', 'Tax & compliance management'],
 };
 
+/**
+ * Per-product logo image, shown in place of the plain text-on-gradient
+ * tile the catalog card used before. Only SPIDIFY and ZivaAIRA have their
+ * own brand mark today — every other product (and any future one added
+ * to PRODUCT_REGISTRY that isn't listed here yet) falls back to the
+ * Ha-Shem company mark via getProductLogo() below, rather than showing
+ * nothing.
+ */
+export const LOGO_BY_PRODUCT: Record<string, string> = {
+  SPIDIFY: '/logo/spidify-logo.png',
+  ZivaAIRA: '/logo/ziva-aira-logo.svg',
+};
+
+const DEFAULT_LOGO = '/logo/Ha-Shem-Logo-dark.png';
+
+export function getProductLogo(productId: string): string {
+  return LOGO_BY_PRODUCT[productId] ?? DEFAULT_LOGO;
+}
+
 export const TYPICAL_USERS_BY_PRODUCT: Record<string, string> = {
   SPIDIFY: 'Compliance, security, and onboarding teams',
   ZivaAIRA: 'Recruiters and HR teams',

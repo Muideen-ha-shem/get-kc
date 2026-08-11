@@ -14,6 +14,14 @@ type Tab = 'branding' | 'settings' | 'products' | 'flags' | 'apikey' | 'analytic
 
 const TABS: Tab[] = ['branding', 'settings', 'products', 'flags', 'apikey', 'analytics'];
 
+const INPUT_CLASS =
+  'w-full border border-ink/10 rounded-xl px-3 py-2 mt-1 bg-paper text-ink text-sm outline-none focus:border-gold-400';
+const PRIMARY_BUTTON =
+  'rounded-full bg-ink px-4 py-2 text-sm font-semibold text-paper transition hover:bg-ink-soft';
+const SECONDARY_BUTTON =
+  'rounded-full border border-ink/15 px-3 py-2 text-xs text-ink transition hover:border-gold-400 hover:text-gold-700';
+const CARD = 'bg-white border border-ink/10 rounded-2xl';
+
 function BrandingTab({ workspace, onSaved }: { workspace: WorkspaceAdmin; onSaved: (w: WorkspaceAdmin) => void }) {
   const [logo, setLogo] = useState(workspace.logo ?? '');
   const [primaryColor, setPrimaryColor] = useState(workspace.primary_color ?? '#2563eb');
@@ -30,19 +38,19 @@ function BrandingTab({ workspace, onSaved }: { workspace: WorkspaceAdmin; onSave
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-3 max-w-md">
-      <label className="text-sm">
+      <label className="text-sm text-ink">
         Logo URL
-        <input value={logo} onChange={(e) => setLogo(e.target.value)} className="w-full border rounded px-3 py-2 mt-1" />
+        <input value={logo} onChange={(e) => setLogo(e.target.value)} className={INPUT_CLASS} />
       </label>
-      <label className="text-sm">
+      <label className="text-sm text-ink">
         Primary color
-        <input type="color" value={primaryColor} onChange={(e) => setPrimaryColor(e.target.value)} className="w-full border rounded px-3 py-2 mt-1 h-10" />
+        <input type="color" value={primaryColor} onChange={(e) => setPrimaryColor(e.target.value)} className={`${INPUT_CLASS} h-10`} />
       </label>
-      <label className="text-sm">
+      <label className="text-sm text-ink">
         Welcome message
-        <input value={welcomeMessage} onChange={(e) => setWelcomeMessage(e.target.value)} className="w-full border rounded px-3 py-2 mt-1" />
+        <input value={welcomeMessage} onChange={(e) => setWelcomeMessage(e.target.value)} className={INPUT_CLASS} />
       </label>
-      <button type="submit" className="bg-blue-600 text-white rounded px-4 py-2 text-sm self-start">
+      <button type="submit" className={`${PRIMARY_BUTTON} self-start`}>
         Save Branding
       </button>
     </form>
@@ -76,14 +84,15 @@ function SettingsTab({ workspaceId }: { workspaceId: string }) {
     setSettings(updated);
   }
 
-  if (!settings) return <p className="text-sm text-gray-400">Loading…</p>;
+  if (!settings) return <p className="text-sm text-ink/40">Loading…</p>;
 
   const toggle = (key: keyof WorkspaceSettings) => (
-    <label className="flex items-center gap-2 text-sm">
+    <label className="flex items-center gap-2 text-sm text-ink">
       <input
         type="checkbox"
         checked={Boolean(settings[key])}
         onChange={(e) => setSettings({ ...settings, [key]: e.target.checked })}
+        className="accent-gold-500"
       />
       {key.replace(/_/g, ' ')}
     </label>
@@ -97,31 +106,31 @@ function SettingsTab({ workspaceId }: { workspaceId: string }) {
       {toggle('chat_enabled')}
       {toggle('offline_mode')}
       {toggle('auto_assignment_enabled')}
-      <label className="text-sm">
+      <label className="text-sm text-ink">
         Greeting message
         <input
           value={settings.greeting_message ?? ''}
           onChange={(e) => setSettings({ ...settings, greeting_message: e.target.value })}
-          className="w-full border rounded px-3 py-2 mt-1"
+          className={INPUT_CLASS}
         />
       </label>
-      <label className="text-sm">
+      <label className="text-sm text-ink">
         Company name
         <input
           value={settings.company_name ?? ''}
           onChange={(e) => setSettings({ ...settings, company_name: e.target.value })}
-          className="w-full border rounded px-3 py-2 mt-1"
+          className={INPUT_CLASS}
         />
       </label>
-      <label className="text-sm">
+      <label className="text-sm text-ink">
         Footer text
         <input
           value={settings.footer_text ?? ''}
           onChange={(e) => setSettings({ ...settings, footer_text: e.target.value })}
-          className="w-full border rounded px-3 py-2 mt-1"
+          className={INPUT_CLASS}
         />
       </label>
-      <button type="submit" className="bg-blue-600 text-white rounded px-4 py-2 text-sm self-start">
+      <button type="submit" className={`${PRIMARY_BUTTON} self-start`}>
         Save Settings
       </button>
     </form>
@@ -155,23 +164,23 @@ function ProductsTab({ workspaceId }: { workspaceId: string }) {
 
   return (
     <div className="max-w-md">
-      <div className="bg-white border rounded divide-y mb-4">
+      <div className={`${CARD} divide-y divide-ink/10 mb-4`}>
         {products.map((p) => (
           <div key={p.product_id} className="flex items-center justify-between px-4 py-2">
-            <span className="text-sm">{p.product_id}</span>
-            <input type="checkbox" checked={p.enabled} onChange={(e) => toggle(p.product_id, e.target.checked)} />
+            <span className="text-sm text-ink">{p.product_id}</span>
+            <input type="checkbox" checked={p.enabled} onChange={(e) => toggle(p.product_id, e.target.checked)} className="accent-gold-500" />
           </div>
         ))}
-        {products.length === 0 && <p className="px-4 py-2 text-sm text-gray-400">No products configured yet.</p>}
+        {products.length === 0 && <p className="px-4 py-2 text-sm text-ink/40">No products configured yet.</p>}
       </div>
       <form onSubmit={addProduct} className="flex gap-2">
         <input
           value={newProductId}
           onChange={(e) => setNewProductId(e.target.value)}
           placeholder="Product id (e.g. SPIDIFY)"
-          className="flex-1 border rounded px-3 py-2 text-sm"
+          className="flex-1 border border-ink/10 rounded-xl px-3 py-2 text-sm bg-paper text-ink outline-none focus:border-gold-400"
         />
-        <button type="submit" className="bg-blue-600 text-white rounded px-4 py-2 text-sm">
+        <button type="submit" className={PRIMARY_BUTTON}>
           Add
         </button>
       </form>
@@ -206,23 +215,23 @@ function FlagsTab({ workspaceId }: { workspaceId: string }) {
 
   return (
     <div className="max-w-md">
-      <div className="bg-white border rounded divide-y mb-4">
+      <div className={`${CARD} divide-y divide-ink/10 mb-4`}>
         {flags.map((f) => (
           <div key={f.flag_key} className="flex items-center justify-between px-4 py-2">
-            <span className="text-sm">{f.flag_key}</span>
-            <input type="checkbox" checked={f.enabled} onChange={(e) => toggle(f.flag_key, e.target.checked)} />
+            <span className="text-sm text-ink">{f.flag_key}</span>
+            <input type="checkbox" checked={f.enabled} onChange={(e) => toggle(f.flag_key, e.target.checked)} className="accent-gold-500" />
           </div>
         ))}
-        {flags.length === 0 && <p className="px-4 py-2 text-sm text-gray-400">No flags configured yet.</p>}
+        {flags.length === 0 && <p className="px-4 py-2 text-sm text-ink/40">No flags configured yet.</p>}
       </div>
       <form onSubmit={addFlag} className="flex gap-2">
         <input
           value={newFlagKey}
           onChange={(e) => setNewFlagKey(e.target.value)}
           placeholder="Flag key (e.g. ai_copilot)"
-          className="flex-1 border rounded px-3 py-2 text-sm"
+          className="flex-1 border border-ink/10 rounded-xl px-3 py-2 text-sm bg-paper text-ink outline-none focus:border-gold-400"
         />
-        <button type="submit" className="bg-blue-600 text-white rounded px-4 py-2 text-sm">
+        <button type="submit" className={PRIMARY_BUTTON}>
           Add
         </button>
       </form>
@@ -243,18 +252,18 @@ function ApiKeyTab({ workspaceId }: { workspaceId: string }) {
 
   return (
     <div className="max-w-md">
-      <p className="text-sm text-gray-600 mb-3">
+      <p className="text-sm text-ink/60 mb-3">
         For security, the raw API key is never shown after creation — only at the moment it's generated.
       </p>
-      <button onClick={regenerate} className="bg-red-600 text-white rounded px-4 py-2 text-sm">
+      <button onClick={regenerate} className="rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700">
         Regenerate API Key
       </button>
       {newKey && (
-        <div className="mt-4 text-xs bg-yellow-50 border border-yellow-200 rounded p-3">
-          <p className="font-semibold text-yellow-700 mb-1">New key — copy it now, it won't be shown again:</p>
-          <code>{newKey}</code>
-          <p className="font-semibold text-yellow-700 mt-3 mb-1">Embed snippet:</p>
-          <pre className="bg-gray-900 text-gray-100 rounded p-3 overflow-x-auto whitespace-pre-wrap">
+        <div className="mt-4 text-xs bg-gold-50 border border-gold-200 rounded-2xl p-3">
+          <p className="font-semibold text-gold-700 mb-1">New key — copy it now, it won't be shown again:</p>
+          <code className="text-ink">{newKey}</code>
+          <p className="font-semibold text-gold-700 mt-3 mb-1">Embed snippet:</p>
+          <pre className="bg-ink text-paper rounded-xl p-3 overflow-x-auto whitespace-pre-wrap">
 {`<script src="https://cdn.havisiq.com/sdk.js"></script>
 <script>
   HavisIQ.init({ apiKey: "${newKey}" });
@@ -273,7 +282,7 @@ function AnalyticsTab({ workspaceId }: { workspaceId: string }) {
     apiJson<WorkspaceAnalytics>(`/admin/workspaces/${workspaceId}/analytics`).then(setAnalytics).catch(() => {});
   }, [workspaceId]);
 
-  if (!analytics) return <p className="text-sm text-gray-400">Loading…</p>;
+  if (!analytics) return <p className="text-sm text-ink/40">Loading…</p>;
 
   return (
     <div className="grid grid-cols-3 gap-4 max-w-2xl">
@@ -286,14 +295,14 @@ function AnalyticsTab({ workspaceId }: { workspaceId: string }) {
         ['Feedback: Helpful', analytics.feedback_helpful_count],
         ['Feedback: Not Helpful', analytics.feedback_not_helpful_count],
       ].map(([label, value]) => (
-        <div key={label as string} className="bg-white border rounded p-4">
-          <p className="text-xs text-gray-500 uppercase">{label}</p>
-          <p className="text-xl font-semibold mt-1">{value}</p>
+        <div key={label as string} className={`${CARD} p-4`}>
+          <p className="text-xs text-ink/50 uppercase">{label}</p>
+          <p className="text-xl font-display font-semibold mt-1 text-ink">{value}</p>
         </div>
       ))}
-      <div className="bg-white border rounded p-4 col-span-3">
-        <p className="text-xs text-gray-500 uppercase mb-2">Escalation Status Breakdown</p>
-        <div className="flex gap-4 text-sm">
+      <div className={`${CARD} p-4 col-span-3`}>
+        <p className="text-xs text-ink/50 uppercase mb-2">Escalation Status Breakdown</p>
+        <div className="flex gap-4 text-sm text-ink">
           {Object.entries(analytics.escalation_status_breakdown).map(([status, count]) => (
             <span key={status}>
               {status}: <strong>{count}</strong>
@@ -337,50 +346,50 @@ function AdminWorkspaceDetailContent() {
 
   if (forbidden) {
     return (
-      <div className="p-8 text-center">
-        <p className="text-lg font-medium">You don't have admin access to this workspace.</p>
-        <Link to="/admin" className="text-blue-600 underline">Back to Admin</Link>
+      <div className="min-h-screen bg-paper p-8 text-center">
+        <p className="text-lg font-display text-ink">You don't have admin access to this workspace.</p>
+        <Link to="/admin" className="text-gold-700 underline hover:text-gold-600">Back to Admin</Link>
       </div>
     );
   }
 
-  if (!workspace || !workspaceId) return <p className="text-sm text-gray-400">Loading…</p>;
+  if (!workspace || !workspaceId) return <p className="text-sm text-ink/40">Loading…</p>;
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h1 className="text-xl font-semibold">{workspace.name}</h1>
-          <p className="text-xs text-gray-500">{workspace.slug}</p>
+          <h1 className="text-xl font-display font-semibold text-ink">{workspace.name}</h1>
+          <p className="text-xs text-ink/50">{workspace.slug}</p>
         </div>
         <div className="flex gap-2">
           <Link
             to={`/admin/workspaces/${workspaceId}/knowledge`}
-            className="text-xs bg-blue-600 text-white rounded px-3 py-2 flex items-center"
+            className="rounded-full bg-ink px-3 py-2 text-xs font-semibold text-paper transition hover:bg-ink-soft flex items-center"
           >
             Knowledge
           </Link>
           <Link
             to={`/admin/workspaces/${workspaceId}/team`}
-            className="text-xs bg-blue-600 text-white rounded px-3 py-2 flex items-center"
+            className="rounded-full bg-ink px-3 py-2 text-xs font-semibold text-paper transition hover:bg-ink-soft flex items-center"
           >
             Team
           </Link>
           {isPlatformAdmin ? (
             <>
               {workspace.is_active ? (
-                <button onClick={() => lifecycleAction('suspend')} className="text-xs bg-gray-200 rounded px-3 py-2">
+                <button onClick={() => lifecycleAction('suspend')} className={SECONDARY_BUTTON}>
                   Suspend
                 </button>
               ) : (
-                <button onClick={() => lifecycleAction('reactivate')} className="text-xs bg-green-600 text-white rounded px-3 py-2">
+                <button onClick={() => lifecycleAction('reactivate')} className="rounded-full bg-green-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-green-700">
                   Reactivate
                 </button>
               )}
-              <button onClick={() => lifecycleAction('archive')} className="text-xs bg-gray-200 rounded px-3 py-2">
+              <button onClick={() => lifecycleAction('archive')} className={SECONDARY_BUTTON}>
                 Archive
               </button>
-              <button onClick={() => lifecycleAction('delete')} className="text-xs bg-red-100 text-red-700 rounded px-3 py-2">
+              <button onClick={() => lifecycleAction('delete')} className="rounded-full bg-red-50 text-red-700 border border-red-200 px-3 py-2 text-xs transition hover:bg-red-100">
                 Delete
               </button>
             </>
@@ -388,12 +397,14 @@ function AdminWorkspaceDetailContent() {
         </div>
       </div>
 
-      <div className="flex gap-2 mb-6 border-b">
+      <div className="flex gap-2 mb-6 border-b border-ink/10">
         {TABS.filter((t) => t !== 'flags' || isPlatformAdmin).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`px-3 py-2 text-sm capitalize ${tab === t ? 'border-b-2 border-blue-600 text-blue-700 font-medium' : 'text-gray-500'}`}
+            className={`px-3 py-2 text-sm capitalize transition ${
+              tab === t ? 'border-b-2 border-gold-500 text-ink font-medium' : 'text-ink/50 hover:text-ink'
+            }`}
           >
             {t}
           </button>

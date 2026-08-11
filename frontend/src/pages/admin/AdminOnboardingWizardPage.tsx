@@ -70,15 +70,20 @@ function AdminOnboardingWizardContent() {
     ? `<script src="https://cdn.havisiq.com/sdk.js"></script>\n<script>\n  HavisIQ.init({ apiKey: "${apiKey}" });\n</script>`
     : '';
 
+  const inputClass =
+    'w-full border border-ink/10 rounded-xl px-3 py-2 mt-1 bg-paper text-ink text-sm outline-none focus:border-gold-400';
+  const primaryButton =
+    'rounded-full bg-ink px-4 py-2 text-sm font-semibold text-paper transition hover:bg-ink-soft self-start';
+
   return (
     <div className="max-w-2xl">
-      <h1 className="text-xl font-semibold mb-6">New Workspace</h1>
+      <h1 className="text-xl font-display font-semibold mb-6 text-ink">New Workspace</h1>
 
       <div className="flex gap-2 mb-6 text-xs">
         {(['details', 'branding', 'settings', 'snippet'] as Step[]).map((s) => (
           <span
             key={s}
-            className={`px-2 py-1 rounded-full ${step === s ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500'}`}
+            className={`px-3 py-1 rounded-full ${step === s ? 'bg-ink text-paper' : 'bg-ink/10 text-ink/50'}`}
           >
             {s}
           </span>
@@ -86,83 +91,84 @@ function AdminOnboardingWizardContent() {
       </div>
 
       {step === 'details' && (
-        <form onSubmit={submitDetails} className="bg-white border rounded p-6 flex flex-col gap-3">
-          <label className="text-sm">
+        <form onSubmit={submitDetails} className="bg-white border border-ink/10 rounded-2xl p-6 flex flex-col gap-3">
+          <label className="text-sm text-ink">
             Company / Workspace name
-            <input value={name} onChange={(e) => setName(e.target.value)} required className="w-full border rounded px-3 py-2 mt-1" />
+            <input value={name} onChange={(e) => setName(e.target.value)} required className={inputClass} />
           </label>
-          <label className="text-sm">
+          <label className="text-sm text-ink">
             Slug
-            <input value={slug} onChange={(e) => setSlug(e.target.value)} required className="w-full border rounded px-3 py-2 mt-1" />
+            <input value={slug} onChange={(e) => setSlug(e.target.value)} required className={inputClass} />
           </label>
-          <label className="text-sm">
+          <label className="text-sm text-ink">
             Domain / host (optional)
-            <input value={host} onChange={(e) => setHost(e.target.value)} className="w-full border rounded px-3 py-2 mt-1" />
+            <input value={host} onChange={(e) => setHost(e.target.value)} className={inputClass} />
           </label>
           {errorMessage && <p className="text-sm text-red-600">{errorMessage}</p>}
-          <button type="submit" className="bg-blue-600 text-white rounded px-4 py-2 text-sm self-start">
+          <button type="submit" className={primaryButton}>
             Create Workspace
           </button>
         </form>
       )}
 
       {step === 'branding' && (
-        <form onSubmit={submitBranding} className="bg-white border rounded p-6 flex flex-col gap-3">
-          <label className="text-sm">
+        <form onSubmit={submitBranding} className="bg-white border border-ink/10 rounded-2xl p-6 flex flex-col gap-3">
+          <label className="text-sm text-ink">
             Logo URL
-            <input value={logo} onChange={(e) => setLogo(e.target.value)} className="w-full border rounded px-3 py-2 mt-1" />
+            <input value={logo} onChange={(e) => setLogo(e.target.value)} className={inputClass} />
           </label>
-          <label className="text-sm">
+          <label className="text-sm text-ink">
             Primary color
-            <input type="color" value={primaryColor} onChange={(e) => setPrimaryColor(e.target.value)} className="w-full border rounded px-3 py-2 mt-1 h-10" />
+            <input type="color" value={primaryColor} onChange={(e) => setPrimaryColor(e.target.value)} className={`${inputClass} h-10`} />
           </label>
-          <label className="text-sm">
+          <label className="text-sm text-ink">
             Welcome message
-            <input value={welcomeMessage} onChange={(e) => setWelcomeMessage(e.target.value)} className="w-full border rounded px-3 py-2 mt-1" />
+            <input value={welcomeMessage} onChange={(e) => setWelcomeMessage(e.target.value)} className={inputClass} />
           </label>
-          <button type="submit" className="bg-blue-600 text-white rounded px-4 py-2 text-sm self-start">
+          <button type="submit" className={primaryButton}>
             Continue
           </button>
         </form>
       )}
 
       {step === 'settings' && (
-        <form onSubmit={submitSettings} className="bg-white border rounded p-6 flex flex-col gap-3">
-          <label className="text-sm">
+        <form onSubmit={submitSettings} className="bg-white border border-ink/10 rounded-2xl p-6 flex flex-col gap-3">
+          <label className="text-sm text-ink">
             Company name (shown in widget footer)
-            <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} className="w-full border rounded px-3 py-2 mt-1" />
+            <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} className={inputClass} />
           </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={aiEnabled} onChange={(e) => setAiEnabled(e.target.checked)} />
+          <label className="flex items-center gap-2 text-sm text-ink">
+            <input type="checkbox" checked={aiEnabled} onChange={(e) => setAiEnabled(e.target.checked)} className="accent-gold-500" />
             AI enabled
           </label>
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex items-center gap-2 text-sm text-ink">
             <input
               type="checkbox"
               checked={humanEscalationEnabled}
               onChange={(e) => setHumanEscalationEnabled(e.target.checked)}
+              className="accent-gold-500"
             />
             Human escalation enabled
           </label>
-          <button type="submit" className="bg-blue-600 text-white rounded px-4 py-2 text-sm self-start">
+          <button type="submit" className={primaryButton}>
             Continue
           </button>
         </form>
       )}
 
       {step === 'snippet' && workspace && (
-        <div className="bg-white border rounded p-6">
-          <p className="text-sm text-gray-600 mb-3">
+        <div className="bg-white border border-ink/10 rounded-2xl p-6">
+          <p className="text-sm text-ink/60 mb-3">
             Ready for embedding. Add this to the site — the API key below is shown once, here, and never again.
           </p>
-          <pre className="bg-gray-900 text-gray-100 text-xs rounded p-4 overflow-x-auto whitespace-pre-wrap">{snippet}</pre>
-          <p className="text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 rounded p-2 mt-3">
+          <pre className="bg-ink text-paper text-xs rounded-xl p-4 overflow-x-auto whitespace-pre-wrap">{snippet}</pre>
+          <p className="text-xs text-gold-700 bg-gold-50 border border-gold-200 rounded-xl p-2 mt-3">
             API key: <code>{apiKey}</code> — save this now, it won't be shown again. Use "Regenerate API Key" on the
             workspace's detail page if it's ever lost.
           </p>
           <button
             onClick={() => navigate(`/admin/workspaces/${workspace.id}`)}
-            className="mt-4 bg-blue-600 text-white rounded px-4 py-2 text-sm"
+            className="mt-4 rounded-full bg-ink px-4 py-2 text-sm font-semibold text-paper transition hover:bg-ink-soft"
           >
             Go to workspace
           </button>

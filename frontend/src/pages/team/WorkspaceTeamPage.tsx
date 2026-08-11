@@ -6,9 +6,9 @@ import type { Department, InvitationRole, WorkspaceInvitation } from './teamType
 const DEPARTMENTS: Department[] = ['Support', 'Sales', 'Solution Architect', 'Customer Success', 'General'];
 
 const STATUS_STYLES: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-700',
+  pending: 'bg-gold-100 text-gold-700',
   accepted: 'bg-green-100 text-green-700',
-  revoked: 'bg-gray-200 text-gray-500',
+  revoked: 'bg-ink/10 text-ink/50',
 };
 
 function WorkspaceTeamContent({ workspaceId }: { workspaceId: string }) {
@@ -58,52 +58,52 @@ function WorkspaceTeamContent({ workspaceId }: { workspaceId: string }) {
 
   if (forbidden) {
     return (
-      <div className="p-8 text-center">
-        <p className="text-lg font-medium">You don't have admin access to this workspace's team.</p>
-        <Link to="/admin" className="text-blue-600 underline">Back to Admin</Link>
+      <div className="min-h-screen bg-paper p-8 text-center">
+        <p className="text-lg font-display text-ink">You don't have admin access to this workspace's team.</p>
+        <Link to="/admin" className="text-gold-700 underline hover:text-gold-600">Back to Admin</Link>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-paper p-6">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-semibold">Team</h1>
-        <Link to={`/admin/workspaces/${workspaceId}`} className="text-sm text-blue-600 underline">
+        <h1 className="text-xl font-display font-semibold text-ink">Team</h1>
+        <Link to={`/admin/workspaces/${workspaceId}`} className="text-sm text-gold-700 underline hover:text-gold-600">
           Back to workspace
         </Link>
       </div>
 
-      <form onSubmit={sendInvite} className="bg-white border rounded p-4 mb-6 flex flex-col gap-3 max-w-md">
-        <h2 className="text-sm font-semibold text-gray-500 uppercase">Invite a teammate</h2>
-        <label className="text-sm">
+      <form onSubmit={sendInvite} className="bg-white border border-ink/10 rounded-2xl p-4 mb-6 flex flex-col gap-3 max-w-md">
+        <h2 className="text-sm font-semibold text-ink/50 uppercase">Invite a teammate</h2>
+        <label className="text-sm text-ink">
           Email
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            className="w-full border rounded px-2 py-1 mt-1"
+            className="w-full border border-ink/10 rounded-xl px-3 py-1.5 mt-1 bg-paper text-ink text-sm outline-none focus:border-gold-400"
           />
         </label>
-        <label className="text-sm">
+        <label className="text-sm text-ink">
           Role
           <select
             value={role}
             onChange={(e) => setRole(e.target.value as InvitationRole)}
-            className="w-full border rounded px-2 py-1 mt-1"
+            className="w-full border border-ink/10 rounded-xl px-3 py-1.5 mt-1 bg-paper text-ink text-sm outline-none focus:border-gold-400"
           >
             <option value="agent">Support Agent</option>
             <option value="workspace_admin">Workspace Admin</option>
           </select>
         </label>
         {role === 'agent' && (
-          <label className="text-sm">
+          <label className="text-sm text-ink">
             Department
             <select
               value={department}
               onChange={(e) => setDepartment(e.target.value as Department)}
-              className="w-full border rounded px-2 py-1 mt-1"
+              className="w-full border border-ink/10 rounded-xl px-3 py-1.5 mt-1 bg-paper text-ink text-sm outline-none focus:border-gold-400"
             >
               {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
@@ -113,18 +113,18 @@ function WorkspaceTeamContent({ workspaceId }: { workspaceId: string }) {
         <button
           type="submit"
           disabled={submitting}
-          className="bg-blue-600 text-white rounded px-4 py-2 text-sm self-start disabled:opacity-50"
+          className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-paper transition hover:bg-ink-soft self-start disabled:opacity-50"
         >
           {submitting ? 'Sending...' : 'Send invite'}
         </button>
       </form>
 
-      <div className="bg-white border rounded divide-y">
+      <div className="bg-white border border-ink/10 rounded-2xl divide-y divide-ink/10">
         {invitations.map((i) => (
           <div key={i.id} className="flex items-center justify-between px-4 py-3">
             <div>
-              <p className="text-sm font-medium">{i.email}</p>
-              <p className="text-xs text-gray-500">
+              <p className="text-sm font-medium text-ink">{i.email}</p>
+              <p className="text-xs text-ink/50">
                 {i.role === 'workspace_admin' ? 'Workspace Admin' : `Agent · ${i.department ?? 'General'}`}
               </p>
             </div>
@@ -133,14 +133,14 @@ function WorkspaceTeamContent({ workspaceId }: { workspaceId: string }) {
                 {i.status}
               </span>
               {i.status === 'pending' && (
-                <button onClick={() => revoke(i.id)} className="text-xs bg-red-100 text-red-700 rounded px-2 py-1">
+                <button onClick={() => revoke(i.id)} className="rounded-full bg-red-50 text-red-700 border border-red-200 px-3 py-1 text-xs transition hover:bg-red-100">
                   Revoke
                 </button>
               )}
             </div>
           </div>
         ))}
-        {invitations.length === 0 && <p className="px-4 py-3 text-sm text-gray-400">No invitations yet.</p>}
+        {invitations.length === 0 && <p className="px-4 py-3 text-sm text-ink/40">No invitations yet.</p>}
       </div>
     </div>
   );

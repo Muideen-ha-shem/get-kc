@@ -20,6 +20,16 @@ from src.services.routing.source_router import RoutingDecision
 
 
 def _make_orchestrator(*, advisory_layer=None, evidence=None, generate_return=None):
+    if advisory_layer is not None:
+        # MagicMock() auto-creates attributes returning a truthy MagicMock
+        # by default — without this, the new zero-signal guard clause
+        # (ChatOrchestrator._chat_new_pipeline) would incorrectly
+        # short-circuit every test in this file that passes a mocked
+        # advisory_layer, since `check_zero_signal(...) is not None` would
+        # always be True. A test that specifically wants to exercise the
+        # zero-signal-fires path can still override this afterward.
+        advisory_layer.check_zero_signal.return_value = None
+
     source_router = MagicMock()
     source_router.route.return_value = RoutingDecision(knowledge=True, web=False)
 
@@ -36,6 +46,49 @@ def _make_orchestrator(*, advisory_layer=None, evidence=None, generate_return=No
         response_generator=response_generator,
         advisory_layer=advisory_layer,
     ), response_generator
+
+
+class TestChatOrchestratorZeroSignalGuard:
+    """The pre-Step-1 guard added to fix the live-confirmed bug: a vague
+    recommendation ask must never reach SourceRouter/SearchManager at
+    all — a real skip, not a post-hoc discard of search results."""
+
+    def test_zero_signal_short_circuits_without_calling_search_or_generation(self):
+        mock_advisory = MagicMock()
+        orchestrator, response_generator = _make_orchestrator(advisory_layer=mock_advisory)
+        # _make_orchestrator defaults check_zero_signal to None — override
+        # afterward for this specific test, which wants the firing path.
+        mock_advisory.check_zero_signal.return_value = "Which business problem are you trying to solve?"
+
+        result = orchestrator.chat("Recommend the best solution for my business")
+
+        assert result["answer"] == "Which business problem are you trying to solve?"
+        assert result["sources"] == []
+        assert result["next_actions"] == []
+        assert result["escalation_recommended"] is False
+        orchestrator._source_router.route.assert_not_called()
+        orchestrator._search_manager.retrieve.assert_not_called()
+        response_generator.generate.assert_not_called()
+
+    def test_non_zero_signal_question_still_searches_normally(self):
+        mock_advisory = MagicMock()
+        mock_advisory.check_zero_signal.return_value = None
+        mock_advisory.build.return_value = AdvisoryResult(intent=BusinessIntent(question="q"))
+        orchestrator, response_generator = _make_orchestrator(advisory_layer=mock_advisory)
+
+        orchestrator.chat("Tell me about SPIDIFY")
+
+        orchestrator._source_router.route.assert_called_once()
+        orchestrator._search_manager.retrieve.assert_called_once()
+        response_generator.generate.assert_called_once()
+
+    def test_no_advisory_layer_skips_guard_entirely(self):
+        orchestrator, response_generator = _make_orchestrator()
+
+        orchestrator.chat("Recommend the best solution for my business")
+
+        orchestrator._source_router.route.assert_called_once()
+        orchestrator._search_manager.retrieve.assert_called_once()
 
 
 class TestChatOrchestratorNoAdvisoryLayer:

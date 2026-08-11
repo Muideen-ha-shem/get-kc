@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { FormEvent, MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from 'react';
 import {
+  ArrowRight,
   CalendarDays,
   CheckCircle2,
   CircleHelp,
@@ -30,7 +31,7 @@ import { MessageActions } from './components/message/MessageActions';
 import { detectProductHeader } from './lib/detectProduct';
 import { type Solution } from './solutions';
 import { useSolutions } from './lib/useSolutions';
-import { groupForCategory, sortGroups } from './productCatalogCopy';
+import { getProductLogo, groupForCategory, sortGroups } from './productCatalogCopy';
 import { useAuth } from './lib/authContext';
 import { apiFetch } from './lib/apiClient';
 import { getSessionId } from './lib/sessionId';
@@ -594,7 +595,7 @@ function App() {
                       className="relative flex justify-end"
                     >
                       <div className="max-w-[80%] rounded-2xl bg-gold-500/20 p-3 text-sm text-gold-100">
-                        What cybersecurity support do you offer?
+                        What compliance focused identity verification platform do you offer?
                       </div>
                     </motion.div>
 
@@ -618,7 +619,7 @@ function App() {
                       />
                       <div className="relative flex items-center gap-2 text-sm font-medium text-gold-200">
                         <Sparkles size={16} />
-                        Recommended: Cybersecurity
+                        Recommended: Spidify
                       </div>
                       <div className="relative mt-3 flex flex-wrap gap-2">
                         {heroPrompts.map((prompt, index) => (
@@ -778,6 +779,13 @@ function App() {
                   Showing solutions for <strong>{activeProblem.label}</strong> — {matchedSolutionIds?.size ?? 0} match
                   {matchedSolutionIds?.size === 1 ? '' : 'es'} highlighted below.
                 </span>
+                <a
+                  href="#solutions"
+                  className="inline-flex items-center gap-1 rounded-full bg-ink px-3 py-1 text-xs font-semibold text-paper shadow-sm transition hover:bg-ink-soft"
+                >
+                  Explore
+                  <ArrowRight size={12} />
+                </a>
                 <button
                   type="button"
                   onClick={() => setSelectedProblem(null)}
@@ -788,6 +796,25 @@ function App() {
                 </button>
               </div>
             ) : null}
+
+            <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-ink/10 pt-5">
+              <div className="flex items-center gap-3 rounded-2xl border border-dashed border-ink/15 bg-paper px-4 py-3 text-sm text-ink/60">
+                <span className="rounded-full bg-ink/5 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-ink/50">
+                  Coming Soon
+                </span>
+                <span>
+                  <strong className="text-ink/80">ZivaFarm360</strong> — farm &amp; livestock management, agri
+                  supply-chain visibility.
+                </span>
+              </div>
+              <a
+                href="#custom-solution"
+                className="ml-auto inline-flex items-center gap-2 rounded-full border border-ink/15 px-4 py-2 text-sm font-semibold text-ink/70 transition hover:border-gold-400 hover:text-gold-700"
+              >
+                Don't see your challenge? Build a custom solution
+                <ArrowRight size={14} />
+              </a>
+            </div>
           </div>
         </section>
 
@@ -843,8 +870,12 @@ function App() {
                               highlighted ? 'border-gold-400 ring-2 ring-gold-300/50' : 'border-ink/10'
                             }`}
                           >
-                            <div className="flex h-28 items-center justify-center rounded-[1.25rem] bg-gradient-to-br from-paper via-gold-50 to-paper">
-                              <span className="font-display text-2xl text-ink/70">{solution.name}</span>
+                            <div className="flex h-28 items-center justify-center rounded-[1.25rem] bg-gradient-to-br from-paper via-gold-50 to-paper p-6">
+                              <img
+                                src={getProductLogo(solution.id)}
+                                alt={`${solution.name} logo`}
+                                className="max-h-full max-w-full object-contain"
+                              />
                             </div>
                             <div className="mt-6 flex items-center justify-between gap-2">
                               <h4 className="text-xl font-semibold text-ink">{solution.name}</h4>
@@ -912,7 +943,7 @@ function App() {
           )}
         </section>
 
-        <section className="mx-auto max-w-7xl px-6 pb-4 lg:px-8">
+        <section id="custom-solution" className="mx-auto max-w-7xl px-6 pb-4 lg:px-8">
           <div className="relative overflow-hidden rounded-[2rem] border border-ink/10 bg-gradient-to-br from-ink to-ink-soft p-8 text-paper shadow-sm sm:p-12">
             <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-gold-400/10 blur-3xl" />
             <div className="relative flex flex-col items-start gap-6 sm:flex-row sm:items-center sm:justify-between">

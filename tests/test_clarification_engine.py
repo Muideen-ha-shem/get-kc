@@ -124,3 +124,57 @@ class TestClarificationEngineQuestionText:
         question = engine.check(intent)
         assert "Alpha" in question
         assert "Beta" in question
+
+
+class TestClarificationEngineZeroSignal:
+    """check_zero_signal() — live-confirmed bug: 'Recommend the best
+    solution for my business' (zero product/theme signal) fell through to
+    an unscoped web search that ended up naming competitor products."""
+
+    def test_vague_recommendation_ask_fires(self):
+        engine = ClarificationEngine()
+        intent = BusinessIntent(question="Recommend the best solution for my business", confidence="none", products=())
+        question = engine.check_zero_signal(intent)
+        assert question is not None
+        assert "business problem" in question.lower()
+
+    def test_ambiguous_confidence_does_not_fire(self):
+        """The existing two-product case must keep going through check(),
+        not this new method."""
+        engine = ClarificationEngine()
+        intent = BusinessIntent(
+            question="we need something for records",
+            products=("AppManage", "Havis eCertify"),
+            confidence="ambiguous",
+            via_theme=False,
+            named_explicitly=False,
+        )
+        assert engine.check_zero_signal(intent) is None
+
+    def test_named_high_confidence_product_does_not_fire(self):
+        engine = ClarificationEngine()
+        intent = BusinessIntent(question="Tell me about SPIDIFY", products=("SPIDIFY",), confidence="high")
+        assert engine.check_zero_signal(intent) is None
+
+    def test_plain_informational_question_with_no_product_match_does_not_fire(self):
+        """Proves the split: zero signal alone isn't enough — must also
+        explicitly ask for a recommendation."""
+        engine = ClarificationEngine()
+        intent = BusinessIntent(question="What are your office hours?", confidence="none", products=())
+        assert engine.check_zero_signal(intent) is None
+
+    def test_unlisted_product_pricing_question_does_not_fire(self):
+        engine = ClarificationEngine()
+        intent = BusinessIntent(question="What is Zendesk's SDK pricing?", confidence="none", products=())
+        assert engine.check_zero_signal(intent) is None
+
+    def test_various_recommendation_phrasings_fire(self):
+        engine = ClarificationEngine()
+        for question in (
+            "What should I use for my business?",
+            "Suggest a solution for us",
+            "Help me choose the right product",
+            "What would you recommend?",
+        ):
+            intent = BusinessIntent(question=question, confidence="none", products=())
+            assert engine.check_zero_signal(intent) is not None, question

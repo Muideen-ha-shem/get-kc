@@ -144,6 +144,29 @@ class AdvisoryResponseLayer:
             next_actions=next_actions,
         )
 
+    def check_zero_signal(self, question: str) -> str | None:
+        """Cheap, pre-retrieval check for a genuinely zero-signal
+        recommendation ask (e.g. "Recommend the best solution for my
+        business" — no product/theme signal at all). Deliberately separate
+        from ``build()`` — must be callable *before*
+        ``SourceRouter.route()``/``SearchManager.retrieve()`` run, not
+        after, so the web search this is meant to prevent never executes.
+        Runs its own cheap, pure ``BusinessIntentEngine.detect()`` call (no
+        I/O, no LLM — same call ``build()`` itself makes) rather than
+        requiring a precomputed intent, since nothing has been retrieved
+        yet at the point this is called.
+
+        Best-effort: any failure returns ``None`` (caller proceeds with
+        the normal pipeline), matching every other advisory sub-step's
+        failure-isolation pattern below.
+        """
+        try:
+            intent = self._intent_engine.detect(question)
+            return self._clarification_engine.check_zero_signal(intent)
+        except Exception as exc:
+            logger.warning("AdvisoryResponseLayer: zero-signal check failed — %s.", exc)
+            return None
+
     # ------------------------------------------------------------------
     # Failure-isolated sub-steps — a bug in one advisory stage degrades to
     # "skip that enrichment", never breaks the chat response.
