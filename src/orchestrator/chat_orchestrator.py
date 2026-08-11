@@ -306,6 +306,34 @@ class ChatOrchestrator:
         if handoff_context:
             advisory_question = f"{handoff_context}. {advisory_question}"
 
+        # --- Step 0.5: Zero-signal guard (vague-recommendation-ask fix) ---
+        # Fires only when the question shows genuinely zero product/theme
+        # signal AND is explicitly phrased as a recommendation ask (see
+        # AdvisoryResponseLayer.check_zero_signal / ClarificationEngine
+        # .check_zero_signal). Runs BEFORE SourceRouter.route()/
+        # SearchManager.retrieve() — a real skip, not a post-hoc discard:
+        # for this one narrow case the web search that previously ran
+        # unconditionally (SourceRouter has no vagueness awareness) never
+        # executes at all, so the answer can never end up naming a
+        # competitor product surfaced by that search.
+        #
+        # Every other query shape — named product, ambiguous-two-product,
+        # business-theme, normal knowledge question, or any call where
+        # advisory_layer is None — does not take this branch and reaches
+        # Step 1 exactly as it does today.
+        if self._advisory_layer is not None:
+            zero_signal_question = self._advisory_layer.check_zero_signal(advisory_question)
+            if zero_signal_question is not None:
+                return {
+                    "answer": zero_signal_question,
+                    "sources": [],
+                    "citations": [],
+                    "next_actions": [],
+                    "session_id": session_id,
+                    "escalation_recommended": False,
+                    "escalation_reason": None,
+                }
+
         # --- Step 1: Route (SourceRouter) ---
         if self._source_router:
             decision = self._source_router.route(message)

@@ -25,6 +25,13 @@ _FAKE_WORKSPACE = WorkspaceContext(workspace_id="w1", slug="acme", name="Acme")
 
 
 def _make_orchestrator(*, advisory_layer=None, evidence=None):
+    if advisory_layer is not None:
+        # MagicMock() auto-creates attributes returning a truthy MagicMock
+        # by default — without this, ChatOrchestrator's zero-signal guard
+        # clause would incorrectly short-circuit every test here that
+        # passes a mocked advisory_layer.
+        advisory_layer.check_zero_signal.return_value = None
+
     source_router = MagicMock()
     source_router.route.return_value = RoutingDecision(knowledge=True, web=False)
 

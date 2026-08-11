@@ -14,19 +14,21 @@ export function AdminLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
-      <aside className="w-56 border-r bg-white flex flex-col">
-        <div className="flex items-center gap-2 px-4 py-4 border-b">
+    <div className="min-h-screen bg-paper flex">
+      <aside className="w-56 border-r border-ink/10 bg-white flex flex-col">
+        <div className="flex items-center gap-2 px-4 py-4 border-b border-ink/10">
           <HavisIQMark />
-          <span className="font-semibold">Admin Portal</span>
+          <span className="font-display font-semibold text-ink">Admin Portal</span>
         </div>
         <nav className="flex flex-col p-2 gap-1">
           {NAV_ITEMS.map((item) => (
             <Link
               key={item.to}
               to={item.to}
-              className={`rounded px-3 py-2 text-sm ${
-                location.pathname === item.to ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-600 hover:bg-gray-100'
+              className={`rounded-full px-3 py-2 text-sm transition ${
+                location.pathname === item.to
+                  ? 'bg-gold-50 text-gold-700 font-medium'
+                  : 'text-ink/60 hover:bg-paper hover:text-ink'
               }`}
             >
               {item.label}

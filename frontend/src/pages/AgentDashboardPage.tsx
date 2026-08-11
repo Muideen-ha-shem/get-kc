@@ -176,10 +176,10 @@ export function AgentDashboardPage() {
 
   if (notAnAgent) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-center p-8">
+      <div className="min-h-screen bg-paper flex items-center justify-center text-center p-8">
         <div>
-          <p className="text-lg font-medium">You're not a registered support agent.</p>
-          <Link to="/" className="text-blue-600 underline">
+          <p className="text-lg font-display text-ink">You're not a registered support agent.</p>
+          <Link to="/" className="text-gold-700 underline hover:text-gold-600">
             Back to HavisIQ
           </Link>
         </div>
@@ -188,22 +188,22 @@ export function AgentDashboardPage() {
   }
 
   if (!agent) {
-    return <div className="min-h-screen flex items-center justify-center">Loading…</div>;
+    return <div className="min-h-screen bg-paper flex items-center justify-center text-ink/60">Loading…</div>;
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="flex items-center justify-between px-6 py-4 border-b bg-white">
+    <div className="min-h-screen bg-paper flex flex-col">
+      <header className="flex items-center justify-between px-6 py-4 border-b border-ink/10 bg-white">
         <div className="flex items-center gap-2">
           <HavisIQMark />
-          <span className="font-semibold">Agent Dashboard</span>
+          <span className="font-display font-semibold text-ink">Agent Dashboard</span>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-500">{agent.name} · {agent.department}</span>
+          <span className="text-sm text-ink/50">{agent.name} · {agent.department}</span>
           <select
             value={agent.status}
             onChange={(e) => setStatus(e.target.value as AgentStatus)}
-            className="border rounded px-2 py-1 text-sm"
+            className="border border-ink/10 rounded-xl px-2 py-1.5 text-sm bg-paper text-ink outline-none focus:border-gold-400"
           >
             <option value="available">Available</option>
             <option value="away">Away</option>
@@ -213,12 +213,12 @@ export function AgentDashboardPage() {
       </header>
 
       {stats && (
-        <div className="flex gap-6 px-6 py-3 border-b bg-white text-sm text-gray-600">
-          <span>Workload: <strong className="text-gray-900">{stats.current_workload}</strong></span>
-          <span>Resolved today: <strong className="text-gray-900">{stats.resolved_today}</strong></span>
+        <div className="flex gap-6 px-6 py-3 border-b border-ink/10 bg-white text-sm text-ink/60">
+          <span>Workload: <strong className="text-ink">{stats.current_workload}</strong></span>
+          <span>Resolved today: <strong className="text-ink">{stats.resolved_today}</strong></span>
           <span>
             Avg. resolution:{' '}
-            <strong className="text-gray-900">
+            <strong className="text-ink">
               {stats.average_resolution_minutes != null ? `${Math.round(stats.average_resolution_minutes)}m` : '—'}
             </strong>
           </span>
@@ -226,34 +226,34 @@ export function AgentDashboardPage() {
       )}
 
       <div className="flex flex-1 overflow-hidden">
-        <aside className="w-80 border-r bg-white overflow-y-auto">
+        <aside className="w-80 border-r border-ink/10 bg-white overflow-y-auto">
           <section className="p-4">
-            <h2 className="text-sm font-semibold text-gray-500 uppercase mb-2">My Queue</h2>
-            {queue.length === 0 && <p className="text-sm text-gray-400">Nothing waiting.</p>}
+            <h2 className="text-sm font-semibold text-ink/50 uppercase mb-2">My Queue</h2>
+            {queue.length === 0 && <p className="text-sm text-ink/40">Nothing waiting.</p>}
             {queue.map((escalation) => (
-              <div key={escalation.id} className="border rounded p-3 mb-2">
-                <p className="text-sm font-medium">{escalation.trigger_reason} · {escalation.department}</p>
-                <p className="text-xs text-gray-500">{escalation.summary?.problem}</p>
+              <div key={escalation.id} className="border border-ink/10 rounded-xl p-3 mb-2">
+                <p className="text-sm font-medium text-ink">{escalation.trigger_reason} · {escalation.department}</p>
+                <p className="text-xs text-ink/50">{escalation.summary?.problem}</p>
                 <button
                   onClick={() => acceptEscalation(escalation.id)}
-                  className="mt-2 text-xs bg-blue-600 text-white rounded px-2 py-1"
+                  className="mt-2 text-xs rounded-full bg-ink px-3 py-1 text-paper font-semibold transition hover:bg-ink-soft"
                 >
                   Accept
                 </button>
               </div>
             ))}
           </section>
-          <section className="p-4 border-t">
-            <h2 className="text-sm font-semibold text-gray-500 uppercase mb-2">Active Chats</h2>
-            {myConversations.length === 0 && <p className="text-sm text-gray-400">None yet.</p>}
+          <section className="p-4 border-t border-ink/10">
+            <h2 className="text-sm font-semibold text-ink/50 uppercase mb-2">Active Chats</h2>
+            {myConversations.length === 0 && <p className="text-sm text-ink/40">None yet.</p>}
             {myConversations.map((escalation) => (
               <button
                 key={escalation.id}
                 onClick={() => setOpenEscalation(escalation)}
-                className="w-full text-left border rounded p-3 mb-2 hover:bg-gray-50"
+                className="w-full text-left border border-ink/10 rounded-xl p-3 mb-2 transition hover:border-gold-400 hover:bg-paper"
               >
-                <p className="text-sm font-medium">{STATUS_LABELS[escalation.status]}</p>
-                <p className="text-xs text-gray-500">{escalation.summary?.problem}</p>
+                <p className="text-sm font-medium text-ink">{STATUS_LABELS[escalation.status]}</p>
+                <p className="text-xs text-ink/50">{escalation.summary?.problem}</p>
               </button>
             ))}
           </section>
@@ -261,17 +261,17 @@ export function AgentDashboardPage() {
 
         <main className="flex-1 flex flex-col p-6 overflow-y-auto">
           {!openEscalation ? (
-            <p className="text-gray-400">Select a conversation to view details.</p>
+            <p className="text-ink/40">Select a conversation to view details.</p>
           ) : (
             <div className="flex flex-col h-full">
-              <div className="bg-white border rounded p-4 mb-4">
+              <div className="bg-white border border-ink/10 rounded-2xl p-4 mb-4">
                 <div className="flex items-center justify-between mb-2">
-                  <h2 className="font-semibold">Summary — {STATUS_LABELS[openEscalation.status]}</h2>
+                  <h2 className="font-display font-semibold text-ink">Summary — {STATUS_LABELS[openEscalation.status]}</h2>
                   <div className="flex gap-2">
                     {openEscalation.status === 'active' && (
                       <button
                         onClick={() => markWaitingForCustomer(openEscalation.id)}
-                        className="text-xs bg-gray-200 rounded px-2 py-1"
+                        className="text-xs rounded-full border border-ink/15 text-ink px-3 py-1 transition hover:border-gold-400 hover:text-gold-700"
                       >
                         Waiting on Customer
                       </button>
@@ -280,13 +280,13 @@ export function AgentDashboardPage() {
                       <>
                         <button
                           onClick={() => resolveEscalation(openEscalation.id)}
-                          className="text-xs bg-green-600 text-white rounded px-2 py-1"
+                          className="text-xs rounded-full bg-green-600 text-white px-3 py-1 transition hover:bg-green-700"
                         >
                           Resolve
                         </button>
                         <button
                           onClick={() => rejoinAi(openEscalation.id)}
-                          className="text-xs bg-purple-600 text-white rounded px-2 py-1"
+                          className="text-xs rounded-full bg-ink text-paper px-3 py-1 transition hover:bg-ink-soft"
                         >
                           Hand back to AI
                         </button>
@@ -295,52 +295,52 @@ export function AgentDashboardPage() {
                   </div>
                 </div>
                 {openEscalation.summary && (
-                  <dl className="text-sm grid grid-cols-2 gap-2">
-                    <dt className="text-gray-500">Customer</dt>
+                  <dl className="text-sm grid grid-cols-2 gap-2 text-ink">
+                    <dt className="text-ink/50">Customer</dt>
                     <dd>{openEscalation.summary.customer}</dd>
-                    <dt className="text-gray-500">Workspace</dt>
+                    <dt className="text-ink/50">Workspace</dt>
                     <dd>{openEscalation.summary.workspace}</dd>
-                    <dt className="text-gray-500">Sentiment</dt>
+                    <dt className="text-ink/50">Sentiment</dt>
                     <dd>{openEscalation.summary.sentiment}</dd>
-                    <dt className="text-gray-500">Products</dt>
+                    <dt className="text-ink/50">Products</dt>
                     <dd>{openEscalation.summary.products.join(', ') || '—'}</dd>
-                    <dt className="text-gray-500">Problem</dt>
+                    <dt className="text-ink/50">Problem</dt>
                     <dd>{openEscalation.summary.problem}</dd>
                   </dl>
                 )}
               </div>
 
-              <div className="bg-white border rounded p-3 mb-4">
-                <h3 className="text-sm font-semibold text-gray-500 uppercase mb-2">Internal Notes</h3>
+              <div className="bg-white border border-ink/10 rounded-2xl p-3 mb-4">
+                <h3 className="text-sm font-semibold text-ink/50 uppercase mb-2">Internal Notes</h3>
                 {(openEscalation.notes ?? []).map((note) => (
-                  <p key={note.id} className="text-xs text-gray-600 mb-1">{note.content}</p>
+                  <p key={note.id} className="text-xs text-ink/60 mb-1">{note.content}</p>
                 ))}
                 <form onSubmit={addNote} className="flex gap-2 mt-2">
                   <input
                     value={noteInput}
                     onChange={(e) => setNoteInput(e.target.value)}
-                    className="flex-1 border rounded px-2 py-1 text-xs"
+                    className="flex-1 border border-ink/10 rounded-xl px-3 py-1.5 text-xs bg-paper text-ink outline-none focus:border-gold-400"
                     placeholder="Add an internal note (not visible to the customer)…"
                   />
-                  <button type="submit" className="text-xs bg-gray-200 rounded px-2 py-1">Add</button>
+                  <button type="submit" className="text-xs rounded-full border border-ink/15 text-ink px-3 py-1.5 transition hover:border-gold-400 hover:text-gold-700">Add</button>
                 </form>
               </div>
 
-              <div className="flex-1 bg-white border rounded p-4 overflow-y-auto mb-4">
+              <div className="flex-1 bg-white border border-ink/10 rounded-2xl p-4 overflow-y-auto mb-4">
                 {(openEscalation.messages ?? []).map((m) => (
                   <div key={m.id} className={m.sender_type === 'agent' ? 'text-right mb-2' : 'text-left mb-2'}>
-                    <span className="inline-block bg-gray-100 rounded px-3 py-1 text-sm">{m.content}</span>
+                    <span className="inline-block bg-paper rounded-xl px-3 py-1 text-sm text-ink">{m.content}</span>
                   </div>
                 ))}
               </div>
 
               {copilotDraft && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded p-3 mb-3 text-sm">
-                  <p className="text-xs font-semibold text-yellow-700 mb-1">Suggested reply (review before sending)</p>
-                  <p className="mb-2">{copilotDraft}</p>
+                <div className="bg-gold-50 border border-gold-200 rounded-2xl p-3 mb-3 text-sm">
+                  <p className="text-xs font-semibold text-gold-700 mb-1">Suggested reply (review before sending)</p>
+                  <p className="mb-2 text-ink">{copilotDraft}</p>
                   <button
                     onClick={() => setMessageInput(copilotDraft)}
-                    className="text-xs bg-yellow-600 text-white rounded px-2 py-1"
+                    className="text-xs rounded-full bg-gold-600 text-white px-3 py-1 transition hover:bg-gold-700"
                   >
                     Use as draft
                   </button>
@@ -351,17 +351,17 @@ export function AgentDashboardPage() {
                 <button
                   type="button"
                   onClick={requestCopilotDraft}
-                  className="text-xs bg-gray-200 rounded px-3 py-2"
+                  className="text-xs rounded-full border border-ink/15 text-ink px-3 py-2 transition hover:border-gold-400 hover:text-gold-700"
                 >
                   Ask Copilot
                 </button>
                 <input
                   value={messageInput}
                   onChange={(e) => setMessageInput(e.target.value)}
-                  className="flex-1 border rounded px-3 py-2 text-sm"
+                  className="flex-1 border border-ink/10 rounded-xl px-3 py-2 text-sm bg-paper text-ink outline-none focus:border-gold-400"
                   placeholder="Type a reply…"
                 />
-                <button type="submit" className="bg-blue-600 text-white rounded px-4 py-2 text-sm">
+                <button type="submit" className="rounded-full bg-ink text-paper px-4 py-2 text-sm font-semibold transition hover:bg-ink-soft">
                   Send
                 </button>
               </form>

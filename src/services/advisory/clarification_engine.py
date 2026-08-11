@@ -45,6 +45,15 @@ logger: logging.Logger = get_logger(__name__)
 
 _COMPARISON_KEYWORDS = ("compare", "comparison", " vs ", " vs. ", " versus ")
 
+_RECOMMENDATION_REQUEST_KEYWORDS = (
+    "recommend", "recommendation", "suggest a solution", "suggest a product",
+    "best solution", "best product", "best option",
+    "what should i use", "which product should i use", "which solution",
+    "what do you suggest", "what would you recommend",
+    "solution for my business", "solution for my company",
+    "help me choose", "help me pick",
+)
+
 
 class ClarificationEngine:
     """Decides whether a question needs a clarifying follow-up instead of
@@ -87,3 +96,40 @@ class ClarificationEngine:
     def _asks_for_comparison(question: str) -> bool:
         padded = f" {(question or '').lower()} "
         return any(keyword in padded for keyword in _COMPARISON_KEYWORDS)
+
+    def check_zero_signal(self, intent: BusinessIntent) -> str | None:
+        """Return a clarifying question when *intent* shows genuinely zero
+        product/theme signal AND the question itself explicitly asks to be
+        pointed to a solution/recommendation — never for the ambiguous
+        two-product case above (that's ``check()``'s job, unchanged), and
+        never for a normal informational question that simply doesn't
+        match any known product (e.g. "What are your office hours?", or a
+        question about an unlisted product name) — those must keep
+        falling through to normal retrieval exactly as before.
+
+        Deliberately a separate method, called by ChatOrchestrator
+        *before* routing/retrieval even runs — ``check()`` still only ever
+        runs after retrieval, inside AdvisoryResponseLayer.build().
+        """
+        if intent.confidence != "none":
+            return None
+        if intent.products:
+            return None
+        if not self._asks_for_recommendation(intent.question):
+            return None
+
+        logger.info(
+            "ClarificationEngine: zero-signal recommendation ask %r — asking to clarify before searching.",
+            intent.question,
+        )
+        return (
+            "I'd love to point you to the right solution — could you tell me a "
+            "bit more about the business problem you're trying to solve? For "
+            "example: employee records, payroll, identity verification, "
+            "expense management, HR/hiring, or something else?"
+        )
+
+    @staticmethod
+    def _asks_for_recommendation(question: str) -> bool:
+        padded = f" {(question or '').lower()} "
+        return any(keyword in padded for keyword in _RECOMMENDATION_REQUEST_KEYWORDS)

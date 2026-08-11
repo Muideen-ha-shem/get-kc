@@ -66,6 +66,38 @@ class TestAdvisoryResponseLayerClarification:
         assert result.next_actions == []
 
 
+class TestAdvisoryResponseLayerZeroSignal:
+    """check_zero_signal() — the pre-retrieval guard used by
+    ChatOrchestrator to ask before searching for a genuinely vague
+    recommendation ask."""
+
+    def test_fires_end_to_end_with_real_sub_engines(self):
+        layer = AdvisoryResponseLayer()
+        question = layer.check_zero_signal("Recommend the best solution for my business")
+        assert question is not None
+        assert "business problem" in question.lower()
+
+    def test_named_product_question_does_not_fire(self):
+        layer = AdvisoryResponseLayer()
+        assert layer.check_zero_signal("Tell me about SPIDIFY") is None
+
+    def test_ambiguous_two_product_question_does_not_fire(self):
+        # Genuinely produces confidence="ambiguous", products=("SPIDIFY", "ZivaAIRA")
+        # via the real classifier — confirmed by direct inspection, not assumed.
+        layer = AdvisoryResponseLayer()
+        assert layer.check_zero_signal("we need identity verification or recruitment help") is None
+
+    def test_plain_knowledge_question_does_not_fire(self):
+        layer = AdvisoryResponseLayer()
+        assert layer.check_zero_signal("What are your office hours?") is None
+
+    def test_intent_engine_failure_returns_none_not_exception(self):
+        mock_intent_engine = MagicMock()
+        mock_intent_engine.detect.side_effect = RuntimeError("boom")
+        layer = AdvisoryResponseLayer(intent_engine=mock_intent_engine)
+        assert layer.check_zero_signal("Recommend the best solution for my business") is None
+
+
 class TestAdvisoryResponseLayerFailureIsolation:
     def test_recommendation_engine_failure_does_not_break_build(self):
         mock_rec_engine = MagicMock()

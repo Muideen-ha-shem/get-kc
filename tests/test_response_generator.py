@@ -480,3 +480,91 @@ class TestResponseGeneratorRecommendationFraming:
         assert "V-Login" in framed
         assert "SPIDIFY" in framed
         assert "primary" in framed.lower()
+
+
+class TestResponseGeneratorCatalogGuardrail:
+    """Live-confirmed bug this fixes: a fully vague question (no
+    primary_product/complementary_products at all) let the model name
+    real third-party competitor products surfaced by a web search. The
+    guardrail must be present in the prompt EVEN with no recommendation
+    params — that's exactly the case that broke."""
+
+    def test_guardrail_present_even_without_primary_product(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = "Answer [1]."
+
+        with patch("groq.Groq") as mock_groq:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_completion
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key")
+            gen.generate(
+                question="Recommend the best solution for my business",
+                context=[_make_evidence(content="Generic business advice.", url="https://example.com/")],
+            )
+
+            system_prompt = mock_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+
+        assert "Product-catalog guardrail" in system_prompt
+        assert "SPIDIFY" in system_prompt
+        assert "PayCheq" in system_prompt
+        assert "third-party" in system_prompt.lower()
+        assert "competitor" in system_prompt.lower()
+
+    def test_guardrail_present_alongside_recommendation_framing_too(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = "I recommend SPIDIFY [1]."
+
+        with patch("groq.Groq") as mock_groq:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_completion
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key")
+            gen.generate(
+                question="Tell me about SPIDIFY",
+                context=[_make_evidence(content="SPIDIFY verifies identity.", url="https://havisspidify.com/")],
+                primary_product="SPIDIFY",
+                complementary_products=[],
+            )
+
+            system_prompt = mock_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+
+        assert "Business recommendation framing" in system_prompt
+        assert "Product-catalog guardrail" in system_prompt
+
+    def test_build_catalog_guardrail_directly(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        guardrail = ResponseGenerator._build_catalog_guardrail()
+        assert "SPIDIFY" in guardrail
+        assert "ZivaAIRA" in guardrail
+        assert "Dynamics 365" in guardrail
+
+    def test_fallback_guardrail_used_on_registry_failure(self):
+        from src.services.generator import response_generator as rg_module
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = "Answer [1]."
+
+        with patch("groq.Groq") as mock_groq, \
+             patch.object(ResponseGenerator, "_build_catalog_guardrail", side_effect=RuntimeError("boom")):
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_completion
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key")
+            gen.generate(
+                question="Recommend the best solution for my business",
+                context=[_make_evidence(content="Generic business advice.", url="https://example.com/")],
+            )
+
+            system_prompt = mock_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+
+        assert rg_module._CATALOG_GUARDRAIL_FALLBACK.strip() in system_prompt

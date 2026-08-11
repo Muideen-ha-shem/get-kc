@@ -50,6 +50,42 @@ fully, say so clearly.  Do NOT guess or make up information.
 Evidence:
 {evidence_block}"""
 
+# Unconditional catalog guardrail — appended to every prompt regardless of
+# whether an advisory recommendation was made (primary_product/
+# complementary_products can both be None, e.g. a fully vague question),
+# since that's exactly the case a live-confirmed bug fell through: nothing
+# stopped the model from naming a third-party/competitor product surfaced
+# by an open web search. The allow-list is generated from PRODUCT_REGISTRY
+# at call time (see _build_catalog_guardrail) rather than hand-written here,
+# so it self-updates if a product is ever added/removed.
+_CATALOG_GUARDRAIL_TEMPLATE: str = """
+
+Product-catalog guardrail:
+6.  If the question asks for a recommendation or suggestion of a product or \
+solution, you may ONLY recommend from HavisIQ's own product catalog: \
+{catalog_names}. NEVER name, suggest, or endorse any third-party or \
+competitor product (for example Microsoft Dynamics 365, ClickUp, Wave \
+Apps, Gusto, or any other outside vendor) — even if such a name appears \
+in the evidence above.
+7.  If the evidence above does not support a clear recommendation from \
+that catalog (for example, it is generic third-party business-advice \
+content with no HavisIQ product coverage), say so plainly and suggest the \
+user reach out to HavisIQ support/sales for a tailored recommendation \
+instead of naming an outside product."""
+
+# Used only if building the primary template above fails (e.g. a
+# PRODUCT_REGISTRY import/format issue) — same intent, no registry
+# dependency, so a bug there degrades gracefully rather than breaking
+# every chat response.
+_CATALOG_GUARDRAIL_FALLBACK: str = """
+
+Product-catalog guardrail:
+6.  If the question asks for a recommendation, only recommend HavisIQ's own \
+products — never a third-party or competitor product, even if one appears \
+in the evidence above.
+7.  If the evidence does not support a HavisIQ-specific recommendation, say \
+so and suggest the user reach out to HavisIQ support/sales instead."""
+
 
 # ---------------------------------------------------------------------------
 # ResponseGenerator
@@ -192,6 +228,11 @@ class ResponseGenerator:
             evidence_block=evidence_block,
         )
         system_prompt += self._build_recommendation_framing(primary_product, complementary_products)
+        try:
+            system_prompt += self._build_catalog_guardrail()
+        except Exception as exc:
+            logger.warning("ResponseGenerator: catalog guardrail build failed — %s. Using generic guardrail.", exc)
+            system_prompt += _CATALOG_GUARDRAIL_FALLBACK
         user_prompt = question_clean
 
         logger.info(
@@ -292,6 +333,20 @@ class ResponseGenerator:
             )
 
         return ""
+
+    @staticmethod
+    def _build_catalog_guardrail() -> str:
+        """Unconditional prompt guardrail — appended for every call,
+        regardless of primary_product/complementary_products, because the
+        bug this fixes happens exactly when those are None (no advisory
+        recommendation was made, e.g. a fully vague query). Callers wrap
+        this in try/except (see generate()) so a PRODUCT_REGISTRY import/
+        format failure degrades to a generic (still-safe) instruction
+        rather than breaking generate() for everyone."""
+        from ...shared.product_registry import PRODUCT_REGISTRY
+
+        catalog_names = ", ".join(sorted(PRODUCT_REGISTRY.keys()))
+        return _CATALOG_GUARDRAIL_TEMPLATE.format(catalog_names=catalog_names)
 
     def _validate_citations(self, citations: list[dict[str, object]]) -> list[dict[str, object]]:
         """Run the injected citation validator, if any.
