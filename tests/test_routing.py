@@ -251,3 +251,52 @@ class TestSourceRouterHavis360ProductNames:
         decision = router.route("Tell me about Havis iReport")
         assert decision.knowledge is True
         assert decision.web is False
+
+
+# ---------------------------------------------------------------------------
+# Self-identity guard — a "tell me about {workspace}" question must never
+# route to web, since an unscoped web search for a same-named but unrelated
+# topic is exactly how a prior incident produced a completely wrong answer
+# ("Ha-Shem" the vendor vs. "Ha-Shem" the Jewish religious term).
+# ---------------------------------------------------------------------------
+
+
+class TestSourceRouterSelfIdentityGuard:
+    def test_self_identity_question_forces_knowledge_only(self):
+        from src.services.routing.source_router import SourceRouter
+
+        router = SourceRouter()
+        decision = router.route("Tell me about Ha-Shem", workspace_name="Ha-Shem")
+        assert decision.knowledge is True
+        assert decision.web is False
+
+    def test_guard_overrides_a_phrasing_that_would_otherwise_also_hit_web_keywords(self):
+        # Without the guard, "what's the latest" trips _web_keywords
+        # (current-event-ish), which combined with the KB-ish "tell me
+        # about" would normally produce knowledge=True, web=True. The
+        # guard must win outright — proves it's doing real work, not just
+        # piggybacking on the existing "about" KB-keyword coincidence.
+        from src.services.routing.source_router import SourceRouter
+
+        router = SourceRouter()
+        decision = router.route(
+            "What's the latest — tell me about Ha-Shem", workspace_name="Ha-Shem"
+        )
+        assert decision.knowledge is True
+        assert decision.web is False
+
+    def test_guard_is_a_no_op_when_workspace_name_omitted(self):
+        from src.services.routing.source_router import SourceRouter
+
+        router = SourceRouter()
+        decision = router.route("What's the latest — tell me about Ha-Shem")
+        assert decision.web is True
+
+    def test_negative_control_specific_question_about_workspace_unaffected(self):
+        from src.services.routing.source_router import SourceRouter
+
+        router = SourceRouter()
+        decision = router.route("Compare Ha-Shem's STAAS to Salesforce", workspace_name="Ha-Shem")
+        # Guard does not fire — falls through to ordinary keyword routing,
+        # which already includes knowledge for a comparison question.
+        assert decision.knowledge is True

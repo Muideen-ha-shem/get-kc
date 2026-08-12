@@ -73,16 +73,14 @@ type ChatResizeEdge = 'left' | 'right' | 'top' | 'bottom';
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
-// Full set used in the actual chat widget's quick-prompt row (plenty of
-// room to wrap there); the compact hero mock uses a short slice of these.
+// Kept short deliberately — shown only before the user's first message
+// (see hasUserMessage below), so it's a quick-start row, not a permanent
+// fixture crowding the panel on every turn. The compact hero mock uses a
+// short slice of these.
 const suggestedPrompts = [
   'Recommend the best solution for my business',
   'Compare SPIDIFY and V-Login',
-  'Compare STAAS and WeCare',
   'Which solution handles payroll?',
-  'Which solution improves recruitment?',
-  'Which solution manages expenses?',
-  'I need custom software',
   'I need cybersecurity services',
   'Tell me about Ha-Shem',
 ];
@@ -148,8 +146,7 @@ function App() {
     {
       id: 1,
       sender: 'assistant',
-      content:
-        "Hello! I'm HavisIQ, the AI advisor for Ha-Shem's solutions. Tell me what you're trying to solve — identity verification, recruitment, cybersecurity, cloud, and more — and I'll point you the right way.",
+      content: "Hi! What are you trying to solve?",
     },
   ]);
   const [input, setInput] = useState('');
@@ -303,11 +300,18 @@ function App() {
       const sources = Array.isArray(data.sources) ? data.sources : [];
       const nextActions: NextAction[] = Array.isArray(data.next_actions) ? data.next_actions : [];
 
+      // Reveal in chunks sized so the whole answer streams in roughly
+      // TARGET_STREAM_DURATION_MS regardless of length — a 3-line answer
+      // and a 20-line answer both feel similarly snappy, instead of long
+      // answers dragging on for many extra seconds at a fixed 1-char/tick
+      // pace.
       let streamedIndex = 0;
-      const streamSpeed = 18;
+      const streamTickMs = 16;
+      const targetStreamDurationMs = 700;
+      const charsPerTick = Math.max(1, Math.ceil(answer.length / (targetStreamDurationMs / streamTickMs)));
 
       const streamInterval = window.setInterval(() => {
-        streamedIndex += 1;
+        streamedIndex = Math.min(streamedIndex + charsPerTick, answer.length);
         const nextContent = answer.slice(0, streamedIndex);
 
         setMessages((prev) =>
@@ -328,7 +332,7 @@ function App() {
           );
           setIsTyping(false);
         }
-      }, streamSpeed);
+      }, streamTickMs);
       streamIntervalRef.current = streamInterval;
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
@@ -1179,7 +1183,9 @@ function App() {
                     Stop generating
                   </button>
                 </div>
-              ) : (
+              ) : messages.every((message) => message.sender !== 'user') ? (
+                // Quick-start row — only before the first user message, so
+                // it doesn't keep crowding the panel on every later turn.
                 <div className="mb-3 flex flex-wrap gap-2">
                   {suggestedPrompts.map((prompt) => (
                     <button key={prompt} type="button" onClick={() => handlePrompt(prompt)} className="rounded-full border border-ink/10 bg-paper px-3 py-1.5 text-xs font-medium text-ink/70 transition hover:border-gold-400 hover:text-gold-700">
@@ -1187,7 +1193,7 @@ function App() {
                     </button>
                   ))}
                 </div>
-              )}
+              ) : null}
               <form onSubmit={handleSubmit} className="flex items-center gap-2 rounded-full border border-ink/10 bg-paper px-3 py-2">
                 <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Ask HavisIQ..." className="flex-1 bg-transparent text-sm outline-none" />
                 <button

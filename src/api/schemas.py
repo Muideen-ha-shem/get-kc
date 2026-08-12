@@ -370,6 +370,27 @@ class EscalationSchema(BaseModel):
     )
 
 
+class CustomerEscalationSchema(BaseModel):
+    """Customer-facing escalation view — deliberately a separate, lighter
+    shape from EscalationSchema rather than reusing it with fields hidden
+    at the call site: omits workspace_id, assigned_agent_id (raw id),
+    trigger_reason, ai_engaged, summary (AI-authored internal intent/
+    sentiment), and notes (agent-internal) — structurally, not just by
+    convention, since this schema has no field to accidentally populate
+    with any of them."""
+
+    id: str
+    conversation_id: str | None = None
+    status: str
+    assigned_agent_name: str | None = None
+    department: str | None = None
+    created_at: str | None = None
+    assigned_at: str | None = None
+    resolved_at: str | None = None
+    closed_at: str | None = None
+    messages: list[EscalationMessageSchema] | None = None
+
+
 class EscalationCreateRequest(BaseModel):
     conversation_id: str | None = None
     question: str = Field(..., min_length=1)

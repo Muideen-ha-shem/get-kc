@@ -17,7 +17,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.app import app
-from src.api.deps import get_current_agent, get_current_user_optional, get_current_user_required, get_current_workspace
+from src.api.deps import (
+    get_current_access_token,
+    get_current_agent,
+    get_current_chat_workspace,
+    get_current_user_optional,
+    get_current_user_required,
+    get_current_workspace,
+)
 from src.services.agents.agent_models import SupportAgent
 from src.services.auth.auth_service import AuthUser
 from src.services.escalation.escalation_models import Escalation
@@ -53,6 +60,14 @@ def _authenticate():
     app.dependency_overrides[get_current_user_required] = lambda: _FAKE_USER
     app.dependency_overrides[get_current_user_optional] = lambda: _FAKE_USER
     app.dependency_overrides[get_current_workspace] = lambda: _FAKE_WORKSPACE
+
+
+def _authenticate_chat_workspace():
+    """For the new customer-facing routes on get_current_chat_workspace
+    (GET /chat/escalations/{id}, GET /chat/conversations/{id}/escalation)."""
+    app.dependency_overrides[get_current_user_required] = lambda: _FAKE_USER
+    app.dependency_overrides[get_current_chat_workspace] = lambda: _FAKE_WORKSPACE
+    app.dependency_overrides[get_current_access_token] = lambda: "token-1"
 
 
 def _authenticate_as_agent(agent: SupportAgent | None = None):
@@ -204,3 +219,153 @@ class TestEscalationRoutes:
         assert response.status_code == 200
         mock_mark_active.assert_called_once_with("e1")
         mock_add.assert_called_once_with("e1", "agent", "u1", "hi")
+
+    def test_message_customer_ownership_check_passes(self, client):
+        _authenticate()
+        app.dependency_overrides[get_current_access_token] = lambda: "token-1"
+        message_row = MagicMock(
+            id="m1", sender_type="customer", sender_auth_user_id="u1", content="hi", created_at=None
+        )
+        with patch(
+            "src.api.routes.escalation._escalation_repository.get",
+            return_value=_escalation(status="assigned", assigned_agent_id="a1", conversation_id="c1"),
+        ), patch(
+            "src.api.routes.escalation._agent_service.get_by_auth_user_id_any_workspace", return_value=None
+        ), patch(
+            "src.api.routes.escalation._conversation_service.get_conversation", return_value=MagicMock()
+        ), patch(
+            "src.api.routes.escalation._escalation_repository.mark_active_if_first_message"
+        ), patch(
+            "src.api.routes.escalation._escalation_repository.set_active"
+        ), patch(
+            "src.api.routes.escalation._escalation_repository.add_message", return_value=message_row
+        ):
+            response = client.post("/agent/escalations/e1/messages", json={"content": "hi"})
+
+        assert response.status_code == 200
+
+    def test_message_customer_ownership_check_blocks_non_owner(self, client):
+        _authenticate()
+        app.dependency_overrides[get_current_access_token] = lambda: "token-1"
+        with patch(
+            "src.api.routes.escalation._escalation_repository.get",
+            return_value=_escalation(status="assigned", assigned_agent_id="a1", conversation_id="c1"),
+        ), patch(
+            "src.api.routes.escalation._agent_service.get_by_auth_user_id_any_workspace", return_value=None
+        ), patch(
+            "src.api.routes.escalation._conversation_service.get_conversation", return_value=None
+        ) as mock_get_conversation:
+            response = client.post("/agent/escalations/e1/messages", json={"content": "hi"})
+
+        assert response.status_code == 404
+        mock_get_conversation.assert_called_once()
+
+    def test_message_customer_blocked_when_escalation_has_no_conversation_id(self, client):
+        _authenticate()
+        app.dependency_overrides[get_current_access_token] = lambda: "token-1"
+        with patch(
+            "src.api.routes.escalation._escalation_repository.get",
+            return_value=_escalation(status="waiting", conversation_id=None),
+        ), patch(
+            "src.api.routes.escalation._agent_service.get_by_auth_user_id_any_workspace", return_value=None
+        ), patch(
+            "src.api.routes.escalation._conversation_service.get_conversation"
+        ) as mock_get_conversation:
+            response = client.post("/agent/escalations/e1/messages", json={"content": "hi"})
+
+        assert response.status_code == 404
+        mock_get_conversation.assert_not_called()
+
+    def test_message_agent_branch_never_calls_ownership_check(self, client):
+        _authenticate()
+        message_row = MagicMock(
+            id="m1", sender_type="agent", sender_auth_user_id="u1", content="hi", created_at=None
+        )
+        with patch(
+            "src.api.routes.escalation._escalation_repository.get",
+            return_value=_escalation(status="assigned", assigned_agent_id="a1"),
+        ), patch(
+            "src.api.routes.escalation._agent_service.get_by_auth_user_id_any_workspace", return_value=_agent()
+        ), patch(
+            "src.api.routes.escalation._conversation_service.get_conversation"
+        ) as mock_get_conversation, patch(
+            "src.api.routes.escalation._escalation_repository.mark_active_if_first_message"
+        ), patch(
+            "src.api.routes.escalation._escalation_repository.add_message", return_value=message_row
+        ):
+            response = client.post("/agent/escalations/e1/messages", json={"content": "hi"})
+
+        assert response.status_code == 200
+        mock_get_conversation.assert_not_called()
+
+
+class TestCustomerEscalationRoutes:
+    def test_get_escalation_happy_path_omits_notes_and_summary(self, client):
+        _authenticate_chat_workspace()
+        with patch(
+            "src.api.routes.escalation._escalation_repository.get",
+            return_value=_escalation(status="active", assigned_agent_id="a1", conversation_id="c1"),
+        ), patch(
+            "src.api.routes.escalation._conversation_service.get_conversation", return_value=MagicMock()
+        ), patch(
+            "src.api.routes.escalation._escalation_repository.list_messages", return_value=[]
+        ), patch(
+            "src.api.routes.escalation._agent_service.get_by_id", return_value=_agent(name="Ada")
+        ):
+            response = client.get("/chat/escalations/e1")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["id"] == "e1"
+        assert body["assigned_agent_name"] == "Ada"
+        assert "notes" not in body
+        assert "summary" not in body
+
+    def test_get_escalation_blocked_for_non_owner(self, client):
+        _authenticate_chat_workspace()
+        with patch(
+            "src.api.routes.escalation._escalation_repository.get",
+            return_value=_escalation(status="active", conversation_id="c1"),
+        ), patch(
+            "src.api.routes.escalation._conversation_service.get_conversation", return_value=None
+        ):
+            response = client.get("/chat/escalations/e1")
+
+        assert response.status_code == 404
+
+    def test_lookup_by_conversation_found(self, client):
+        _authenticate_chat_workspace()
+        with patch(
+            "src.api.routes.escalation._conversation_service.get_conversation", return_value=MagicMock()
+        ), patch(
+            "src.api.routes.escalation._escalation_repository.list_by_conversation_ids",
+            return_value=[_escalation(status="waiting", conversation_id="c1")],
+        ):
+            response = client.get("/chat/conversations/c1/escalation")
+
+        assert response.status_code == 200
+        assert response.json()["id"] == "e1"
+
+    def test_lookup_by_conversation_none_found_returns_null_body(self, client):
+        _authenticate_chat_workspace()
+        with patch(
+            "src.api.routes.escalation._conversation_service.get_conversation", return_value=MagicMock()
+        ), patch(
+            "src.api.routes.escalation._escalation_repository.list_by_conversation_ids", return_value=[]
+        ):
+            response = client.get("/chat/conversations/c1/escalation")
+
+        assert response.status_code == 200
+        assert response.json() is None
+
+    def test_lookup_by_conversation_blocked_for_non_owner(self, client):
+        _authenticate_chat_workspace()
+        with patch(
+            "src.api.routes.escalation._conversation_service.get_conversation", return_value=None
+        ), patch(
+            "src.api.routes.escalation._escalation_repository.list_by_conversation_ids"
+        ) as mock_list:
+            response = client.get("/chat/conversations/c1/escalation")
+
+        assert response.status_code == 404
+        mock_list.assert_not_called()
