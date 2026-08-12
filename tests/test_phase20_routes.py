@@ -57,7 +57,7 @@ class TestChatBackwardCompatibility:
         mock_process.assert_called_once_with(
             "hello", session_id=None, profile_context=None, workspace_id=DEFAULT_WORKSPACE_ID,
             workspace_name="Ha-Shem Limited", workspace_welcome_message="Welcome to Ha-Shem — how can HavisIQ help today?",
-            handoff_context=None,
+            handoff_context=None, conversation_id=None,
         )
 
     def test_old_style_request_without_new_fields_is_accepted(self, client):
@@ -83,7 +83,7 @@ class TestChatSessionIdPassthrough:
             "How much does it cost?", session_id="s1", profile_context=None,
             workspace_id=DEFAULT_WORKSPACE_ID,
             workspace_name="Ha-Shem Limited", workspace_welcome_message="Welcome to Ha-Shem — how can HavisIQ help today?",
-            handoff_context=None,
+            handoff_context=None, conversation_id=None,
         )
 
 

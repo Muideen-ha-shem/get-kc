@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.services.advisory.session_context import SessionContext
+from src.services.advisory.session_context import PendingAction, SessionContext
 from src.services.session.session_service import SessionService
 
 
@@ -27,6 +27,15 @@ class TestSessionServiceBasics:
         service.record_comparison(None, ["SPIDIFY", "ZivaAIRA"])
         service.record_business_problem(None, "identity verification")
 
+    def test_get_pending_action_without_session_id_returns_none(self):
+        service = SessionService()
+        assert service.get_pending_action(None) is None
+
+    def test_set_pending_action_is_a_no_op_without_session_id(self):
+        service = SessionService()
+        # Must not raise.
+        service.set_pending_action(None, PendingAction(kind="demo"))
+
 
 class TestSessionServiceDelegatesToSessionContext:
     def test_pronoun_resolution_after_recording_a_product(self):
@@ -49,3 +58,14 @@ class TestSessionServiceDelegatesToSessionContext:
 
         assert state is not None
         assert "SPIDIFY" in state.recommended_products
+
+    def test_pending_action_round_trip(self):
+        context = SessionContext()
+        service = SessionService(session_context=context)
+        session_id = "s1"
+
+        service.set_pending_action(session_id, PendingAction(kind="appointment"))
+        pending = service.get_pending_action(session_id)
+
+        assert pending is not None
+        assert pending.kind == "appointment"

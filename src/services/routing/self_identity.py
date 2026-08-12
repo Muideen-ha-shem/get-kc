@@ -33,24 +33,51 @@ _IDENTITY_PHRASES: tuple[str, ...] = (
 # identity phrase and the name aren't part of the same clause).
 _MAX_ADJACENT_GAP = 15
 
+# A public user asking about "this company"/"the platform"/etc. never
+# needs to say the workspace's own name — these deictic phrases mean the
+# workspace itself, full stop, regardless of whether workspace_name is
+# even known. Live-confirmed bug: "Tell me the core values of this
+# company" (no name mentioned) was answered as if it were about SPIDIFY
+# (the last-discussed product) instead of the host workspace — session
+# pronoun resolution was also rewriting "this company" into "this SPIDIFY
+# company" before this function ever saw it (see session_context.py's
+# _SELF_REFERENTIAL_NOUNS exclusion, which is the other half of this fix).
+_DEICTIC_SELF_REFERENCES: tuple[str, ...] = (
+    "this company", "this platform", "this organization", "this organisation", "this business",
+    "that company", "that platform", "that organization", "that organisation", "that business",
+    "the company", "the platform", "your company", "your platform",
+    "you guys",
+)
+
 
 def is_self_identity_question(question: str, workspace_name: str | None) -> bool:
-    """True if *question* asks "about" *workspace_name* itself.
+    """True if *question* asks "about" the workspace itself.
 
-    Requires the workspace's own name to appear as a whole word/phrase
-    (not possessive — "Ha-Shem's" doesn't count, that's a question about
-    something *of* the workspace, not the workspace itself) immediately
-    adjacent to one of the generic identity phrases above, in either
-    order. A specific question that merely mentions the workspace
-    (pricing, support, comparison, unrelated news) does NOT trigger this.
-    Returns False for empty/None input on either side, never raises.
+    Two independent ways to match:
+    1. A deictic self-reference ("this company", "the platform", "your
+       company", ...) — always means the workspace, never requires
+       ``workspace_name`` to be known or mentioned.
+    2. The workspace's own name appears as a whole word/phrase (not
+       possessive — "Ha-Shem's" doesn't count, that's a question about
+       something *of* the workspace) immediately adjacent to one of the
+       generic identity phrases above, in either order.
+
+    A specific question that merely mentions the workspace (pricing,
+    support, comparison, unrelated news) does NOT trigger this. Returns
+    False for empty input, never raises.
     """
-    if not question or not workspace_name:
+    if not question:
+        return False
+    q = question.lower()
+
+    if any(phrase in q for phrase in _DEICTIC_SELF_REFERENCES):
+        return True
+
+    if not workspace_name:
         return False
     name = workspace_name.strip().lower()
     if not name:
         return False
-    q = question.lower()
     name_match = re.search(rf"\b{re.escape(name)}\b(?!'s\b)", q)
     if name_match is None:
         return False

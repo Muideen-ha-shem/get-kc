@@ -32,7 +32,19 @@ import logging
 from typing import Any
 
 from ..api.schemas import ChatResponse
+from ..services.advisory.action_workflow import (
+    build_confirmation_summary,
+    build_field_prompt,
+    collect_field,
+    execute_action,
+    required_fields,
+)
+from ..services.advisory.session_context import PendingAction
+from ..services.appointments.appointment_service import AppointmentService
 from ..services.escalation.decision import decide_escalation
+from ..services.escalation.escalation_service import EscalationService
+from ..services.routing.action_intent import detect_action_intent
+from ..services.routing.confirmation_intent import detect_confirmation
 from ..services.knowledge import KnowledgeService
 from ..services.support import SupportService
 from ..services.routing import SourceRouter, ProductRouter
@@ -47,6 +59,7 @@ from ..services.validation import CitationValidator
 from ..services.advisory import AdvisoryResponseLayer, AnalyticsService
 from ..services.session.session_service import SessionService
 from ..shared.cache import TTLCache
+from ..shared.customer_copy import NO_EVIDENCE_FALLBACK
 from ..shared.logging import get_logger
 
 logger: logging.Logger = get_logger(__name__)
@@ -104,6 +117,8 @@ class ChatOrchestrator:
         enable_background_learning: bool | None = None,
         advisory_layer: Any = None,
         session_service: SessionService | None = None,
+        appointment_service: Any = None,
+        escalation_service: Any = None,
     ) -> None:
         # Legacy services
         self._knowledge_service = knowledge_service or KnowledgeService()
@@ -126,6 +141,15 @@ class ChatOrchestrator:
         # discussed products/recommendations/comparisons/business problem).
         # None preserves exact prior behaviour: every call is stateless.
         self._session_service = session_service
+        # Optional — used only by the action-intent short-circuit (Step 0.6)
+        # to surface REAL open appointment slots instead of ever inventing
+        # one. None degrades gracefully to a generic (still honest) ack.
+        self._appointment_service = appointment_service
+        # Optional — used only by Step 0.6's confirmed-escalation path
+        # (execute_action) to create a REAL escalation once the customer
+        # confirms. None degrades to an honest "couldn't submit" message
+        # rather than pretending to have raised the request.
+        self._escalation_service = escalation_service
 
         # Whether to trigger background learning after responses
         if enable_background_learning is None:
@@ -166,6 +190,7 @@ class ChatOrchestrator:
         workspace_name: str | None = None,
         workspace_welcome_message: str | None = None,
         handoff_context: str | None = None,
+        conversation_id: str | None = None,
     ) -> dict[str, Any]:
         """Process a user message and return a response.
 
@@ -205,6 +230,7 @@ class ChatOrchestrator:
                 workspace_name=workspace_name,
                 workspace_welcome_message=workspace_welcome_message,
                 handoff_context=handoff_context,
+                conversation_id=conversation_id,
             )
         return self._chat_legacy(message)
 
@@ -226,6 +252,7 @@ class ChatOrchestrator:
         workspace_name: str | None = None,
         workspace_welcome_message: str | None = None,
         handoff_context: str | None = None,
+        conversation_id: str | None = None,
     ) -> ChatResponse:
         """Process a request and return a Pydantic ``ChatResponse``.
 
@@ -248,6 +275,7 @@ class ChatOrchestrator:
             workspace_name=workspace_name,
             workspace_welcome_message=workspace_welcome_message,
             handoff_context=handoff_context,
+            conversation_id=conversation_id,
         )
         next_actions = result.get("next_actions") or None
         return ChatResponse(
@@ -268,7 +296,7 @@ class ChatOrchestrator:
         matches, _, parent_urls = self._knowledge_service.retrieve_context(message)
         if not matches:
             return {
-                "answer": "I couldn't find enough relevant context in the knowledge base for that question.",
+                "answer": NO_EVIDENCE_FALLBACK,
                 "sources": [],
             }
 
@@ -292,6 +320,7 @@ class ChatOrchestrator:
         workspace_name: str | None = None,
         workspace_welcome_message: str | None = None,
         handoff_context: str | None = None,
+        conversation_id: str | None = None,
     ) -> dict[str, Any]:
         """Full multi-source pipeline with router, manager, merger, generator."""
         # --- Step 0: Session wiring (Phase 20, optional) ---
@@ -343,6 +372,97 @@ class ChatOrchestrator:
                     "escalation_recommended": False,
                     "escalation_reason": None,
                 }
+
+        # --- Step 0.6: Action-request workflow (Phase 2 — confirmed, ---
+        # --- stateful escalation/appointment/demo requests) ---
+        # Live-confirmed bug: "Can you arrange a quick chat with a specialist?"
+        # got an improvised "Absolutely — I can set up a quick chat..." (no
+        # backend action taken), and the follow-up "Today 1:45pm WAT, live
+        # chat" had zero KB evidence and fell through to a live web search
+        # (unrelated timezone/city results). Detected BEFORE Step 1/2 so
+        # these messages never reach retrieval at all. A pending action is
+        # tracked per-session across turns (see
+        # session_context.PendingAction): fields are collected one at a
+        # time, a plain summary is shown, and a real backend write only
+        # ever happens once the customer explicitly confirms — see
+        # services.advisory.action_workflow, the only module here with side
+        # effects. Without a session_service configured there's nowhere to
+        # carry state across turns, so this degrades to a single-turn ack.
+        session_state = self._session_service.get_state(session_id) if self._session_service else None
+        pending = self._session_service.get_pending_action(session_id) if self._session_service else None
+
+        if pending is not None:
+            confirmation = detect_confirmation(message)
+            if pending.status == "awaiting_confirmation" and confirmation == "yes":
+                answer = execute_action(
+                    pending,
+                    workspace_id=workspace_id,
+                    workspace_name=workspace_name,
+                    conversation_id=conversation_id,
+                    escalation_service=self._escalation_service,
+                    appointment_service=self._appointment_service,
+                )
+                self._session_service.set_pending_action(session_id, None)
+                return {
+                    "answer": answer, "sources": [], "citations": [], "next_actions": [],
+                    "session_id": session_id, "escalation_recommended": False, "escalation_reason": None,
+                }
+            if confirmation == "no":
+                self._session_service.set_pending_action(session_id, None)
+                return {
+                    "answer": "No problem — I've cancelled that. Anything else I can help with?",
+                    "sources": [], "citations": [], "next_actions": [],
+                    "session_id": session_id, "escalation_recommended": False, "escalation_reason": None,
+                }
+            if pending.status == "collecting_info":
+                pending, answer = collect_field(
+                    pending, message,
+                    appointment_service=self._appointment_service, workspace_id=workspace_id,
+                )
+                self._session_service.set_pending_action(session_id, pending)
+                return {
+                    "answer": answer, "sources": [], "citations": [], "next_actions": [],
+                    "session_id": session_id,
+                    "escalation_recommended": pending.status == "awaiting_confirmation" and pending.kind == "escalation",
+                    "escalation_reason": None,
+                }
+            # awaiting_confirmation but the reply wasn't a bare yes/no — gently
+            # re-ask rather than silently dropping the pending action.
+            return {
+                "answer": build_confirmation_summary(pending),
+                "sources": [], "citations": [], "next_actions": [],
+                "session_id": session_id, "escalation_recommended": False, "escalation_reason": None,
+            }
+
+        action_match = detect_action_intent(message)
+        if action_match is not None:
+            if self._session_service is None or not session_id:
+                # No session to carry state across turns — a degraded,
+                # single-turn ack rather than pretending to collect
+                # information that can never be received back.
+                answer = self._build_stateless_action_ack(action_match.kind, workspace_id)
+                return {
+                    "answer": answer, "sources": [], "citations": [], "next_actions": [],
+                    "session_id": session_id, "escalation_recommended": action_match.kind == "escalation",
+                    "escalation_reason": "explicit_request" if action_match.kind == "escalation" else None,
+                }
+            new_pending = PendingAction(
+                kind=action_match.kind,
+                missing=required_fields(action_match.kind, session_state),
+                original_question=message,
+            )
+            if new_pending.missing:
+                answer = build_field_prompt(new_pending, appointment_service=self._appointment_service, workspace_id=workspace_id)
+            else:
+                new_pending.status = "awaiting_confirmation"
+                answer = build_confirmation_summary(new_pending)
+            self._session_service.set_pending_action(session_id, new_pending)
+            return {
+                "answer": answer, "sources": [], "citations": [], "next_actions": [],
+                "session_id": session_id,
+                "escalation_recommended": new_pending.status == "awaiting_confirmation" and new_pending.kind == "escalation",
+                "escalation_reason": "explicit_request" if new_pending.kind == "escalation" and new_pending.status == "awaiting_confirmation" else None,
+            }
 
         # --- Step 1: Route (SourceRouter) ---
         if self._source_router:
@@ -439,7 +559,7 @@ class ChatOrchestrator:
                 answer = result.get("answer", "")
                 citations = []
             else:
-                answer = "I couldn't find enough relevant context to answer that question."
+                answer = NO_EVIDENCE_FALLBACK
                 citations = []
 
         # --- Step 4: Background learning (fire-and-forget) ---
@@ -481,6 +601,66 @@ class ChatOrchestrator:
                 self._session_service.record_business_problem(session_id, category)
         except Exception as exc:
             logger.warning("ChatOrchestrator: session recording failed — %s.", exc)
+
+    def _build_appointment_availability_ack(self, workspace_id: str | None) -> str:
+        """Deterministic, zero-LLM-call ack for an appointment/scheduling
+        request — lists REAL open slots from AppointmentService so the
+        answer can never echo back a time the customer invented (e.g. the
+        live-confirmed bug's "1:45pm", which doesn't match any bookable
+        slot). Degrades to a generic-but-honest ack when no
+        appointment_service is configured, rather than fabricating slots.
+        """
+        if self._appointment_service is None:
+            return (
+                "I can help you get an appointment booked — could you let me know your "
+                "preferred day, plus your name and email, and I'll take it from there?"
+            )
+        try:
+            availability = self._appointment_service.get_availability(days=4, workspace_id=workspace_id)
+        except Exception as exc:
+            logger.warning("ChatOrchestrator: appointment availability lookup failed — %s.", exc)
+            return (
+                "I can help you get an appointment booked — could you let me know your "
+                "preferred day, plus your name and email, and I'll take it from there?"
+            )
+
+        open_slots = [
+            f"{day.day_label} {slot['time']}"
+            for day in availability
+            if not day.fully_booked
+            for slot in day.slots
+            if slot.get("available")
+        ]
+        if not open_slots:
+            return (
+                "I'd love to get that booked, but I'm not seeing any open slots in the "
+                "next few days — could you tell me your name and email, and I'll follow up "
+                "with the next available time?"
+            )
+        slots_text = ", ".join(open_slots[:5])
+        return (
+            f"I can help set that up — here's what's actually open: {slots_text}. "
+            "Could you tell me which time works for you, plus your name and email, and "
+            "I'll get it booked?"
+        )
+
+    def _build_stateless_action_ack(self, kind: str, workspace_id: str | None) -> str:
+        """Single-turn ack used only when no session_service is configured
+        (so there's nowhere to carry collected fields across turns) — never
+        pretends to collect information it can't remember on the next
+        message."""
+        if kind == "escalation":
+            return (
+                "I can raise this with a support specialist for you — I don't have a "
+                "live connection open yet, but I can flag it now so someone follows up. "
+                "Would you like me to go ahead?"
+            )
+        if kind == "appointment":
+            return self._build_appointment_availability_ack(workspace_id)
+        return (
+            "I can help you request a demo — could you tell me your name, email, and "
+            "which HavisIQ solution you'd like to see, and I'll pass it along?"
+        )
 
     # ------------------------------------------------------------------
     # Background learning
@@ -623,6 +803,8 @@ _embedding_cache = TTLCache(ttl_seconds=3600.0, maxsize=1024)
 _context_merger = ContextMerger(ngram_threshold=0.75)
 _analytics_service = AnalyticsService()
 _session_service = SessionService()
+_appointment_service = AppointmentService()
+_escalation_service = EscalationService()
 
 chat_orchestrator = ChatOrchestrator(
     source_router=SourceRouter(),
@@ -639,4 +821,6 @@ chat_orchestrator = ChatOrchestrator(
     response_generator=ResponseGenerator(citation_validator=CitationValidator()),
     advisory_layer=AdvisoryResponseLayer(analytics=_analytics_service),
     session_service=_session_service,
+    appointment_service=_appointment_service,
+    escalation_service=_escalation_service,
 )

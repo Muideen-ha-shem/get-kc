@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.services.advisory.session_context import SessionContext
+from src.services.advisory.session_context import PendingAction, SessionContext
 
 
 class TestSessionContextBasics:
@@ -87,6 +87,60 @@ class TestSessionContextResolveReference:
         ctx.record_products("s1", ["PayCheq"])
         assert "PayCheq" in ctx.resolve_reference("s1", "Tell me more about this.")
         assert "PayCheq" in ctx.resolve_reference("s1", "Is that available on mobile?")
+
+    def test_this_company_is_not_resolved_to_last_product(self):
+        """Live-confirmed bug: with SPIDIFY as the last-discussed product,
+        "Tell me the core values of this company" must NOT become "...of
+        this SPIDIFY company" — "this company" refers to the workspace/
+        host itself, not the last product."""
+        ctx = SessionContext()
+        ctx.record_products("s1", ["SPIDIFY"])
+        resolved = ctx.resolve_reference("s1", "Tell me the core values of this company")
+        assert resolved == "Tell me the core values of this company"
+        assert "SPIDIFY" not in resolved
+
+    def test_this_platform_and_that_organization_also_left_alone(self):
+        ctx = SessionContext()
+        ctx.record_products("s1", ["ZivaAIRA"])
+        assert "ZivaAIRA" not in ctx.resolve_reference("s1", "Who runs this platform?")
+        assert "ZivaAIRA" not in ctx.resolve_reference("s1", "What is that organization about?")
+
+    def test_this_alone_still_resolves_when_not_followed_by_self_referential_noun(self):
+        """The exclusion must be narrow — a genuine product pronoun
+        elsewhere in the same session still resolves normally."""
+        ctx = SessionContext()
+        ctx.record_products("s1", ["PayCheq"])
+        resolved = ctx.resolve_reference("s1", "Does this support mobile payments?")
+        assert "PayCheq" in resolved
+
+
+class TestSessionContextPendingAction:
+    def test_no_pending_action_by_default(self):
+        ctx = SessionContext()
+        assert ctx.get_pending_action("s1") is None
+
+    def test_probing_pending_action_does_not_auto_create_a_session(self):
+        ctx = SessionContext()
+        ctx.get_pending_action("never-touched")
+        # get() would have auto-created a session; get_pending_action() must not.
+        assert ctx._cache.get("never-touched") is None
+
+    def test_set_and_get_round_trip(self):
+        ctx = SessionContext()
+        action = PendingAction(kind="escalation", status="awaiting_confirmation")
+        ctx.set_pending_action("s1", action)
+        assert ctx.get_pending_action("s1") == action
+
+    def test_clearing_pending_action(self):
+        ctx = SessionContext()
+        ctx.set_pending_action("s1", PendingAction(kind="demo"))
+        ctx.set_pending_action("s1", None)
+        assert ctx.get_pending_action("s1") is None
+
+    def test_isolated_across_sessions(self):
+        ctx = SessionContext()
+        ctx.set_pending_action("s1", PendingAction(kind="appointment"))
+        assert ctx.get_pending_action("s2") is None
 
 
 class TestSessionContextTTLAndCapacity:

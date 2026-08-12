@@ -51,6 +51,7 @@ from typing import Any, Sequence
 
 from ...shared.logging import get_logger
 from ..routing.source_router import SourceRouter, RoutingDecision
+from ..routing.action_intent import detect_action_intent
 from ..routing.self_identity import is_self_identity_question
 from ..merger.context_merger import ContextMerger, EvidenceItem, _CONFIDENCE_THRESHOLD
 
@@ -288,6 +289,14 @@ class SearchManager:
                         "web search; the workspace's own KB gap is the honest answer here.",
                         kb_confidence, workspace_name,
                     )
+                elif detect_action_intent(question) is not None:
+                    logger.info(
+                        "SearchManager: KB confidence %.4f below threshold but question is "
+                        "an action request (live-chat/escalation/appointment) — NOT falling "
+                        "back to web search; this belongs to the action-intent short-circuit, "
+                        "not retrieval.",
+                        kb_confidence,
+                    )
                 else:
                     logger.info(
                         "SearchManager: KB confidence %.4f below threshold %.2f — "
@@ -335,6 +344,12 @@ class SearchManager:
                     "self-identity question about workspace %r — skipping the enterprise "
                     "web-search fallback rather than risking an unrelated same-named result.",
                     workspace_name,
+                )
+            elif detect_action_intent(question) is not None:
+                logger.info(
+                    "SearchManager: no evidence from any source, but question is an action "
+                    "request (live-chat/escalation/appointment) — skipping the enterprise "
+                    "web-search fallback; this belongs to the action-intent short-circuit."
                 )
             else:
                 logger.info(

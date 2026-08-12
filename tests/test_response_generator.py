@@ -106,20 +106,22 @@ class TestResponseGeneratorGenerate:
 
     def test_generate_empty_context(self):
         from src.services.generator.response_generator import ResponseGenerator
+        from src.shared.customer_copy import NO_EVIDENCE_FALLBACK
 
         gen = ResponseGenerator(api_key="test-key")
         result = gen.generate(question="Anything?", context=[])
 
-        assert "don't have enough information" in result["answer"]
+        assert result["answer"] == NO_EVIDENCE_FALLBACK
         assert result["citations"] == []
 
     def test_generate_none_context(self):
         from src.services.generator.response_generator import ResponseGenerator
+        from src.shared.customer_copy import NO_EVIDENCE_FALLBACK
 
         gen = ResponseGenerator(api_key="test-key")
         result = gen.generate(question="Anything?", context=None)
 
-        assert "don't have enough information" in result["answer"]
+        assert result["answer"] == NO_EVIDENCE_FALLBACK
 
     def test_empty_question_raises_error(self):
         from src.services.generator.response_generator import ResponseGenerator
@@ -157,6 +159,7 @@ class TestResponseGeneratorGenerate:
 
     def test_llm_returns_empty_string(self):
         from src.services.generator.response_generator import ResponseGenerator
+        from src.shared.customer_copy import GENERATION_FAILED_FALLBACK
 
         mock_completion = MagicMock()
         mock_completion.choices[0].message.content = ""
@@ -172,7 +175,7 @@ class TestResponseGeneratorGenerate:
                 context=[_make_evidence()],
             )
 
-        assert "couldn't generate" in result["answer"]
+        assert result["answer"] == GENERATION_FAILED_FALLBACK
 
 
 # ---------------------------------------------------------------------------
@@ -570,6 +573,116 @@ class TestResponseGeneratorCatalogGuardrail:
         assert rg_module._CATALOG_GUARDRAIL_FALLBACK.strip() in system_prompt
 
 
+class TestResponseGeneratorCustomerTone:
+    """Live-confirmed bug this fixes: "Find a solution for employee
+    onboarding" (no matching evidence) came back as "the information
+    provided does not include any details... Based on the available
+    evidence, I can't recommend a solution... I suggest reaching out to
+    HavisIQ sales or support" — internal/system phrasing, plus an
+    external-handoff suggestion as the first move instead of continuing to
+    help inside HavisIQ."""
+
+    def test_tone_guardrail_present_unconditionally(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = "Answer [1]."
+
+        with patch("groq.Groq") as mock_groq:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_completion
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key")
+            gen.generate(
+                question="Anything?",
+                context=[_make_evidence(content="Some content.", url="https://example.com/")],
+            )
+
+            system_prompt = mock_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+
+        assert "Customer-tone guardrail" in system_prompt
+        assert "Never describe your own process" in system_prompt
+        assert "do not force empathy language onto every sentence" in system_prompt
+
+    def test_old_developer_facing_phrasing_is_gone(self):
+        from src.services.generator import response_generator as rg_module
+
+        assembled = (
+            rg_module._SYSTEM_PROMPT_TEMPLATE
+            + rg_module._TONE_GUARDRAIL_TEMPLATE
+            + rg_module._CATALOG_GUARDRAIL_TEMPLATE.format(catalog_names="SPIDIFY")
+            + rg_module._CATALOG_GUARDRAIL_FALLBACK
+            + rg_module._IDENTITY_GUARDRAIL_TEMPLATE.format(workspace_name="Ha-Shem", welcome_clause="")
+        )
+        assert "reach out to HavisIQ support/sales" not in assembled
+        assert "contact Ha-Shem support directly" not in assembled
+
+    def test_no_evidence_fallback_offers_to_keep_helping_in_platform(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        gen = ResponseGenerator(api_key="test-key")
+        result = gen.generate(question="Find a solution for employee onboarding", context=[])
+
+        assert "reach out to" not in result["answer"].lower()
+        assert "evidence" not in result["answer"].lower()
+        assert "context" not in result["answer"].lower()
+
+
+class TestResponseGeneratorActionIntegrityGuardrail:
+    """Live-confirmed bug this backstops: asked "Can you arrange a quick
+    chat with a specialist?", the model replied "Absolutely — I can set
+    that up..." — a promise with no backend action behind it. The
+    deterministic action-intent guard (services.routing.action_intent)
+    should catch this before generation even runs, but this guardrail is
+    the containment layer for any phrasing it misses."""
+
+    def test_guardrail_present_unconditionally(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = "Answer [1]."
+
+        with patch("groq.Groq") as mock_groq:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_completion
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key")
+            gen.generate(
+                question="Anything?",
+                context=[_make_evidence(content="Some content.", url="https://example.com/")],
+            )
+
+            system_prompt = mock_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+
+        assert "Action-integrity guardrail" in system_prompt
+        assert "no backend action has been taken" in system_prompt
+
+    def test_guardrail_present_alongside_identity_guardrail(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = "Answer [1]."
+
+        with patch("groq.Groq") as mock_groq:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_completion
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key")
+            gen.generate(
+                question="Tell me about Ha-Shem",
+                context=[_make_evidence(content="Some content.", url="https://ha-shem.com/")],
+                workspace_name="Ha-Shem",
+            )
+
+            system_prompt = mock_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+
+        assert "Workspace-identity guardrail" in system_prompt
+        assert "Action-integrity guardrail" in system_prompt
+
+
 class TestResponseGeneratorIdentityGuardrail:
     """Live-confirmed bug this fixes: "Tell me about Ha-Shem" (the
     platform's own operator) reached the model with web-search evidence
@@ -578,13 +691,14 @@ class TestResponseGeneratorIdentityGuardrail:
 
     def test_empty_context_early_return_unaffected_by_workspace_name(self):
         from src.services.generator.response_generator import ResponseGenerator
+        from src.shared.customer_copy import NO_EVIDENCE_FALLBACK
 
         gen = ResponseGenerator(api_key="test-key")
         result = gen.generate(question="Tell me about Ha-Shem", context=[], workspace_name="Ha-Shem")
 
         # The empty-evidence early return happens before the prompt (and
         # therefore the identity guardrail) is even built.
-        assert "don't have enough information" in result["answer"]
+        assert result["answer"] == NO_EVIDENCE_FALLBACK
         assert result["citations"] == []
 
     def test_guardrail_present_when_workspace_name_set(self):

@@ -22,6 +22,7 @@ class ChatRouteRefactorTests(unittest.TestCase):
         mock_process.assert_called_once_with(
             "hello", session_id=None, profile_context=None, workspace_id=DEFAULT_WORKSPACE_ID,
             workspace_name="Ha-Shem", workspace_welcome_message=None, handoff_context=None,
+            conversation_id=None,
         )
 
     def test_legacy_chat_entrypoint_delegates_to_orchestrator(self):

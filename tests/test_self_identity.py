@@ -60,3 +60,40 @@ class TestNegativeMatches:
 
     def test_wrong_workspace_name(self):
         assert is_self_identity_question("Tell me about Ha-Shem", "Acme") is False
+
+
+class TestDeicticSelfReference:
+    """Live-confirmed bug: "Tell me the core values of this company" (no
+    workspace name mentioned) must be recognized as a self-identity
+    question regardless of whether workspace_name is known."""
+
+    @pytest.mark.parametrize(
+        "question",
+        [
+            "Tell me the core values of this company",
+            "Who runs this platform?",
+            "What is that organization about?",
+            "Tell me about this organisation",
+            "What does this business do?",
+            "Tell me about the company",
+            "How does the platform work?",
+            "What is your company's mission?",
+            "Does your platform support SSO?",
+            "Who are you guys?",
+        ],
+    )
+    def test_matches_without_workspace_name(self, question):
+        assert is_self_identity_question(question, None) is True
+
+    @pytest.mark.parametrize(
+        "question",
+        [
+            "Tell me the core values of this company",
+            "Who runs this platform?",
+        ],
+    )
+    def test_matches_with_workspace_name_too(self, question):
+        assert is_self_identity_question(question, "Ha-Shem") is True
+
+    def test_deictic_match_is_case_insensitive(self):
+        assert is_self_identity_question("TELL ME ABOUT THIS COMPANY", None) is True
