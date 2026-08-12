@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { PanelLeft, PanelLeftClose } from 'lucide-react';
+import { ArrowLeft, PanelLeft, PanelLeftClose } from 'lucide-react';
 import { HavisIQMark } from '../components/HavisIQMark';
 import { PageContainer } from '../components/PageContainer';
 import { Select } from '../components/Select';
@@ -210,6 +210,12 @@ export function AgentDashboardPage() {
           </button>
           <HavisIQMark />
           <span className="font-display font-semibold text-ink">Agent Dashboard</span>
+          <Link
+            to="/dashboard"
+            className="ml-2 flex items-center gap-1.5 rounded-full border border-ink/15 px-3 py-1.5 text-xs text-ink transition hover:border-gold-400 hover:text-gold-700"
+          >
+            <ArrowLeft size={13} /> Back to Dashboard
+          </Link>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-sm text-ink/50">{agent.name} · {agent.department}</span>

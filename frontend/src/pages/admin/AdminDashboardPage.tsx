@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Bot, Building2, CheckCircle2, LifeBuoy, MessageSquare } from 'lucide-react';
 import { apiJson } from '../../lib/apiClient';
+import { MetricCard } from '../../components/MetricCard';
 import { StatusBadge, type BadgeTone } from '../../components/StatusBadge';
 import { CARD, PRIMARY_BUTTON } from '../../lib/uiClassNames';
 import { AdminGuard } from './AdminGuard';
@@ -39,18 +41,11 @@ function AdminDashboardContent() {
 
       {stats && (
         <div className="grid grid-cols-5 gap-4 mb-8">
-          {[
-            ['Total Workspaces', stats.total_workspace_count],
-            ['Active Workspaces', stats.active_workspace_count],
-            ['Total Conversations', stats.total_conversation_count],
-            ['Human Escalations', stats.total_escalation_count],
-            ['Total Agents', stats.total_agent_count],
-          ].map(([label, value]) => (
-            <div key={label as string} className={`${CARD} p-4`}>
-              <p className="text-xs text-ink/50 uppercase">{label}</p>
-              <p className="text-2xl font-display font-semibold mt-1 text-ink">{value}</p>
-            </div>
-          ))}
+          <MetricCard label="Total Workspaces" value={stats.total_workspace_count} icon={Building2} tone="gold" />
+          <MetricCard label="Active Workspaces" value={stats.active_workspace_count} icon={CheckCircle2} tone="green" />
+          <MetricCard label="Total Conversations" value={stats.total_conversation_count} icon={MessageSquare} tone="ink" />
+          <MetricCard label="Human Escalations" value={stats.total_escalation_count} icon={LifeBuoy} tone="red" />
+          <MetricCard label="Total Agents" value={stats.total_agent_count} icon={Bot} tone="gold" />
         </div>
       )}
 

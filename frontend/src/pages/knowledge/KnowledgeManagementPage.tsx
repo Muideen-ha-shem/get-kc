@@ -1,6 +1,23 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import {
+  AlertOctagon,
+  CheckCircle2,
+  Clock,
+  Copy,
+  Database,
+  FileText,
+  FileX,
+  Layers,
+  Maximize2,
+  RefreshCw,
+  Search,
+  Tag,
+  Unlink,
+  XCircle,
+} from 'lucide-react';
 import { apiJson, apiUpload } from '../../lib/apiClient';
+import { MetricCard } from '../../components/MetricCard';
 import { Select } from '../../components/Select';
 import { StatusBadge } from '../../components/StatusBadge';
 import { CARD, INPUT_CLASS, PRIMARY_BUTTON, SECONDARY_BUTTON } from '../../lib/uiClassNames';
@@ -30,25 +47,28 @@ function DashboardTab({ workspaceId }: { workspaceId: string }) {
 
   if (!stats) return <p className="text-sm text-ink/40">Loading…</p>;
 
-  const tiles: [string, string | number][] = [
-    ['Total Sources', stats.total_sources],
-    ['Indexed Sources', stats.indexed_sources],
-    ['Pending Sources', stats.pending_sources],
-    ['Failed Sources', stats.failed_sources],
-    ['Total Documents', stats.total_documents],
-    ['Total Chunks', stats.total_chunks],
-    ['Last Crawl', stats.last_crawl?.slice(0, 19).replace('T', ' ') ?? '—'],
-    ['Last Index', stats.last_index?.slice(0, 19).replace('T', ' ') ?? '—'],
-  ];
-
   return (
     <div className="grid grid-cols-4 gap-4">
-      {tiles.map(([label, value]) => (
-        <div key={label} className={`${CARD} p-4`}>
-          <p className="text-xs text-ink/50 uppercase">{label}</p>
-          <p className="text-xl font-display font-semibold mt-1 text-ink">{value}</p>
-        </div>
-      ))}
+      <MetricCard label="Total Sources" value={stats.total_sources} icon={Database} tone="ink" />
+      <MetricCard label="Indexed Sources" value={stats.indexed_sources} icon={CheckCircle2} tone="green" />
+      <MetricCard label="Pending Sources" value={stats.pending_sources} icon={Clock} tone="gold" />
+      <MetricCard label="Failed Sources" value={stats.failed_sources} icon={XCircle} tone="red" />
+      <MetricCard label="Total Documents" value={stats.total_documents} icon={FileText} tone="ink" />
+      <MetricCard label="Total Chunks" value={stats.total_chunks} icon={Layers} tone="ink" />
+      <MetricCard
+        label="Last Crawl"
+        value={stats.last_crawl?.slice(0, 19).replace('T', ' ') ?? '—'}
+        icon={RefreshCw}
+        tone="gold"
+        small
+      />
+      <MetricCard
+        label="Last Index"
+        value={stats.last_index?.slice(0, 19).replace('T', ' ') ?? '—'}
+        icon={Search}
+        tone="gold"
+        small
+      />
     </div>
   );
 }
@@ -422,17 +442,20 @@ function QualityTab({ workspaceId }: { workspaceId: string }) {
       {report ? (
         <div className="grid grid-cols-3 gap-4">
           {[
-            ['Duplicate Chunks', report.duplicate_chunk_count],
-            ['Broken Sources', report.broken_url_count],
-            ['Empty Documents', report.empty_document_count],
-            ['Embedding Failures', report.embedding_failure_count],
-            ['Large Chunks', report.large_chunk_count],
-            ['Missing Metadata', report.missing_metadata_count],
-          ].map(([label, value]) => (
-            <div key={label as string} className={`${CARD} p-4`}>
-              <p className="text-xs text-ink/50 uppercase">{label}</p>
-              <p className="text-xl font-display font-semibold mt-1 text-ink">{value}</p>
-            </div>
+            ['Duplicate Chunks', report.duplicate_chunk_count, Copy] as const,
+            ['Broken Sources', report.broken_url_count, Unlink] as const,
+            ['Empty Documents', report.empty_document_count, FileX] as const,
+            ['Embedding Failures', report.embedding_failure_count, AlertOctagon] as const,
+            ['Large Chunks', report.large_chunk_count, Maximize2] as const,
+            ['Missing Metadata', report.missing_metadata_count, Tag] as const,
+          ].map(([label, value, icon]) => (
+            <MetricCard
+              key={label}
+              label={label}
+              value={value}
+              icon={icon}
+              tone={value > 0 ? 'red' : 'green'}
+            />
           ))}
         </div>
       ) : (

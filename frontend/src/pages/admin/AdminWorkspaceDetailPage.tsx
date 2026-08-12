@@ -1,7 +1,9 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Calendar, GitCompare, LifeBuoy, MessageSquare, Star, ThumbsDown, ThumbsUp } from 'lucide-react';
 import { apiJson } from '../../lib/apiClient';
 import { ConfirmDeleteModal } from '../../components/ConfirmDeleteModal';
+import { MetricCard } from '../../components/MetricCard';
 import { CARD, DANGER_BUTTON, INPUT_CLASS, PRIMARY_BUTTON, SECONDARY_BUTTON } from '../../lib/uiClassNames';
 import { AdminLayout } from './AdminLayout';
 import type {
@@ -280,20 +282,13 @@ function AnalyticsTab({ workspaceId }: { workspaceId: string }) {
 
   return (
     <div className="grid grid-cols-3 gap-4 max-w-2xl">
-      {[
-        ['Conversations', analytics.conversation_count],
-        ['Escalations', analytics.escalation_count],
-        ['Appointments', analytics.appointment_count],
-        ['Saved Recommendations', analytics.saved_recommendation_count],
-        ['Saved Comparisons', analytics.saved_comparison_count],
-        ['Feedback: Helpful', analytics.feedback_helpful_count],
-        ['Feedback: Not Helpful', analytics.feedback_not_helpful_count],
-      ].map(([label, value]) => (
-        <div key={label as string} className={`${CARD} p-4`}>
-          <p className="text-xs text-ink/50 uppercase">{label}</p>
-          <p className="text-xl font-display font-semibold mt-1 text-ink">{value}</p>
-        </div>
-      ))}
+      <MetricCard label="Conversations" value={analytics.conversation_count} icon={MessageSquare} tone="ink" />
+      <MetricCard label="Escalations" value={analytics.escalation_count} icon={LifeBuoy} tone="red" />
+      <MetricCard label="Appointments" value={analytics.appointment_count} icon={Calendar} tone="gold" />
+      <MetricCard label="Saved Recommendations" value={analytics.saved_recommendation_count} icon={Star} tone="gold" />
+      <MetricCard label="Saved Comparisons" value={analytics.saved_comparison_count} icon={GitCompare} tone="ink" />
+      <MetricCard label="Feedback: Helpful" value={analytics.feedback_helpful_count} icon={ThumbsUp} tone="green" />
+      <MetricCard label="Feedback: Not Helpful" value={analytics.feedback_not_helpful_count} icon={ThumbsDown} tone="red" />
       <div className={`${CARD} p-4 col-span-3`}>
         <p className="text-xs text-ink/50 uppercase mb-2">Escalation Status Breakdown</p>
         <div className="flex gap-4 text-sm text-ink">

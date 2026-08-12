@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Bot, Building2, LayoutDashboard, PanelLeft, PanelLeftClose, ScrollText, Users } from 'lucide-react';
+import { ArrowLeft, Bot, Building2, LayoutDashboard, PanelLeft, PanelLeftClose, ScrollText, Users } from 'lucide-react';
 import { HavisIQMark } from '../../components/HavisIQMark';
 import { PageContainer } from '../../components/PageContainer';
 import { useSidebarCollapse } from '../../lib/useSidebarCollapse';
@@ -34,7 +34,17 @@ export function AdminLayout({ children }: { children: ReactNode }) {
             </div>
           )}
         </div>
-        <nav className="flex flex-col p-2 gap-1">
+        <div className="px-2 pt-2">
+          <Link
+            to="/dashboard"
+            title={collapsed ? 'Back to Dashboard' : undefined}
+            className="flex items-center gap-2 rounded-full px-3 py-2 text-sm text-ink/60 transition hover:bg-paper hover:text-ink"
+          >
+            <ArrowLeft size={16} className="shrink-0" />
+            {!collapsed && <span className="truncate">Back to Dashboard</span>}
+          </Link>
+        </div>
+        <nav className="flex flex-col p-2 gap-1 border-t border-ink/10 mt-1 pt-2">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const isActive = location.pathname === item.to;

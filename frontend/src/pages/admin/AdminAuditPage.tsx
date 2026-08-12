@@ -45,8 +45,8 @@ function AdminAuditContent() {
     <div>
       <h1 className="text-xl font-display font-semibold mb-4 text-ink">Audit Logs</h1>
 
-      <div className={`${CARD} p-4 mb-4 flex flex-wrap gap-3 items-end`}>
-        <label className="text-xs text-ink">
+      <div className={`${CARD} p-4 mb-4 flex flex-wrap items-end gap-3`}>
+        <label className="text-xs text-ink flex-1 min-w-[9rem]">
           Workspace id
           <input
             value={workspaceId}
@@ -55,7 +55,7 @@ function AdminAuditContent() {
             className={INPUT_CLASS}
           />
         </label>
-        <label className="text-xs text-ink">
+        <label className="text-xs text-ink flex-1 min-w-[9rem]">
           Actor id
           <input
             value={actorId}
@@ -64,7 +64,7 @@ function AdminAuditContent() {
             className={INPUT_CLASS}
           />
         </label>
-        <label className="text-xs text-ink w-48">
+        <label className="text-xs text-ink flex-1 min-w-[9rem]">
           Action
           <Select value={action} onChange={(e) => setAction(e.target.value)} className="mt-1">
             <option value="">All actions</option>
@@ -73,18 +73,20 @@ function AdminAuditContent() {
             ))}
           </Select>
         </label>
-        <label className="text-xs text-ink">
+        <label className="text-xs text-ink flex-1 min-w-[8rem]">
           From
           <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={INPUT_CLASS} />
         </label>
-        <label className="text-xs text-ink">
+        <label className="text-xs text-ink flex-1 min-w-[8rem]">
           To
           <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className={INPUT_CLASS} />
         </label>
-        <button onClick={load} className={PRIMARY_BUTTON}>Filter</button>
-        <button onClick={() => { clearFilters(); load(); }} className={SECONDARY_BUTTON}>
-          Clear filters
-        </button>
+        <div className="flex gap-2 shrink-0">
+          <button onClick={load} className={PRIMARY_BUTTON}>Filter</button>
+          <button onClick={() => { clearFilters(); load(); }} className={SECONDARY_BUTTON}>
+            Clear
+          </button>
+        </div>
       </div>
 
       <table className="w-full bg-white border border-ink/10 rounded-2xl text-sm">
