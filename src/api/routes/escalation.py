@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from ...services.agents.agent_models import SupportAgent
 from ...services.agents.agent_service import AgentService
 from ...services.auth.auth_service import AuthUser
+from ...services.conversation.conversation_service import ConversationService
 from ...services.escalation.copilot import suggest_reply
 from ...services.escalation.customer_timeline import build_customer_timeline
 from ...services.escalation.escalation_repository import EscalationRepository
@@ -22,6 +23,7 @@ from ...services.escalation.escalation_service import EscalationService
 from ...services.profile.profile_service import ProfileService
 from ...services.workspace.workspace_context import WorkspaceContext
 from ..deps import (
+    get_current_access_token,
     get_current_agent,
     get_current_chat_workspace,
     get_current_user_optional,
@@ -32,6 +34,7 @@ from ..schemas import (
     AgentDashboardStatsSchema,
     CopilotSuggestReplyRequest,
     CopilotSuggestReplySchema,
+    CustomerEscalationSchema,
     CustomerTimelineSchema,
     EscalationActionRequest,
     EscalationCreateRequest,
@@ -49,6 +52,7 @@ _agent_service = AgentService()
 _escalation_repository = EscalationRepository()
 _escalation_service = EscalationService(agent_service=_agent_service, repository=_escalation_repository)
 _profile_service = ProfileService()
+_conversation_service = ConversationService()
 
 
 def _customer_company(user: AuthUser | None) -> str | None:
@@ -123,6 +127,47 @@ def _get_escalation_or_404(escalation_id: str, workspace_id: str):
     return escalation
 
 
+def _to_customer_schema(escalation, messages=None) -> CustomerEscalationSchema:
+    return CustomerEscalationSchema(
+        id=escalation.id,
+        conversation_id=escalation.conversation_id,
+        status=escalation.status,
+        assigned_agent_name=_agent_name(escalation.assigned_agent_id),
+        department=escalation.department,
+        created_at=escalation.created_at,
+        assigned_at=escalation.assigned_at,
+        resolved_at=escalation.resolved_at,
+        closed_at=escalation.closed_at,
+        messages=(
+            [
+                EscalationMessageSchema(
+                    id=m.id,
+                    sender_type=m.sender_type,
+                    sender_auth_user_id=m.sender_auth_user_id,
+                    content=m.content,
+                    created_at=m.created_at,
+                )
+                for m in messages
+            ]
+            if messages is not None
+            else None
+        ),
+    )
+
+
+def _require_customer_owned_escalation(escalation, user: AuthUser, access_token: str | None) -> None:
+    """Raises 404 unless `escalation` is linked to a conversation that
+    actually belongs to `user` — workspace membership alone (what
+    `_get_escalation_or_404` checks) isn't ownership. An escalation with no
+    conversation_id can't be proven to belong to any customer, so it's
+    treated as not-found for a customer caller."""
+    conversation_id = escalation.conversation_id
+    if conversation_id is None or _conversation_service.get_conversation(
+        conversation_id, user.id, access_token=access_token
+    ) is None:
+        raise HTTPException(status_code=404, detail="Escalation not found")
+
+
 @router.post("/chat/escalate", response_model=EscalationSchema)
 def escalate_conversation(
     request: EscalationCreateRequest,
@@ -137,6 +182,43 @@ def escalate_conversation(
         customer_company=_customer_company(user),
     )
     return _to_schema(escalation)
+
+
+@router.get("/chat/conversations/{conversation_id}/escalation", response_model=CustomerEscalationSchema | None)
+def get_escalation_for_conversation(
+    conversation_id: str,
+    user: AuthUser = Depends(get_current_user_required),
+    workspace: WorkspaceContext = Depends(get_current_chat_workspace),
+    access_token: str | None = Depends(get_current_access_token),
+) -> CustomerEscalationSchema | None:
+    """Lookup/resume — the customer dashboard calls this on every
+    conversation open to check whether an escalation already exists for
+    it, so a page reload or re-selecting a past conversation can resume
+    the live thread. Returns null (200), not 404, when none exists — this
+    is an existence probe, not a fetch-by-known-id."""
+    conversation = _conversation_service.get_conversation(conversation_id, user.id, access_token=access_token)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    escalations = _escalation_repository.list_by_conversation_ids([conversation_id])
+    if not escalations:
+        return None
+    return _to_customer_schema(escalations[0])
+
+
+@router.get("/chat/escalations/{escalation_id}", response_model=CustomerEscalationSchema)
+def get_customer_escalation(
+    escalation_id: str,
+    user: AuthUser = Depends(get_current_user_required),
+    workspace: WorkspaceContext = Depends(get_current_chat_workspace),
+    access_token: str | None = Depends(get_current_access_token),
+) -> CustomerEscalationSchema:
+    """Detail + messages for the customer's own escalation — the polling
+    target while a live thread is open. Notes are never fetched here at
+    all (agent-internal, structurally excluded by CustomerEscalationSchema)."""
+    escalation = _get_escalation_or_404(escalation_id, workspace.workspace_id)
+    _require_customer_owned_escalation(escalation, user, access_token)
+    messages = _escalation_repository.list_messages(escalation_id)
+    return _to_customer_schema(escalation, messages=messages)
 
 
 @router.get("/agent/queue", response_model=list[EscalationSchema])
@@ -200,6 +282,7 @@ def send_escalation_message(
     request: EscalationMessageCreateRequest,
     user: AuthUser = Depends(get_current_user_required),
     workspace: WorkspaceContext = Depends(get_current_workspace),
+    access_token: str | None = Depends(get_current_access_token),
 ) -> EscalationMessageSchema:
     # This route is shared by both agents and customers, so it can't
     # depend on get_current_agent outright (that 404s non-agents). Instead:
@@ -211,6 +294,12 @@ def send_escalation_message(
     agent = _agent_service.get_by_auth_user_id_any_workspace(user.id)
     workspace_id = agent.workspace_id if agent is not None else workspace.workspace_id
     escalation = _get_escalation_or_404(escalation_id, workspace_id)
+
+    if agent is None:
+        # Workspace match alone isn't ownership — without this, any
+        # authenticated customer who knew/guessed an escalation_id in their
+        # own workspace could post into someone else's thread (IDOR).
+        _require_customer_owned_escalation(escalation, user, access_token)
 
     is_assigned_agent = agent is not None and agent.id == escalation.assigned_agent_id
     sender_type = "agent" if is_assigned_agent else "customer"

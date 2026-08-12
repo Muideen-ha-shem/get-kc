@@ -163,6 +163,8 @@ class ChatOrchestrator:
         session_id: str | None = None,
         profile_context: str | None = None,
         workspace_id: str | None = None,
+        workspace_name: str | None = None,
+        workspace_welcome_message: str | None = None,
         handoff_context: str | None = None,
     ) -> dict[str, Any]:
         """Process a user message and return a response.
@@ -200,6 +202,8 @@ class ChatOrchestrator:
                 session_id=session_id,
                 profile_context=profile_context,
                 workspace_id=workspace_id,
+                workspace_name=workspace_name,
+                workspace_welcome_message=workspace_welcome_message,
                 handoff_context=handoff_context,
             )
         return self._chat_legacy(message)
@@ -219,6 +223,8 @@ class ChatOrchestrator:
         session_id: str | None = None,
         profile_context: str | None = None,
         workspace_id: str | None = None,
+        workspace_name: str | None = None,
+        workspace_welcome_message: str | None = None,
         handoff_context: str | None = None,
     ) -> ChatResponse:
         """Process a request and return a Pydantic ``ChatResponse``.
@@ -239,6 +245,8 @@ class ChatOrchestrator:
             session_id=session_id,
             profile_context=profile_context,
             workspace_id=workspace_id,
+            workspace_name=workspace_name,
+            workspace_welcome_message=workspace_welcome_message,
             handoff_context=handoff_context,
         )
         next_actions = result.get("next_actions") or None
@@ -281,6 +289,8 @@ class ChatOrchestrator:
         session_id: str | None = None,
         profile_context: str | None = None,
         workspace_id: str | None = None,
+        workspace_name: str | None = None,
+        workspace_welcome_message: str | None = None,
         handoff_context: str | None = None,
     ) -> dict[str, Any]:
         """Full multi-source pipeline with router, manager, merger, generator."""
@@ -336,7 +346,7 @@ class ChatOrchestrator:
 
         # --- Step 1: Route (SourceRouter) ---
         if self._source_router:
-            decision = self._source_router.route(message)
+            decision = self._source_router.route(message, workspace_name=workspace_name)
         else:
             # If no router was injected, default to both
             from ..services.routing.source_router import RoutingDecision
@@ -344,7 +354,9 @@ class ChatOrchestrator:
 
         # --- Step 2: Retrieve (SearchManager) ---
         if self._search_manager:
-            evidence = self._search_manager.retrieve(message, decision=decision, workspace_id=workspace_id)
+            evidence = self._search_manager.retrieve(
+                message, decision=decision, workspace_id=workspace_id, workspace_name=workspace_name,
+            )
         else:
             # Fallback: use legacy knowledge service
             matches, _, _ = self._knowledge_service.retrieve_context(message)
@@ -413,6 +425,8 @@ class ChatOrchestrator:
                 context=evidence,
                 primary_product=primary_product,
                 complementary_products=complementary_products,
+                workspace_name=workspace_name,
+                workspace_welcome_message=workspace_welcome_message,
             )
             answer = result.get("answer", "")
             citations = result.get("citations", [])

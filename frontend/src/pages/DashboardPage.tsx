@@ -4,6 +4,7 @@ import {
   Bell,
   Check,
   GitCompare,
+  LifeBuoy,
   LogOut,
   MessageSquarePlus,
   PanelLeft,
@@ -23,12 +24,14 @@ import { CompareSolutionsModal } from '../components/CompareSolutionsModal';
 import { DemoRequestModal } from '../components/DemoRequestModal';
 import { ConversationStartState } from '../components/ConversationStartState';
 import { PageContainer } from '../components/PageContainer';
+import { StatusBadge, type BadgeTone } from '../components/StatusBadge';
 import { useAuth } from '../lib/authContext';
 import { apiJson } from '../lib/apiClient';
 import { useSolutions } from '../lib/useSolutions';
 import { getSessionId } from '../lib/sessionId';
 import { downloadMarkdown, messagesToMarkdown } from '../lib/exportConversation';
 import { useSidebarCollapse } from '../lib/useSidebarCollapse';
+import { INPUT_CLASS, PRIMARY_BUTTON, SECONDARY_BUTTON } from '../lib/uiClassNames';
 import type { Solution } from '../solutions';
 
 type ConversationSummary = {
@@ -45,12 +48,68 @@ type ConversationMessage = {
   citations: string[];
   metadata: Record<string, unknown>;
   created_at: string | null;
+  escalationSuggested?: boolean;
 };
 
 type ConversationDetail = {
   conversation: ConversationSummary;
   messages: ConversationMessage[];
 };
+
+type EscalationStatus = 'waiting' | 'assigned' | 'active' | 'waiting_for_customer' | 'resolved' | 'closed';
+
+type CustomerEscalationMessage = {
+  id: string;
+  sender_type: 'agent' | 'customer';
+  content: string;
+  created_at: string | null;
+};
+
+type CustomerEscalation = {
+  id: string;
+  conversation_id: string | null;
+  status: EscalationStatus;
+  assigned_agent_name: string | null;
+  department: string | null;
+  created_at: string | null;
+  assigned_at: string | null;
+  resolved_at: string | null;
+  closed_at: string | null;
+  messages?: CustomerEscalationMessage[] | null;
+};
+
+const ESCALATION_STATUS_TONE: Record<EscalationStatus, BadgeTone> = {
+  waiting: 'neutral',
+  assigned: 'gold',
+  active: 'gold',
+  waiting_for_customer: 'warning',
+  resolved: 'success',
+  closed: 'success',
+};
+
+const ESCALATION_STATUS_LABEL: Record<EscalationStatus, string> = {
+  waiting: 'Waiting for an agent',
+  assigned: 'Agent assigned',
+  active: 'In progress',
+  waiting_for_customer: 'Waiting on you',
+  resolved: 'Resolved',
+  closed: 'Closed',
+};
+
+const ESCALATION_POLL_INTERVAL_MS = 2500;
+
+const TITLE_MAX_LEN = 60;
+
+// Mirrors ConversationService._title_from_message on the backend (same
+// 60-char truncation, break on the last whole word) so a conversation's
+// title reads consistently regardless of which code path derived it.
+function titleFromMessage(message: string): string {
+  const collapsed = message.trim().split(/\s+/).join(' ');
+  if (collapsed.length <= TITLE_MAX_LEN) return collapsed || 'New conversation';
+  const truncated = collapsed.slice(0, TITLE_MAX_LEN);
+  const lastSpace = truncated.lastIndexOf(' ');
+  return `${lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated}…`;
+}
 
 type Section = 'conversations' | 'recommendations' | 'comparisons' | 'profile' | 'notifications';
 
@@ -81,6 +140,9 @@ export function DashboardPage() {
   const [isSupportAgent, setIsSupportAgent] = useState(false);
   const [adminWorkspaces, setAdminWorkspaces] = useState<{ id: string; slug: string; name: string }[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useSidebarCollapse('havisiq-dashboard-sidebar-collapsed');
+  const [escalation, setEscalation] = useState<CustomerEscalation | null>(null);
+  const [escalationInput, setEscalationInput] = useState('');
+  const [isEscalating, setIsEscalating] = useState(false);
 
   const loadConversations = (search?: string) => {
     setIsLoadingList(true);
@@ -124,21 +186,27 @@ export function DashboardPage() {
   }, [searchTerm]);
 
   const openConversation = async (id: string) => {
+    setEscalation(null);
     const detail = await apiJson<ConversationDetail>(`/conversations/${id}`);
     setSelected(detail);
     setSection('conversations');
+    apiJson<CustomerEscalation | null>(`/chat/conversations/${id}/escalation`)
+      .then(setEscalation)
+      .catch(() => setEscalation(null));
   };
 
   const startNewConversation = async (initialMessage?: string) => {
+    const trimmedInitial = initialMessage?.trim();
     const row = await apiJson<ConversationSummary>('/conversations', {
       method: 'POST',
-      body: JSON.stringify({}),
+      body: JSON.stringify({ first_message: trimmedInitial || null }),
     });
     setConversations((prev) => [row, ...prev]);
     setSelected({ conversation: row, messages: [] });
+    setEscalation(null);
     setSection('conversations');
-    if (initialMessage && initialMessage.trim()) {
-      await sendMessage(row.id, initialMessage.trim());
+    if (trimmedInitial) {
+      await sendMessage(row.id, trimmedInitial);
     }
   };
 
@@ -169,6 +237,29 @@ export function DashboardPage() {
   const sendMessage = async (conversationId: string, text: string) => {
     setIsSending(true);
 
+    // A conversation created via the plain "New conversation" sidebar
+    // button (no first_message passed) keeps the literal "New
+    // conversation" placeholder title until its first message is sent —
+    // rename it here so the sidebar reads as something meaningful without
+    // requiring a manual rename. Conversations started with an initial
+    // message (ConversationStartState) already get a derived title from
+    // the backend at creation time, so this only fires for the gap case.
+    const shouldAutoTitle =
+      selected?.conversation.id === conversationId &&
+      selected.messages.length === 0 &&
+      selected.conversation.title === 'New conversation';
+    if (shouldAutoTitle) {
+      apiJson<ConversationSummary>(`/conversations/${conversationId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title: titleFromMessage(text) }),
+      })
+        .then((row) => {
+          setConversations((prev) => prev.map((c) => (c.id === conversationId ? row : c)));
+          setSelected((prev) => (prev && prev.conversation.id === conversationId ? { ...prev, conversation: row } : prev));
+        })
+        .catch(() => {});
+    }
+
     const optimisticUser: ConversationMessage = {
       id: `local-${Date.now()}`,
       role: 'user',
@@ -182,7 +273,12 @@ export function DashboardPage() {
     );
 
     try {
-      const response = await apiJson<{ answer: string; sources: string[]; session_id: string | null }>('/chat', {
+      const response = await apiJson<{
+        answer: string;
+        sources: string[];
+        session_id: string | null;
+        escalation_recommended?: boolean;
+      }>('/chat', {
         method: 'POST',
         body: JSON.stringify({
           message: text,
@@ -198,6 +294,7 @@ export function DashboardPage() {
         citations: response.sources || [],
         metadata: {},
         created_at: null,
+        escalationSuggested: Boolean(response.escalation_recommended),
       };
       setSelected((prev) =>
         prev && prev.conversation.id === conversationId ? { ...prev, messages: [...prev.messages, assistantMessage] } : prev
@@ -217,6 +314,53 @@ export function DashboardPage() {
     setInput('');
     await sendMessage(selected.conversation.id, trimmed);
   };
+
+  const requestHumanEscalation = async (question?: string) => {
+    if (!selected || isEscalating) return;
+    setIsEscalating(true);
+    try {
+      const lastUserMessage = [...selected.messages].reverse().find((m) => m.role === 'user')?.content;
+      const result = await apiJson<CustomerEscalation>('/chat/escalate', {
+        method: 'POST',
+        body: JSON.stringify({
+          conversation_id: selected.conversation.id,
+          question: question || lastUserMessage || "I'd like to talk to a human.",
+        }),
+      });
+      setEscalation(result);
+    } finally {
+      setIsEscalating(false);
+    }
+  };
+
+  const handleSendEscalationMessage = async (event: FormEvent) => {
+    event.preventDefault();
+    const trimmed = escalationInput.trim();
+    if (!trimmed || !escalation) return;
+    setEscalationInput('');
+    const optimistic: CustomerEscalationMessage = { id: `local-${Date.now()}`, sender_type: 'customer', content: trimmed, created_at: null };
+    setEscalation((prev) => (prev ? { ...prev, messages: [...(prev.messages ?? []), optimistic] } : prev));
+    await apiJson(`/agent/escalations/${escalation.id}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content: trimmed }),
+    });
+    const refreshed = await apiJson<CustomerEscalation>(`/chat/escalations/${escalation.id}`);
+    setEscalation(refreshed);
+  };
+
+  // Poll the open escalation thread while it's live, mirroring
+  // AgentDashboardPage's poll pattern — stops once resolved/closed so a
+  // finished thread doesn't keep getting hammered.
+  useEffect(() => {
+    if (!escalation || escalation.status === 'resolved' || escalation.status === 'closed') return;
+    const escalationId = escalation.id;
+    const interval = window.setInterval(() => {
+      apiJson<CustomerEscalation>(`/chat/escalations/${escalationId}`)
+        .then(setEscalation)
+        .catch(() => {});
+    }, ESCALATION_POLL_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [escalation?.id, escalation?.status]);
 
   const handleExport = () => {
     if (!selected || selected.messages.length === 0) return;
@@ -414,52 +558,121 @@ export function DashboardPage() {
             <div className="flex h-full flex-col">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <h2 className="font-display text-xl">{selected.conversation.title}</h2>
-                {selected.messages.length > 0 ? (
-                  <button
-                    onClick={handleExport}
-                    className="shrink-0 rounded-full border border-ink/15 px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-gold-400 hover:text-gold-700"
-                  >
-                    Export
-                  </button>
-                ) : null}
+                <div className="flex shrink-0 items-center gap-2">
+                  {!escalation || escalation.status === 'resolved' || escalation.status === 'closed' ? (
+                    <button
+                      onClick={() => requestHumanEscalation()}
+                      disabled={isEscalating}
+                      className={`flex items-center gap-1.5 ${SECONDARY_BUTTON} disabled:cursor-not-allowed disabled:opacity-50`}
+                    >
+                      <LifeBuoy size={13} /> {isEscalating ? 'Requesting…' : 'Talk to a human'}
+                    </button>
+                  ) : null}
+                  {selected.messages.length > 0 ? (
+                    <button
+                      onClick={handleExport}
+                      className="rounded-full border border-ink/15 px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-gold-400 hover:text-gold-700"
+                    >
+                      Export
+                    </button>
+                  ) : null}
+                </div>
               </div>
-              <div className="flex-1 space-y-4 overflow-y-auto rounded-2xl border border-ink/10 bg-white p-5">
-                {selected.messages.length === 0 ? (
-                  <p className="text-sm text-ink/50">Ask HavisIQ anything to continue this conversation.</p>
-                ) : null}
-                {selected.messages.map((m) => {
-                  const precedingQuestion =
-                    m.role === 'assistant'
-                      ? selected.messages[selected.messages.indexOf(m) - 1]?.content ?? ''
-                      : '';
-                  return (
-                    <div key={m.id} className={m.role === 'user' ? 'text-right' : 'text-left'}>
-                      <div
-                        className={`inline-block max-w-2xl rounded-2xl px-4 py-2.5 text-sm ${
-                          m.role === 'user' ? 'bg-ink text-paper' : 'bg-paper text-ink'
-                        }`}
-                      >
-                        {m.role === 'assistant' ? (
-                          <MessageContent content={m.content} solutions={solutions} />
-                        ) : (
-                          m.content
-                        )}
-                      </div>
-                      {m.role === 'assistant' && m.citations.length > 0 ? (
-                        <div className="mt-1"><SourceChips sources={m.citations} /></div>
-                      ) : null}
-                      {m.role === 'assistant' ? (
-                        <div className="flex justify-start">
-                          <MessageActions
-                            question={precedingQuestion}
-                            answer={m.content}
-                            conversationId={selected.conversation.id}
-                          />
+              <div className="flex-1 space-y-4 overflow-y-auto">
+                <div className="max-h-[50vh] space-y-4 overflow-y-auto rounded-2xl border border-ink/10 bg-white p-5">
+                  {selected.messages.length === 0 ? (
+                    <p className="text-sm text-ink/50">Ask HavisIQ anything to continue this conversation.</p>
+                  ) : null}
+                  {selected.messages.map((m) => {
+                    const precedingQuestion =
+                      m.role === 'assistant'
+                        ? selected.messages[selected.messages.indexOf(m) - 1]?.content ?? ''
+                        : '';
+                    return (
+                      <div key={m.id} className={m.role === 'user' ? 'text-right' : 'text-left'}>
+                        <div
+                          className={`inline-block max-w-2xl rounded-2xl px-4 py-2.5 text-sm ${
+                            m.role === 'user' ? 'bg-ink text-paper' : 'bg-paper text-ink'
+                          }`}
+                        >
+                          {m.role === 'assistant' ? (
+                            <MessageContent content={m.content} solutions={solutions} />
+                          ) : (
+                            m.content
+                          )}
                         </div>
-                      ) : null}
+                        {m.role === 'assistant' && m.citations.length > 0 ? (
+                          <div className="mt-1"><SourceChips sources={m.citations} /></div>
+                        ) : null}
+                        {m.role === 'assistant' ? (
+                          <div className="flex justify-start">
+                            <MessageActions
+                              question={precedingQuestion}
+                              answer={m.content}
+                              conversationId={selected.conversation.id}
+                            />
+                          </div>
+                        ) : null}
+                        {m.role === 'assistant' && m.escalationSuggested && !escalation ? (
+                          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-gold-200 bg-gold-50 px-3 py-2 text-xs text-gold-700">
+                            <span>Would you like to talk to a human about this?</span>
+                            <button
+                              onClick={() => requestHumanEscalation(precedingQuestion || m.content)}
+                              className="font-semibold underline"
+                            >
+                              Talk to a human
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {escalation ? (
+                  <div className="rounded-2xl border border-ink/10 bg-white p-5">
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-ink">
+                        <LifeBuoy size={16} className="text-gold-600" />
+                        <h3 className="font-display text-base">
+                          {escalation.assigned_agent_name
+                            ? `Talking with ${escalation.assigned_agent_name}`
+                            : 'Waiting for an agent…'}
+                        </h3>
+                      </div>
+                      <StatusBadge tone={ESCALATION_STATUS_TONE[escalation.status]}>
+                        {ESCALATION_STATUS_LABEL[escalation.status]}
+                      </StatusBadge>
                     </div>
-                  );
-                })}
+                    <div className="max-h-72 space-y-3 overflow-y-auto">
+                      {(escalation.messages ?? []).length === 0 ? (
+                        <p className="text-sm text-ink/50">A member of our support team will join shortly.</p>
+                      ) : null}
+                      {(escalation.messages ?? []).map((m) => (
+                        <div key={m.id} className={m.sender_type === 'customer' ? 'text-right' : 'text-left'}>
+                          <span
+                            className={`inline-block max-w-md rounded-2xl px-4 py-2 text-sm ${
+                              m.sender_type === 'customer' ? 'bg-ink text-paper' : 'bg-paper text-ink'
+                            }`}
+                          >
+                            {m.content}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    {escalation.status !== 'resolved' && escalation.status !== 'closed' ? (
+                      <form onSubmit={handleSendEscalationMessage} className="mt-3 flex items-center gap-2">
+                        <input
+                          value={escalationInput}
+                          onChange={(e) => setEscalationInput(e.target.value)}
+                          placeholder="Message the agent..."
+                          className={`flex-1 ${INPUT_CLASS} mt-0`}
+                        />
+                        <button type="submit" className={PRIMARY_BUTTON}>Send</button>
+                      </form>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
               <form onSubmit={handleSend} className="mt-4 flex items-center gap-2">
                 <input

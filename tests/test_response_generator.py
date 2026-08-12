@@ -568,3 +568,138 @@ class TestResponseGeneratorCatalogGuardrail:
             system_prompt = mock_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
 
         assert rg_module._CATALOG_GUARDRAIL_FALLBACK.strip() in system_prompt
+
+
+class TestResponseGeneratorIdentityGuardrail:
+    """Live-confirmed bug this fixes: "Tell me about Ha-Shem" (the
+    platform's own operator) reached the model with web-search evidence
+    about an unrelated same-named entity, and nothing told the model that
+    evidence didn't actually describe its own workspace."""
+
+    def test_empty_context_early_return_unaffected_by_workspace_name(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        gen = ResponseGenerator(api_key="test-key")
+        result = gen.generate(question="Tell me about Ha-Shem", context=[], workspace_name="Ha-Shem")
+
+        # The empty-evidence early return happens before the prompt (and
+        # therefore the identity guardrail) is even built.
+        assert "don't have enough information" in result["answer"]
+        assert result["citations"] == []
+
+    def test_guardrail_present_when_workspace_name_set(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = "Answer [1]."
+
+        with patch("groq.Groq") as mock_groq:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_completion
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key")
+            gen.generate(
+                question="Tell me about Ha-Shem",
+                context=[_make_evidence(content="Unrelated content.", url="https://example.com/")],
+                workspace_name="Ha-Shem",
+            )
+
+            system_prompt = mock_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+
+        assert "Workspace-identity guardrail" in system_prompt
+        assert "Ha-Shem" in system_prompt
+        assert "do NOT use that evidence" in system_prompt
+
+    def test_guardrail_absent_when_workspace_name_omitted(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = "Answer [1]."
+
+        with patch("groq.Groq") as mock_groq:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_completion
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key")
+            gen.generate(
+                question="Tell me about Ha-Shem",
+                context=[_make_evidence(content="Unrelated content.", url="https://example.com/")],
+            )
+
+            system_prompt = mock_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+
+        assert "Workspace-identity guardrail" not in system_prompt
+
+    def test_welcome_message_clause_included_when_given(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = "Answer [1]."
+
+        with patch("groq.Groq") as mock_groq:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_completion
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key")
+            gen.generate(
+                question="Tell me about Ha-Shem",
+                context=[_make_evidence(content="Unrelated content.", url="https://example.com/")],
+                workspace_name="Ha-Shem",
+                workspace_welcome_message="Welcome to Ha-Shem — how can HavisIQ help today?",
+            )
+
+            system_prompt = mock_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+
+        assert "Welcome to Ha-Shem" in system_prompt
+
+    def test_welcome_message_clause_omitted_cleanly_when_not_given(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = "Answer [1]."
+
+        with patch("groq.Groq") as mock_groq:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_completion
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key")
+            gen.generate(
+                question="Tell me about Ha-Shem",
+                context=[_make_evidence(content="Unrelated content.", url="https://example.com/")],
+                workspace_name="Ha-Shem",
+            )
+
+            system_prompt = mock_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+
+        assert 'You are the AI advisor for Ha-Shem. If' in system_prompt
+
+    def test_guardrail_additive_strict_prompt_diff(self):
+        """Byte-diff the prompt with vs without workspace_name, all other
+        args identical — proves strict additivity, not a reformatting."""
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = "Answer [1]."
+
+        def _run(**kwargs):
+            with patch("groq.Groq") as mock_groq:
+                mock_client = MagicMock()
+                mock_client.chat.completions.create.return_value = mock_completion
+                mock_groq.return_value = mock_client
+                gen = ResponseGenerator(api_key="test-key")
+                gen.generate(
+                    question="Tell me about Ha-Shem",
+                    context=[_make_evidence(content="Unrelated content.", url="https://example.com/")],
+                    **kwargs,
+                )
+                return mock_client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
+
+        without_identity = _run()
+        with_identity = _run(workspace_name="Ha-Shem")
+
+        assert with_identity.startswith(without_identity)
+        assert with_identity[len(without_identity):].strip().startswith("Workspace-identity guardrail")

@@ -30,6 +30,7 @@ from typing import Sequence
 
 from ...shared.logging import get_logger
 from ...shared.product_registry import PRODUCT_REGISTRY
+from .self_identity import is_self_identity_question
 
 logger: logging.Logger = get_logger(__name__)
 
@@ -218,7 +219,7 @@ class SourceRouter:
     # Public API
     # ------------------------------------------------------------------
 
-    def route(self, question: str) -> RoutingDecision:
+    def route(self, question: str, *, workspace_name: str | None = None) -> RoutingDecision:
         """Decide which sources to query for *question*.
 
         The decision is based purely on keyword matching — no I/O or
@@ -226,6 +227,13 @@ class SourceRouter:
 
         Args:
             question: The user's natural-language question.
+            workspace_name: The tenant's own name, if known. When the
+                question asks "about" this name itself (see
+                ``self_identity.is_self_identity_question``), routing is
+                forced knowledge-only — a vendor's AI should never need the
+                open web to describe itself, and an unscoped web search for
+                a same-named but unrelated topic is how a prior incident
+                produced a completely wrong answer.
 
         Returns:
             A :class:`RoutingDecision` with one boolean per source.
@@ -236,6 +244,14 @@ class SourceRouter:
         cleaned = (question or "").strip()
         if not cleaned:
             raise ValueError("route() requires a non-empty question string.")
+
+        if is_self_identity_question(cleaned, workspace_name):
+            logger.info(
+                "SourceRouter: self-identity question about workspace %r detected for %r "
+                "-> knowledge only (web search suppressed).",
+                workspace_name, cleaned,
+            )
+            return RoutingDecision(knowledge=True, web=False)
 
         cleaned_lower = cleaned.lower()
 

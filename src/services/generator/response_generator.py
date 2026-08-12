@@ -86,6 +86,29 @@ in the evidence above.
 7.  If the evidence does not support a HavisIQ-specific recommendation, say \
 so and suggest the user reach out to HavisIQ support/sales instead."""
 
+# Unconditional (when workspace identity is known) — appended after the
+# catalog guardrail. Backstop for a live-confirmed incident: a question
+# asking "about" the vendor's own workspace (e.g. "Tell me about Ha-Shem")
+# reached the model with web-search evidence about an unrelated, same-named
+# real-world entity (the Jewish religious term "Ha-Shem"), and nothing told
+# the model that evidence didn't actually describe its own operator. The
+# routing/retrieval layers (SourceRouter, SearchManager) now suppress that
+# web search at the source — this is the containment layer for any phrasing
+# their keyword-based guard doesn't catch.
+_IDENTITY_GUARDRAIL_TEMPLATE: str = """
+
+Workspace-identity guardrail:
+8.  You are the AI advisor for {workspace_name}{welcome_clause}. If the \
+question asks about {workspace_name} itself (what it is, who runs it, what \
+it does, its history/background) and the evidence above does not clearly \
+describe {workspace_name} — for example because it is about an unrelated \
+person, place, term, or organization that merely shares part of the name — \
+do NOT use that evidence to answer. Instead say plainly that you don't have \
+detailed company information about {workspace_name} yet, and suggest the \
+user contact {workspace_name} support directly. Never present information \
+about a different, similarly-named entity or concept as if it describes \
+{workspace_name}."""
+
 
 # ---------------------------------------------------------------------------
 # ResponseGenerator
@@ -162,6 +185,8 @@ class ResponseGenerator:
         context: Sequence[EvidenceItem] | None = None,
         primary_product: str | None = None,
         complementary_products: Sequence[str] | None = None,
+        workspace_name: str | None = None,
+        workspace_welcome_message: str | None = None,
     ) -> dict[str, Any]:
         """Generate a grounded answer from *question* and *context*.
 
@@ -186,6 +211,16 @@ class ResponseGenerator:
                       e.g. a company-wide transformation touching several
                       unrelated departments equally). ``None``/empty means
                       no business-theme framing is added to the prompt.
+            workspace_name: The tenant's own name, if known. When set, an
+                      additional guardrail instructs the model not to
+                      present unrelated evidence as if it describes the
+                      workspace itself. ``None`` (the default) leaves the
+                      prompt byte-for-byte unchanged from before this
+                      parameter existed.
+            workspace_welcome_message: The workspace's own welcome
+                      message, if configured — folded into the identity
+                      guardrail for extra context. Only used when
+                      ``workspace_name`` is also set.
 
         Returns:
             A dict with keys:
@@ -233,6 +268,11 @@ class ResponseGenerator:
         except Exception as exc:
             logger.warning("ResponseGenerator: catalog guardrail build failed — %s. Using generic guardrail.", exc)
             system_prompt += _CATALOG_GUARDRAIL_FALLBACK
+        if workspace_name:
+            welcome_clause = f' — "{workspace_welcome_message}"' if workspace_welcome_message else ""
+            system_prompt += _IDENTITY_GUARDRAIL_TEMPLATE.format(
+                workspace_name=workspace_name, welcome_clause=welcome_clause,
+            )
         user_prompt = question_clean
 
         logger.info(
