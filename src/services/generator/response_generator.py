@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any, Sequence
 
 from dotenv import load_dotenv
@@ -313,6 +314,18 @@ class ResponseGenerator:
         if not answer:
             answer = "I couldn't generate a grounded response from the available context."
 
+        # If the model's answer cites nothing at all — e.g. it explicitly
+        # says the evidence doesn't cover the question, per the catalog/
+        # identity guardrails above — don't surface a "Sources" list
+        # underneath anyway. Live-confirmed: "Compare SPIDIFY and V-Login"
+        # correctly answered "I don't have that information" (zero [n]
+        # markers) while the web-fallback evidence behind the scenes was
+        # for the unrelated music service Spotify — showing those links as
+        # "Sources" under a disclaimed answer was misleading even though
+        # the answer text itself was already correct.
+        if not self._answer_cites_any_source(answer):
+            citations = []
+
         return {
             "answer": answer,
             "citations": citations,
@@ -404,6 +417,20 @@ class ResponseGenerator:
         except Exception as exc:
             logger.warning("ResponseGenerator: citation validation failed — %s. Using unfiltered citations.", exc)
             return citations
+
+    # The prompt instructs the model to cite with plain ASCII "[1]", "[2]"
+    # notation, but this model occasionally emits the CJK/ideographic
+    # bracket variant "【1】" instead (confirmed live) — both must count as
+    # a citation, or a genuinely-grounded, correctly-cited answer gets its
+    # real sources wiped by _answer_cites_any_source's all-or-nothing check
+    # just as surely as an actually-uncited one should.
+    _CITATION_MARKER_RE = re.compile(r"[\[【]\d+[\]】]")
+
+    @staticmethod
+    def _answer_cites_any_source(answer: str) -> bool:
+        """True if *answer* references at least one ``[1]``- or
+        ``【1】``-style marker."""
+        return ResponseGenerator._CITATION_MARKER_RE.search(answer) is not None
 
     @staticmethod
     def _format_evidence(

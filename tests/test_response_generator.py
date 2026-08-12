@@ -703,3 +703,103 @@ class TestResponseGeneratorIdentityGuardrail:
 
         assert with_identity.startswith(without_identity)
         assert with_identity[len(without_identity):].strip().startswith("Workspace-identity guardrail")
+
+
+class TestResponseGeneratorUncitedAnswerSuppressesCitations:
+    """Live-confirmed bug this fixes: "Compare SPIDIFY and V-Login" fell
+    back to a live web search that returned unrelated Spotify results. The
+    model correctly refused to use that evidence ("I don't have that
+    information...", zero [n] markers) but the Spotify links were still
+    shown as "Sources" underneath — misleading even though the answer text
+    itself was already correct."""
+
+    def test_citations_dropped_when_answer_cites_nothing(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = (
+            "I'm sorry, the evidence does not contain information about that."
+        )
+
+        with patch("groq.Groq") as mock_groq:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_completion
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key")
+            result = gen.generate(
+                question="Compare SPIDIFY and V-Login",
+                context=[_make_evidence(content="Spotify Premium pricing.", url="https://spotify.com/premium")],
+            )
+
+        assert result["citations"] == []
+
+    def test_citations_kept_when_answer_cites_at_least_one_source(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = "SPIDIFY handles identity verification [1]."
+
+        with patch("groq.Groq") as mock_groq:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_completion
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key")
+            result = gen.generate(
+                question="Tell me about SPIDIFY",
+                context=[_make_evidence(content="SPIDIFY verifies identity.", url="https://havisspidify.com/")],
+            )
+
+        assert len(result["citations"]) == 1
+
+    def test_citations_still_returned_unconditionally_on_llm_failure(self):
+        """The error-fallback path (LLM call itself raised) has no answer
+        text to check markers against — citations must still be returned
+        there exactly as before, matching test_llm_failure_graceful_fallback."""
+        from src.services.generator.response_generator import ResponseGenerator
+
+        with patch("groq.Groq") as mock_groq:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.side_effect = RuntimeError("API unavailable")
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key")
+            result = gen.generate(
+                question="test",
+                context=[_make_evidence(content="Some data", url="https://example.com")],
+            )
+
+        assert len(result["citations"]) == 1
+
+    def test_answer_cites_any_source_helper_directly(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        assert ResponseGenerator._answer_cites_any_source("Answer [1].") is True
+        assert ResponseGenerator._answer_cites_any_source("Answer [1][2].") is True
+        assert ResponseGenerator._answer_cites_any_source("No citation here.") is False
+        assert ResponseGenerator._answer_cites_any_source("") is False
+        # Live-confirmed regression: the model sometimes cites with CJK/
+        # ideographic brackets (【 】) instead of ASCII — a
+        # genuinely-cited answer using this style must not be treated as
+        # uncited (which would wipe its real, valid sources).
+        assert ResponseGenerator._answer_cites_any_source("Answer【1】.") is True
+
+    def test_citations_kept_for_cjk_bracket_style_citation(self):
+        from src.services.generator.response_generator import ResponseGenerator
+
+        mock_completion = MagicMock()
+        mock_completion.choices[0].message.content = "SPIDIFY verifies identity【1】."
+
+        with patch("groq.Groq") as mock_groq:
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_completion
+            mock_groq.return_value = mock_client
+
+            gen = ResponseGenerator(api_key="test-key")
+            result = gen.generate(
+                question="Tell me about SPIDIFY",
+                context=[_make_evidence(content="SPIDIFY verifies identity.", url="https://havisspidify.com/")],
+            )
+
+        assert len(result["citations"]) == 1
