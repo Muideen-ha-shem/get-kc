@@ -42,7 +42,7 @@ export function ConversationStartState({
   return (
     <div className="flex h-full flex-col items-center justify-center gap-6 px-4 text-center">
       <h2 className="font-display text-2xl text-ink">
-        {firstName ? `What can HavisIQ help you find, ${firstName}?` : 'What can HavisIQ help you find today?'}
+        {firstName ? `What can HavisIQ help you solve, ${firstName}?` : 'What can HavisIQ help you solve today?'}
       </h2>
 
       <form onSubmit={handleSubmit} className="flex w-full max-w-xl items-center gap-2">
@@ -50,7 +50,7 @@ export function ConversationStartState({
           autoFocus
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="Ask about a product, compare solutions, or describe a business problem..."
+          placeholder="Message HavisIQ"
           className="flex-1 rounded-full border border-ink/10 bg-white px-5 py-3.5 text-sm outline-none transition-colors focus:border-gold-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-400/50"
         />
         <button
