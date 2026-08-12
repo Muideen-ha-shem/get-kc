@@ -126,9 +126,8 @@ def build_confirmation_summary(pending: PendingAction) -> str:
     go-ahead — never a claim that anything has happened yet."""
     if pending.kind == "escalation":
         return (
-            "I can raise this with a support specialist for you — I don't have a live "
-            "connection open yet, but I can flag it now so someone follows up. Would "
-            "you like me to go ahead?"
+            "I can raise this with a support specialist for you — I'll flag it now so "
+            "someone follows up. Would you like me to go ahead?"
         )
     if pending.kind == "appointment":
         slot_label = pending.fields.get("slot_label", "the selected time")

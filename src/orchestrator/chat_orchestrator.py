@@ -39,7 +39,7 @@ from ..services.advisory.action_workflow import (
     execute_action,
     required_fields,
 )
-from ..services.advisory.session_context import PendingAction
+from ..services.advisory.session_context import PendingAction, SessionState
 from ..services.appointments.appointment_service import AppointmentService
 from ..services.escalation.decision import decide_escalation
 from ..services.escalation.escalation_service import EscalationService
@@ -414,6 +414,31 @@ class ChatOrchestrator:
                     "sources": [], "citations": [], "next_actions": [],
                     "session_id": session_id, "escalation_recommended": False, "escalation_reason": None,
                 }
+
+            # Intent switch (Phase 28): a message that itself expresses a
+            # DIFFERENT action request must never be silently swallowed as
+            # this field's answer — live-confirmed bug: an appointment
+            # request typed mid-way through a demo's name/email collection
+            # got misfiled as the customer's name. Checked before any
+            # field-specific handling so a switch always wins, even at the
+            # confirmation step (a customer can change their mind there
+            # too), and even for a field that already has its own strict
+            # validator (email/slot) — those only run below, once we know
+            # this genuinely isn't a switch.
+            switch_match = detect_action_intent(message)
+            if switch_match is not None and switch_match.kind != pending.kind:
+                new_pending = self._start_pending_action(switch_match.kind, session_state, message)
+                answer = "Sure — let's do that instead. " + self._render_pending_action_prompt(
+                    new_pending, workspace_id=workspace_id
+                )
+                self._session_service.set_pending_action(session_id, new_pending)
+                return {
+                    "answer": answer, "sources": [], "citations": [], "next_actions": [],
+                    "session_id": session_id,
+                    "escalation_recommended": new_pending.status == "awaiting_confirmation" and new_pending.kind == "escalation",
+                    "escalation_reason": "explicit_request" if new_pending.kind == "escalation" and new_pending.status == "awaiting_confirmation" else None,
+                }
+
             if pending.status == "collecting_info":
                 pending, answer = collect_field(
                     pending, message,
@@ -426,8 +451,8 @@ class ChatOrchestrator:
                     "escalation_recommended": pending.status == "awaiting_confirmation" and pending.kind == "escalation",
                     "escalation_reason": None,
                 }
-            # awaiting_confirmation but the reply wasn't a bare yes/no — gently
-            # re-ask rather than silently dropping the pending action.
+            # awaiting_confirmation but the reply wasn't a bare yes/no/switch —
+            # gently re-ask rather than silently dropping the pending action.
             return {
                 "answer": build_confirmation_summary(pending),
                 "sources": [], "citations": [], "next_actions": [],
@@ -446,16 +471,8 @@ class ChatOrchestrator:
                     "session_id": session_id, "escalation_recommended": action_match.kind == "escalation",
                     "escalation_reason": "explicit_request" if action_match.kind == "escalation" else None,
                 }
-            new_pending = PendingAction(
-                kind=action_match.kind,
-                missing=required_fields(action_match.kind, session_state),
-                original_question=message,
-            )
-            if new_pending.missing:
-                answer = build_field_prompt(new_pending, appointment_service=self._appointment_service, workspace_id=workspace_id)
-            else:
-                new_pending.status = "awaiting_confirmation"
-                answer = build_confirmation_summary(new_pending)
+            new_pending = self._start_pending_action(action_match.kind, session_state, message)
+            answer = self._render_pending_action_prompt(new_pending, workspace_id=workspace_id)
             self._session_service.set_pending_action(session_id, new_pending)
             return {
                 "answer": answer, "sources": [], "citations": [], "next_actions": [],
@@ -651,9 +668,8 @@ class ChatOrchestrator:
         message."""
         if kind == "escalation":
             return (
-                "I can raise this with a support specialist for you — I don't have a "
-                "live connection open yet, but I can flag it now so someone follows up. "
-                "Would you like me to go ahead?"
+                "I can raise this with a support specialist for you — I'll flag it now "
+                "so someone follows up. Would you like me to go ahead?"
             )
         if kind == "appointment":
             return self._build_appointment_availability_ack(workspace_id)
@@ -661,6 +677,39 @@ class ChatOrchestrator:
             "I can help you request a demo — could you tell me your name, email, and "
             "which HavisIQ solution you'd like to see, and I'll pass it along?"
         )
+
+    def _start_pending_action(
+        self, kind: str, session_state: SessionState | None, message: str
+    ) -> PendingAction:
+        """Build a fresh :class:`PendingAction` for *kind* — required-field
+        queue via ``action_workflow.required_fields``, plus the known-
+        product seed (Phase 28 fix): a session that already discussed a
+        product must never show a demo's product as "the solution you
+        mentioned" just because asking for it was skipped."""
+        pending = PendingAction(
+            kind=kind,
+            missing=required_fields(kind, session_state),
+            original_question=message,
+        )
+        self._seed_known_demo_product(pending, session_state)
+        return pending
+
+    @staticmethod
+    def _seed_known_demo_product(pending: PendingAction, session_state: SessionState | None) -> None:
+        if pending.kind != "demo" or "product" in pending.missing:
+            return
+        known = session_state.last_product() if session_state else None
+        if known:
+            pending.fields["product"] = known
+
+    def _render_pending_action_prompt(self, pending: PendingAction, *, workspace_id: str | None) -> str:
+        """The first turn's response for a freshly-started (or switched-to)
+        pending action — the next field question, or straight to the
+        confirmation summary when nothing is required (escalation)."""
+        if pending.missing:
+            return build_field_prompt(pending, appointment_service=self._appointment_service, workspace_id=workspace_id)
+        pending.status = "awaiting_confirmation"
+        return build_confirmation_summary(pending)
 
     # ------------------------------------------------------------------
     # Background learning
