@@ -28,6 +28,18 @@ class TestNo:
         assert detect_confirmation(question) == "no"
 
 
+class TestBroadenedCancelPhrasing:
+    """Live-confirmed bug: "cancel that" fell through to normal RAG because
+    the old exact-match "cancel" never matched it."""
+
+    @pytest.mark.parametrize(
+        "question",
+        ["cancel that", "actually cancel", "please cancel this", "Never mind, forget it", "nevermind that"],
+    )
+    def test_cancel_phrases_match_as_substring(self, question):
+        assert detect_confirmation(question) == "no"
+
+
 class TestNoMatch:
     @pytest.mark.parametrize(
         "question",

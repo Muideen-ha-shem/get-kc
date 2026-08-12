@@ -287,3 +287,87 @@ class TestStatefulDemoFlow:
             name="Jane Doe", email="jane@example.com", company=None, use_case="I want a demo", product="SPIDIFY",
         )
         assert "submitted" in r6["answer"].lower()
+
+
+class TestPhase28IntentSwitch:
+    """Live-confirmed bug: an appointment request typed mid-way through a
+    demo's field collection got misfiled as the customer's name instead of
+    being recognized as a switch to a different workflow."""
+
+    def test_appointment_request_mid_demo_switches_workflow(self):
+        appointment_service = MagicMock()
+        appointment_service.get_availability.return_value = [
+            SimpleNamespace(date="2026-08-13", day_label="Thu", fully_booked=False, slots=[{"time": "09:00", "available": True}]),
+        ]
+        orchestrator, *_rest = _make_stateful_orchestrator(appointment_service=appointment_service)
+
+        # Start a demo flow — no product known yet, so it asks which one.
+        r1 = orchestrator.chat("I want a demo", session_id="s1")
+        assert "which havisiq" in r1["answer"].lower()
+
+        r2 = orchestrator.chat("SPIDIFY", session_id="s1")
+        assert "name" in r2["answer"].lower()  # now collecting the demo's name field
+
+        # Customer changes their mind mid-collection.
+        r3 = orchestrator.chat("Actually, I'd like to book an appointment instead", session_id="s1")
+
+        assert "let's do that instead" in r3["answer"].lower()
+        assert "Thu 09:00" in r3["answer"]  # real appointment availability, not misfiled as a name
+
+    def test_switch_at_confirmation_step_also_works(self):
+        escalation_service = MagicMock()
+        orchestrator, *_rest = _make_stateful_orchestrator(escalation_service=escalation_service)
+
+        r1 = orchestrator.chat(
+            "Can you arrange a quick chat with a specialist?", session_id="s1",
+            workspace_id="w1", workspace_name="Ha-Shem",
+        )
+        assert "would you like" in r1["answer"].lower()  # awaiting_confirmation
+
+        r2 = orchestrator.chat("Actually, I want a demo instead", session_id="s1")
+
+        assert "let's do that instead" in r2["answer"].lower()
+        escalation_service.create_direct.assert_not_called()
+
+    def test_cancel_that_cancels_pending_action(self):
+        escalation_service = MagicMock()
+        orchestrator, *_rest = _make_stateful_orchestrator(escalation_service=escalation_service)
+
+        orchestrator.chat("Can you arrange a quick chat with a specialist?", session_id="s1")
+        r2 = orchestrator.chat("cancel that", session_id="s1")
+
+        assert "cancelled" in r2["answer"].lower()
+        escalation_service.create_direct.assert_not_called()
+
+    def test_known_product_shown_in_demo_summary_not_placeholder(self):
+        response_generator = MagicMock()
+        response_generator.generate.return_value = {"answer": "SPIDIFY does X [1].", "citations": []}
+        search_manager = MagicMock()
+        search_manager.retrieve.return_value = []
+        search_manager.product_match = None
+        source_router = MagicMock()
+        source_router.route.return_value = RoutingDecision(knowledge=True, web=False)
+
+        session_service = SessionService(session_context=SessionContext())
+        orchestrator = ChatOrchestrator(
+            source_router=source_router,
+            search_manager=search_manager,
+            response_generator=response_generator,
+            session_service=session_service,
+        )
+        session_service.record_products("s1", ["SPIDIFY"])
+
+        orchestrator.chat("I want a demo", session_id="s1")  # skips the product question
+        orchestrator.chat("Jane Doe", session_id="s1")
+        orchestrator.chat("jane@example.com", session_id="s1")
+        r5 = orchestrator.chat("skip", session_id="s1")
+
+        assert "SPIDIFY" in r5["answer"]
+        assert "the solution you mentioned" not in r5["answer"]
+
+    def test_escalation_ack_has_no_dev_facing_phrasing(self):
+        orchestrator, *_rest = _make_orchestrator()  # stateless path
+
+        result = orchestrator.chat("Can you arrange a quick chat with a specialist?")
+
+        assert "live connection" not in result["answer"].lower()
