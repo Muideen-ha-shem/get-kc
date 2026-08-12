@@ -1,5 +1,7 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useState } from 'react';
 import { apiJson } from '../../lib/apiClient';
+import { Select } from '../../components/Select';
+import { CARD, PRIMARY_BUTTON } from '../../lib/uiClassNames';
 import { AdminGuard } from './AdminGuard';
 import { AdminLayout } from './AdminLayout';
 import type { AgentPerformance, SupportAgent } from './adminTypes';
@@ -42,12 +44,12 @@ function AdminAgentsContent() {
           value={workspaceId}
           onChange={(e) => setWorkspaceId(e.target.value)}
           placeholder="Workspace id"
-          className="border border-ink/10 rounded-xl px-3 py-2 text-sm bg-paper text-ink outline-none focus:border-gold-400"
+          className="border border-ink/10 rounded-xl px-3 py-2 text-sm bg-paper text-ink outline-none transition-colors focus:border-gold-400"
         />
-        <button type="submit" className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-paper transition hover:bg-ink-soft">Load</button>
+        <button type="submit" className={PRIMARY_BUTTON}>Load</button>
       </form>
 
-      <div className="bg-white border border-ink/10 rounded-2xl divide-y divide-ink/10">
+      <div className={`${CARD} divide-y divide-ink/10`}>
         {agents.map((a) => (
           <div key={a.id} className="flex items-center justify-between px-4 py-3">
             <div>
@@ -59,14 +61,14 @@ function AdminAgentsContent() {
                 </p>
               )}
             </div>
-            <div className="flex items-center gap-2">
-              <select
+            <div className="flex items-center gap-2 w-40">
+              <Select
                 value={a.department}
                 onChange={(e) => changeDepartment(a.id, e.target.value)}
-                className="text-xs border border-ink/10 rounded-xl px-2 py-1.5 bg-paper text-ink outline-none focus:border-gold-400"
+                className="text-xs py-1.5"
               >
                 {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
-              </select>
+              </Select>
               <button onClick={() => removeAgent(a.id)} className="rounded-full bg-red-50 text-red-700 border border-red-200 px-3 py-1 text-xs transition hover:bg-red-100">
                 Remove
               </button>

@@ -1,7 +1,12 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { PanelLeft, PanelLeftClose } from 'lucide-react';
 import { HavisIQMark } from '../components/HavisIQMark';
+import { PageContainer } from '../components/PageContainer';
+import { Select } from '../components/Select';
 import { apiJson } from '../lib/apiClient';
+import { INPUT_CLASS, PRIMARY_BUTTON, SECONDARY_BUTTON } from '../lib/uiClassNames';
+import { useSidebarCollapse } from '../lib/useSidebarCollapse';
 
 type AgentStatus = 'available' | 'away' | 'offline';
 
@@ -82,6 +87,7 @@ export function AgentDashboardPage() {
   const [messageInput, setMessageInput] = useState('');
   const [noteInput, setNoteInput] = useState('');
   const [copilotDraft, setCopilotDraft] = useState<string | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useSidebarCollapse('havisiq-agent-sidebar-collapsed');
 
   useEffect(() => {
     apiJson<SupportAgent>('/agents/me')
@@ -194,21 +200,26 @@ export function AgentDashboardPage() {
   return (
     <div className="min-h-screen bg-paper flex flex-col">
       <header className="flex items-center justify-between px-6 py-4 border-b border-ink/10 bg-white">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setSidebarCollapsed((v) => !v)}
+            className="rounded-full p-1.5 text-ink/50 transition hover:bg-paper hover:text-ink"
+            aria-label={sidebarCollapsed ? 'Show queue sidebar' : 'Hide queue sidebar'}
+          >
+            {sidebarCollapsed ? <PanelLeft size={16} /> : <PanelLeftClose size={16} />}
+          </button>
           <HavisIQMark />
           <span className="font-display font-semibold text-ink">Agent Dashboard</span>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-sm text-ink/50">{agent.name} · {agent.department}</span>
-          <select
-            value={agent.status}
-            onChange={(e) => setStatus(e.target.value as AgentStatus)}
-            className="border border-ink/10 rounded-xl px-2 py-1.5 text-sm bg-paper text-ink outline-none focus:border-gold-400"
-          >
-            <option value="available">Available</option>
-            <option value="away">Away</option>
-            <option value="offline">Offline</option>
-          </select>
+          <div className="w-32">
+            <Select value={agent.status} onChange={(e) => setStatus(e.target.value as AgentStatus)}>
+              <option value="available">Available</option>
+              <option value="away">Away</option>
+              <option value="offline">Offline</option>
+            </Select>
+          </div>
         </div>
       </header>
 
@@ -226,7 +237,11 @@ export function AgentDashboardPage() {
       )}
 
       <div className="flex flex-1 overflow-hidden">
-        <aside className="w-80 border-r border-ink/10 bg-white overflow-y-auto">
+        <aside
+          className={`shrink-0 border-r border-ink/10 bg-white overflow-y-auto overflow-x-hidden transition-[width] duration-200 ${
+            sidebarCollapsed ? 'w-0 border-r-0' : 'w-80'
+          }`}
+        >
           <section className="p-4">
             <h2 className="text-sm font-semibold text-ink/50 uppercase mb-2">My Queue</h2>
             {queue.length === 0 && <p className="text-sm text-ink/40">Nothing waiting.</p>}
@@ -236,7 +251,7 @@ export function AgentDashboardPage() {
                 <p className="text-xs text-ink/50">{escalation.summary?.problem}</p>
                 <button
                   onClick={() => acceptEscalation(escalation.id)}
-                  className="mt-2 text-xs rounded-full bg-ink px-3 py-1 text-paper font-semibold transition hover:bg-ink-soft"
+                  className="mt-2 rounded-full bg-ink px-3 py-1 text-xs text-paper font-semibold transition hover:bg-ink-soft hover:-translate-y-0.5 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-400/50 focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
                 >
                   Accept
                 </button>
@@ -260,6 +275,7 @@ export function AgentDashboardPage() {
         </aside>
 
         <main className="flex-1 flex flex-col p-6 overflow-y-auto">
+          <PageContainer className="flex-1 flex flex-col h-full">
           {!openEscalation ? (
             <p className="text-ink/40">Select a conversation to view details.</p>
           ) : (
@@ -269,10 +285,7 @@ export function AgentDashboardPage() {
                   <h2 className="font-display font-semibold text-ink">Summary — {STATUS_LABELS[openEscalation.status]}</h2>
                   <div className="flex gap-2">
                     {openEscalation.status === 'active' && (
-                      <button
-                        onClick={() => markWaitingForCustomer(openEscalation.id)}
-                        className="text-xs rounded-full border border-ink/15 text-ink px-3 py-1 transition hover:border-gold-400 hover:text-gold-700"
-                      >
+                      <button onClick={() => markWaitingForCustomer(openEscalation.id)} className={SECONDARY_BUTTON}>
                         Waiting on Customer
                       </button>
                     )}
@@ -319,10 +332,10 @@ export function AgentDashboardPage() {
                   <input
                     value={noteInput}
                     onChange={(e) => setNoteInput(e.target.value)}
-                    className="flex-1 border border-ink/10 rounded-xl px-3 py-1.5 text-xs bg-paper text-ink outline-none focus:border-gold-400"
+                    className={`flex-1 ${INPUT_CLASS} mt-0 text-xs`}
                     placeholder="Add an internal note (not visible to the customer)…"
                   />
-                  <button type="submit" className="text-xs rounded-full border border-ink/15 text-ink px-3 py-1.5 transition hover:border-gold-400 hover:text-gold-700">Add</button>
+                  <button type="submit" className={SECONDARY_BUTTON}>Add</button>
                 </form>
               </div>
 
@@ -348,25 +361,22 @@ export function AgentDashboardPage() {
               )}
 
               <form onSubmit={sendMessage} className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={requestCopilotDraft}
-                  className="text-xs rounded-full border border-ink/15 text-ink px-3 py-2 transition hover:border-gold-400 hover:text-gold-700"
-                >
+                <button type="button" onClick={requestCopilotDraft} className={`${SECONDARY_BUTTON} py-2`}>
                   Ask Copilot
                 </button>
                 <input
                   value={messageInput}
                   onChange={(e) => setMessageInput(e.target.value)}
-                  className="flex-1 border border-ink/10 rounded-xl px-3 py-2 text-sm bg-paper text-ink outline-none focus:border-gold-400"
+                  className={`flex-1 ${INPUT_CLASS} mt-0`}
                   placeholder="Type a reply…"
                 />
-                <button type="submit" className="rounded-full bg-ink text-paper px-4 py-2 text-sm font-semibold transition hover:bg-ink-soft">
+                <button type="submit" className={PRIMARY_BUTTON}>
                   Send
                 </button>
               </form>
             </div>
           )}
+          </PageContainer>
         </main>
       </div>
     </div>

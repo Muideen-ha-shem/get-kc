@@ -1,9 +1,23 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { apiJson } from '../../lib/apiClient';
+import { StatusBadge, type BadgeTone } from '../../components/StatusBadge';
+import { CARD, PRIMARY_BUTTON } from '../../lib/uiClassNames';
 import { AdminGuard } from './AdminGuard';
 import { AdminLayout } from './AdminLayout';
 import type { PlatformDashboard, WorkspaceAdmin } from './adminTypes';
+
+function workspaceStatusTone(w: WorkspaceAdmin): BadgeTone {
+  if (w.deleted_at) return 'danger';
+  if (w.is_active) return 'success';
+  return 'neutral';
+}
+
+function workspaceStatusLabel(w: WorkspaceAdmin): string {
+  if (w.deleted_at) return 'Deleted';
+  if (w.archived_at) return 'Archived';
+  return w.is_active ? 'Active' : 'Suspended';
+}
 
 function AdminDashboardContent() {
   const [stats, setStats] = useState<PlatformDashboard | null>(null);
@@ -18,7 +32,7 @@ function AdminDashboardContent() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-display font-semibold text-ink">Dashboard</h1>
-        <Link to="/admin/workspaces/new" className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-paper transition hover:bg-ink-soft">
+        <Link to="/admin/workspaces/new" className={PRIMARY_BUTTON}>
           + New Workspace
         </Link>
       </div>
@@ -32,7 +46,7 @@ function AdminDashboardContent() {
             ['Human Escalations', stats.total_escalation_count],
             ['Total Agents', stats.total_agent_count],
           ].map(([label, value]) => (
-            <div key={label as string} className="bg-white border border-ink/10 rounded-2xl p-4">
+            <div key={label as string} className={`${CARD} p-4`}>
               <p className="text-xs text-ink/50 uppercase">{label}</p>
               <p className="text-2xl font-display font-semibold mt-1 text-ink">{value}</p>
             </div>
@@ -41,7 +55,7 @@ function AdminDashboardContent() {
       )}
 
       <h2 className="text-sm font-semibold text-ink/50 uppercase mb-2">Workspaces</h2>
-      <div className="bg-white border border-ink/10 rounded-2xl divide-y divide-ink/10">
+      <div className={`${CARD} divide-y divide-ink/10`}>
         {workspaces.map((w) => (
           <Link
             key={w.id}
@@ -52,13 +66,7 @@ function AdminDashboardContent() {
               <p className="text-sm font-medium text-ink">{w.name}</p>
               <p className="text-xs text-ink/50">{w.slug}</p>
             </div>
-            <span
-              className={`text-xs rounded-full px-2 py-1 ${
-                w.deleted_at ? 'bg-red-100 text-red-700' : w.is_active ? 'bg-green-100 text-green-700' : 'bg-ink/10 text-ink/60'
-              }`}
-            >
-              {w.deleted_at ? 'Deleted' : w.archived_at ? 'Archived' : w.is_active ? 'Active' : 'Suspended'}
-            </span>
+            <StatusBadge tone={workspaceStatusTone(w)}>{workspaceStatusLabel(w)}</StatusBadge>
           </Link>
         ))}
         {workspaces.length === 0 && <p className="px-4 py-3 text-sm text-ink/40">No workspaces yet.</p>}

@@ -1,6 +1,9 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { apiJson, apiUpload } from '../../lib/apiClient';
+import { Select } from '../../components/Select';
+import { StatusBadge } from '../../components/StatusBadge';
+import { CARD, INPUT_CLASS, PRIMARY_BUTTON, SECONDARY_BUTTON } from '../../lib/uiClassNames';
 import type {
   CrawlJob,
   KnowledgeCollection,
@@ -17,14 +20,6 @@ type Tab = 'dashboard' | 'sources' | 'uploads' | 'faq' | 'collections' | 'testin
 const TABS: Tab[] = ['dashboard', 'sources', 'uploads', 'faq', 'collections', 'testing', 'quality', 'jobs'];
 const SOURCE_TYPES: SourceType[] = ['website', 'pdf', 'docx', 'pptx', 'markdown', 'txt', 'faq'];
 const SCHEDULES: Schedule[] = ['manual', 'daily', 'weekly', 'monthly'];
-
-const INPUT_CLASS =
-  'w-full border border-ink/10 rounded-xl px-3 py-1.5 mt-1 bg-paper text-ink text-sm outline-none focus:border-gold-400';
-const PRIMARY_BUTTON =
-  'rounded-full bg-ink px-4 py-2 text-sm font-semibold text-paper transition hover:bg-ink-soft';
-const SECONDARY_BUTTON =
-  'rounded-full border border-ink/15 px-3 py-1 text-xs text-ink transition hover:border-gold-400 hover:text-gold-700';
-const CARD = 'bg-white border border-ink/10 rounded-2xl';
 
 function DashboardTab({ workspaceId }: { workspaceId: string }) {
   const [stats, setStats] = useState<KnowledgeDashboard | null>(null);
@@ -135,9 +130,9 @@ function SourcesTab({ workspaceId, collections }: { workspaceId: string; collect
         <form onSubmit={createSource} className={`${CARD} p-4 mb-4 flex flex-col gap-3 max-w-lg`}>
           <label className="text-sm text-ink">
             Type
-            <select value={sourceType} onChange={(e) => setSourceType(e.target.value as SourceType)} className={INPUT_CLASS}>
+            <Select value={sourceType} onChange={(e) => setSourceType(e.target.value as SourceType)} className="mt-1">
               {SOURCE_TYPES.filter((t) => t !== 'faq').map((t) => <option key={t} value={t}>{t}</option>)}
-            </select>
+            </Select>
           </label>
           <label className="text-sm text-ink">
             Name
@@ -163,18 +158,18 @@ function SourcesTab({ workspaceId, collections }: { workspaceId: string; collect
               </label>
               <label className="text-sm text-ink">
                 Schedule
-                <select value={schedule} onChange={(e) => setSchedule(e.target.value as Schedule)} className={INPUT_CLASS}>
+                <Select value={schedule} onChange={(e) => setSchedule(e.target.value as Schedule)} className="mt-1">
                   {SCHEDULES.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
+                </Select>
               </label>
             </>
           )}
           <label className="text-sm text-ink">
             Collection (optional)
-            <select value={collectionId} onChange={(e) => setCollectionId(e.target.value)} className={INPUT_CLASS}>
+            <Select value={collectionId} onChange={(e) => setCollectionId(e.target.value)} className="mt-1">
               <option value="">None</option>
               {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            </Select>
           </label>
           <label className="text-sm text-ink">
             Product tag (optional, e.g. SPIDIFY)
@@ -242,10 +237,10 @@ function UploadsTab({ workspaceId }: { workspaceId: string }) {
       <form onSubmit={submit} className={`${CARD} p-4 flex flex-col gap-3`}>
         <label className="text-sm text-ink">
           Source
-          <select value={sourceId} onChange={(e) => setSourceId(e.target.value)} required className={INPUT_CLASS}>
+          <Select value={sourceId} onChange={(e) => setSourceId(e.target.value)} required className="mt-1">
             <option value="">Select a source…</option>
             {sources.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.source_type})</option>)}
-          </select>
+          </Select>
         </label>
         <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} required className="text-sm text-ink" />
         <button type="submit" className={`${PRIMARY_BUTTON} self-start`}>Upload</button>
@@ -301,10 +296,10 @@ function FaqTab({ workspaceId, collections }: { workspaceId: string; collections
         </label>
         <label className="text-sm text-ink">
           Collection (optional)
-          <select value={collectionId} onChange={(e) => setCollectionId(e.target.value)} className={INPUT_CLASS}>
+          <Select value={collectionId} onChange={(e) => setCollectionId(e.target.value)} className="mt-1">
             <option value="">None</option>
             {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          </Select>
         </label>
         <button type="submit" className={`${PRIMARY_BUTTON} self-start`}>Add FAQ</button>
       </form>

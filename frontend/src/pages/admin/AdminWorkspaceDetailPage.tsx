@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { apiJson } from '../../lib/apiClient';
+import { ConfirmDeleteModal } from '../../components/ConfirmDeleteModal';
+import { CARD, DANGER_BUTTON, INPUT_CLASS, PRIMARY_BUTTON, SECONDARY_BUTTON } from '../../lib/uiClassNames';
 import { AdminLayout } from './AdminLayout';
 import type {
   FeatureFlag,
@@ -13,14 +15,6 @@ import type {
 type Tab = 'branding' | 'settings' | 'products' | 'flags' | 'apikey' | 'analytics';
 
 const TABS: Tab[] = ['branding', 'settings', 'products', 'flags', 'apikey', 'analytics'];
-
-const INPUT_CLASS =
-  'w-full border border-ink/10 rounded-xl px-3 py-2 mt-1 bg-paper text-ink text-sm outline-none focus:border-gold-400';
-const PRIMARY_BUTTON =
-  'rounded-full bg-ink px-4 py-2 text-sm font-semibold text-paper transition hover:bg-ink-soft';
-const SECONDARY_BUTTON =
-  'rounded-full border border-ink/15 px-3 py-2 text-xs text-ink transition hover:border-gold-400 hover:text-gold-700';
-const CARD = 'bg-white border border-ink/10 rounded-2xl';
 
 function BrandingTab({ workspace, onSaved }: { workspace: WorkspaceAdmin; onSaved: (w: WorkspaceAdmin) => void }) {
   const [logo, setLogo] = useState(workspace.logo ?? '');
@@ -255,7 +249,7 @@ function ApiKeyTab({ workspaceId }: { workspaceId: string }) {
       <p className="text-sm text-ink/60 mb-3">
         For security, the raw API key is never shown after creation — only at the moment it's generated.
       </p>
-      <button onClick={regenerate} className="rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700">
+      <button onClick={regenerate} className={DANGER_BUTTON}>
         Regenerate API Key
       </button>
       {newKey && (
@@ -316,9 +310,11 @@ function AnalyticsTab({ workspaceId }: { workspaceId: string }) {
 
 function AdminWorkspaceDetailContent() {
   const { workspaceId } = useParams<{ workspaceId: string }>();
+  const navigate = useNavigate();
   const [workspace, setWorkspace] = useState<WorkspaceAdmin | null>(null);
   const [tab, setTab] = useState<Tab>('branding');
   const [forbidden, setForbidden] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   // Lifecycle actions (suspend/archive/delete) and the Flags tab stay
   // super-admin-only even after Phase 28 widened the rest of this page to
   // workspace_admins — best-effort probe, not a hard gate (mirrors
@@ -338,10 +334,19 @@ function AdminWorkspaceDetailContent() {
       .catch(() => setIsPlatformAdmin(false));
   }, [workspaceId]);
 
-  async function lifecycleAction(action: 'suspend' | 'reactivate' | 'archive' | 'delete') {
+  async function lifecycleAction(action: 'suspend' | 'reactivate' | 'archive') {
     if (!workspaceId) return;
     const updated = await apiJson<WorkspaceAdmin>(`/admin/workspaces/${workspaceId}/${action}`, { method: 'POST' });
     setWorkspace(updated);
+  }
+
+  async function hardDeleteWorkspace() {
+    if (!workspaceId || !workspace) return;
+    await apiJson(`/admin/workspaces/${workspaceId}/hard-delete`, {
+      method: 'POST',
+      body: JSON.stringify({ confirm_name: workspace.name }),
+    });
+    navigate('/admin/workspaces');
   }
 
   if (forbidden) {
@@ -389,7 +394,10 @@ function AdminWorkspaceDetailContent() {
               <button onClick={() => lifecycleAction('archive')} className={SECONDARY_BUTTON}>
                 Archive
               </button>
-              <button onClick={() => lifecycleAction('delete')} className="rounded-full bg-red-50 text-red-700 border border-red-200 px-3 py-2 text-xs transition hover:bg-red-100">
+              <button
+                onClick={() => setDeleteModalOpen(true)}
+                className="rounded-full bg-red-50 text-red-700 border border-red-200 px-3 py-2 text-xs transition hover:bg-red-100"
+              >
                 Delete
               </button>
             </>
@@ -417,6 +425,14 @@ function AdminWorkspaceDetailContent() {
       {tab === 'flags' && <FlagsTab workspaceId={workspaceId} />}
       {tab === 'apikey' && <ApiKeyTab workspaceId={workspaceId} />}
       {tab === 'analytics' && <AnalyticsTab workspaceId={workspaceId} />}
+
+      <ConfirmDeleteModal
+        isOpen={deleteModalOpen}
+        onClose={() => setDeleteModalOpen(false)}
+        resourceLabel={workspace.name}
+        resourceType="workspace"
+        onConfirm={hardDeleteWorkspace}
+      />
     </div>
   );
 }

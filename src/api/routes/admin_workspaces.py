@@ -20,6 +20,10 @@ from ...services.admin.feature_flag_service import FeatureFlagService
 from ...services.admin.product_service import ProductService
 from ...services.admin.settings_service import SettingsService
 from ...services.admin.tenant_service import TenantService
+from ...services.admin.workspace_deletion_service import (
+    WorkspaceDeletionConfirmationError,
+    WorkspaceHardDeleteService,
+)
 from ...services.auth.auth_service import AuthUser
 from ..deps import require_super_admin, require_workspace_admin
 from ..schemas_admin import (
@@ -33,6 +37,7 @@ from ..schemas_admin import (
     WorkspaceBrandingUpdateRequest,
     WorkspaceCreateRequest,
     WorkspaceCreateResponse,
+    WorkspaceHardDeleteRequest,
     WorkspaceProductSchema,
     WorkspaceProductsUpdateRequest,
     WorkspaceSettingsSchema,
@@ -46,6 +51,7 @@ _settings_service = SettingsService()
 _feature_flag_service = FeatureFlagService()
 _product_service = ProductService()
 _audit_service = AuditService()
+_workspace_deletion_service = WorkspaceHardDeleteService()
 
 
 def _to_workspace_schema(workspace) -> WorkspaceAdminSchema:
@@ -241,6 +247,21 @@ def soft_delete_workspace(workspace_id: str, user: AuthUser = Depends(require_su
     return _to_workspace_schema(_tenant_service.soft_delete(workspace_id, user.id))
 
 
+@router.post("/admin/workspaces/{workspace_id}/hard-delete", status_code=204)
+def hard_delete_workspace(
+    workspace_id: str, body: WorkspaceHardDeleteRequest, user: AuthUser = Depends(require_super_admin)
+) -> None:
+    """Irreversibly deletes the workspace and every row it owns — gated
+    behind confirm_name matching the workspace's current name exactly.
+    Separate from the reversible soft-delete route above, which stays
+    untouched; the frontend's Delete button now calls this one instead."""
+    _get_workspace_or_404(workspace_id)
+    try:
+        _workspace_deletion_service.hard_delete(workspace_id, body.confirm_name, user.id)
+    except WorkspaceDeletionConfirmationError:
+        raise HTTPException(status_code=400, detail="Workspace name confirmation did not match.")
+
+
 @router.get("/admin/dashboard", response_model=PlatformDashboardSchema)
 def get_admin_dashboard(user: AuthUser = Depends(require_super_admin)) -> PlatformDashboardSchema:
     return PlatformDashboardSchema(**_tenant_service.platform_dashboard())
@@ -248,9 +269,18 @@ def get_admin_dashboard(user: AuthUser = Depends(require_super_admin)) -> Platfo
 
 @router.get("/admin/audit", response_model=list[AuditLogEntrySchema])
 def get_audit_log(
-    workspace_id: str | None = None, limit: int = 100, user: AuthUser = Depends(require_super_admin)
+    workspace_id: str | None = None,
+    action: str | None = None,
+    actor_auth_user_id: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    limit: int = 100,
+    user: AuthUser = Depends(require_super_admin),
 ) -> list[AuditLogEntrySchema]:
-    entries = _audit_service.list_recent(workspace_id=workspace_id, limit=limit)
+    entries = _audit_service.list_recent(
+        workspace_id=workspace_id, limit=limit, action=action, actor_auth_user_id=actor_auth_user_id,
+        start_date=start_date, end_date=end_date,
+    )
     return [
         AuditLogEntrySchema(
             id=e.id, workspace_id=e.workspace_id, actor_auth_user_id=e.actor_auth_user_id,
