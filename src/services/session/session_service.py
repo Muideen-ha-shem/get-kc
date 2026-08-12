@@ -14,7 +14,7 @@ import logging
 import uuid
 
 from ...shared.logging import get_logger
-from ..advisory.session_context import SessionContext, SessionState
+from ..advisory.session_context import PendingAction, SessionContext, SessionState
 
 logger: logging.Logger = get_logger(__name__)
 
@@ -52,3 +52,12 @@ class SessionService:
     def record_business_problem(self, session_id: str | None, problem: str) -> None:
         if session_id:
             self._context.record_business_problem(session_id, problem)
+
+    def get_pending_action(self, session_id: str | None) -> PendingAction | None:
+        if not session_id:
+            return None
+        return self._context.get_pending_action(session_id)
+
+    def set_pending_action(self, session_id: str | None, action: PendingAction | None) -> None:
+        if session_id:
+            self._context.set_pending_action(session_id, action)

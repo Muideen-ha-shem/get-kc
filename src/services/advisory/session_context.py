@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
+from typing import Literal
 
 from ...shared.cache import TTLCache
 from ...shared.logging import get_logger
@@ -33,7 +34,40 @@ logger: logging.Logger = get_logger(__name__)
 # product name that was already the topic, which is harmless).
 _PRONOUN_RE = re.compile(r"\b(it|this|that)\b", re.IGNORECASE)
 
+# "this company"/"that platform"/etc. is a DIFFERENT reference entirely —
+# it means the workspace/host itself, never the last-discussed product.
+# Live-confirmed bug: with SPIDIFY as the last-discussed product, "Tell me
+# the core values of this company" was rewritten to "...of this SPIDIFY
+# company", so the self-identity guard downstream (which only sees the
+# already-rewritten text) never recognized it as a question about the
+# workspace itself. Unlike the "harmless" tradeoff noted above, this one
+# actively produces a wrong answer, so it's excluded specifically.
+_SELF_REFERENTIAL_NOUNS: tuple[str, ...] = (
+    "company", "platform", "organization", "organisation", "business",
+)
+
 _DEFAULT_TTL_SECONDS = 1800.0  # 30 minutes of conversational inactivity
+
+
+@dataclass
+class PendingAction:
+    """A multi-turn action workflow in progress (Phase 2 — confirmed action
+    workflows). ``kind`` mirrors ``services.routing.action_intent.ActionKind``
+    plus ``"demo"``. ``missing`` is the ordered queue of fields still needed;
+    once empty, ``status`` flips to ``"awaiting_confirmation"`` and nothing
+    is written to a real backend until the user explicitly confirms — see
+    ``services.advisory.action_workflow.execute_action``, the only function
+    in this feature that performs a real write."""
+
+    kind: Literal["escalation", "appointment", "demo"]
+    status: Literal["collecting_info", "awaiting_confirmation"] = "collecting_info"
+    fields: dict[str, str] = field(default_factory=dict)
+    missing: list[str] = field(default_factory=list)
+    original_question: str = ""
+    # Appointment only — the exact slot labels shown to the customer, so the
+    # next turn's reply can be matched against real availability rather than
+    # parsed with any date/time NLU.
+    offered_slots: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -42,6 +76,7 @@ class SessionState:
     recommended_products: list[str] = field(default_factory=list)
     comparisons: list[tuple[str, ...]] = field(default_factory=list)
     current_business_problem: str | None = None
+    pending_action: PendingAction | None = None
 
     def last_product(self) -> str | None:
         return self.discussed_products[-1] if self.discussed_products else None
@@ -100,6 +135,20 @@ class SessionContext:
         state.current_business_problem = problem
         self._cache.set(session_id, state)
 
+    def get_pending_action(self, session_id: str) -> PendingAction | None:
+        """The in-progress action workflow for this session, if any. Does
+        NOT auto-create a session (unlike ``get()``) — a probe for a
+        pending action on a session that doesn't exist yet should just
+        report "none", not fabricate empty state."""
+        state = self._cache.get(session_id)
+        return state.pending_action if state is not None else None
+
+    def set_pending_action(self, session_id: str, action: PendingAction | None) -> None:
+        """Set or clear (``None``) the in-progress action workflow."""
+        state = self.get(session_id)
+        state.pending_action = action
+        self._cache.set(session_id, state)
+
     def resolve_reference(self, session_id: str, question: str) -> str:
         """Rewrite a pronoun-only reference in *question* to the last
         product discussed in this session, if any. Returns *question*
@@ -117,7 +166,16 @@ class SessionContext:
         if any(re.search(rf"\b{re.escape(p.lower())}\b", lowered) for p in PRODUCT_REGISTRY):
             return question  # already names a product explicitly
 
-        if not _PRONOUN_RE.search(question):
+        match = _PRONOUN_RE.search(question)
+        if not match:
+            return question
+
+        # "this company"/"that platform"/etc. — leave untouched so the
+        # self-identity guard downstream still sees the real phrase (see
+        # is_self_identity_question), instead of a corrupted "this SPIDIFY
+        # company"-style rewrite.
+        following = question[match.end():match.end() + 20].strip().lower()
+        if any(following.startswith(noun) for noun in _SELF_REFERENTIAL_NOUNS):
             return question
 
         last_product = state.last_product()

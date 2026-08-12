@@ -26,8 +26,9 @@ import { CompareSolutionsModal } from './components/CompareSolutionsModal';
 import { AuthModal } from './components/auth/AuthModal';
 import { AppointmentScheduler } from './components/AppointmentScheduler';
 import { MessageContent } from './components/message/MessageContent';
-import { SourceChips } from './components/message/SourceChips';
 import { MessageActions } from './components/message/MessageActions';
+import { SourceChips } from './components/message/SourceChips';
+import { isSourceRequest } from './lib/sourceRequest';
 import { detectProductHeader } from './lib/detectProduct';
 import { type Solution } from './solutions';
 import { useSolutions } from './lib/useSolutions';
@@ -1128,7 +1129,7 @@ function App() {
                         message.content
                       )}
                       {message.isTyping ? <span className="ml-1 animate-pulse">█</span> : null}
-                      {message.sender === 'assistant' && !message.isTyping && message.sources && message.sources.length > 0 ? (
+                      {message.sender === 'assistant' && !message.isTyping && message.sources && message.sources.length > 0 && isSourceRequest(message.question) ? (
                         <SourceChips sources={message.sources} />
                       ) : null}
                       {message.sender === 'assistant' && !message.isTyping && message.question ? (

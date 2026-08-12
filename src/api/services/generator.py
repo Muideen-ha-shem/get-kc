@@ -4,6 +4,8 @@ from typing import Any
 from dotenv import load_dotenv
 from groq import Groq
 
+from ...shared.customer_copy import GENERATION_FAILED_FALLBACK
+
 load_dotenv()
 
 
@@ -16,7 +18,9 @@ def generate_answer(question: str, context_text: str, sources: list[str]) -> dic
         "You are a strict, helpful corporate assistant. Answer the question using ONLY the provided context blocks. "
         "Look for explicit lists, headers, or bullet points in the context when answering. "
         "If a specific item or list is named directly in the text (such as core values), list them exactly as they appear. "
-        "If the answer cannot be found cleanly in the context, say 'I cannot find that in the knowledge base.'\n\n"
+        "You are talking directly to a customer, not a developer — never describe your own process or say things "
+        "like 'the context', 'the evidence', or 'the knowledge base'. If the answer cannot be found cleanly in the "
+        "context, acknowledge what the customer is asking and offer to help them further instead of just refusing.\n\n"
         f"Context:\n{context_text}"
     )
 
@@ -34,6 +38,6 @@ def generate_answer(question: str, context_text: str, sources: list[str]) -> dic
 
     answer = completion.choices[0].message.content or ""
     return {
-        "answer": answer.strip() or "I couldn’t generate a grounded response from the available context.",
+        "answer": answer.strip() or GENERATION_FAILED_FALLBACK,
         "sources": sources,
     }

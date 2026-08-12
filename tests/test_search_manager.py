@@ -1420,3 +1420,75 @@ class TestSearchManagerSelfIdentityGuard:
         )
 
         mock_search.search.assert_called()
+
+
+class TestSearchManagerActionIntentGuard:
+    """Live-confirmed bug: "Today 1:45pm WAT, live chat" had zero KB
+    evidence and fell straight through to a live web search, returning
+    unrelated timezone/city content instead of being recognized as a
+    live-chat/escalation follow-up."""
+
+    def test_confidence_fallback_skipped_for_action_request(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+
+        mock_kb = _make_mock_knowledge_service(matches=[])
+        mock_search = _make_mock_search_service()
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=mock_search,
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+        )
+
+        manager.retrieve(
+            "Today 1:45pm WAT, live chat",
+            decision=RoutingDecision(knowledge=True, web=False),
+        )
+
+        mock_search.search.assert_not_called()
+
+    def test_enterprise_fallback_skipped_for_action_request(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+
+        mock_kb = _make_mock_knowledge_service(matches=[])
+        mock_search = _make_mock_search_service()
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=mock_search,
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+        )
+
+        manager.retrieve(
+            "Can you arrange a quick chat with a specialist?",
+            decision=RoutingDecision(knowledge=True, web=True),
+        )
+
+        # Only the initial `if actual_decision.web:` call — the
+        # enterprise-fallback's extra call is suppressed by the guard.
+        assert mock_search.search.call_count == 1
+
+    def test_ordinary_question_still_falls_back_normally(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+
+        mock_kb = _make_mock_knowledge_service(matches=[])
+        mock_search = _make_mock_search_service()
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=mock_search,
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+        )
+
+        manager.retrieve(
+            "What is the latest news about identity verification?",
+            decision=RoutingDecision(knowledge=True, web=False),
+        )
+
+        mock_search.search.assert_called()

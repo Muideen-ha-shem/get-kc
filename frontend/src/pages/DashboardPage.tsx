@@ -18,8 +18,9 @@ import {
 } from 'lucide-react';
 import { HavisIQMark } from '../components/HavisIQMark';
 import { MessageContent } from '../components/message/MessageContent';
-import { SourceChips } from '../components/message/SourceChips';
 import { MessageActions } from '../components/message/MessageActions';
+import { SourceChips } from '../components/message/SourceChips';
+import { isSourceRequest } from '../lib/sourceRequest';
 import { CompareSolutionsModal } from '../components/CompareSolutionsModal';
 import { DemoRequestModal } from '../components/DemoRequestModal';
 import { ConversationStartState } from '../components/ConversationStartState';
@@ -600,10 +601,10 @@ export function DashboardPage() {
                           ) : (
                             m.content
                           )}
+                          {m.role === 'assistant' && m.citations.length > 0 && isSourceRequest(precedingQuestion) ? (
+                            <div className="mt-1"><SourceChips sources={m.citations} /></div>
+                          ) : null}
                         </div>
-                        {m.role === 'assistant' && m.citations.length > 0 ? (
-                          <div className="mt-1"><SourceChips sources={m.citations} /></div>
-                        ) : null}
                         {m.role === 'assistant' ? (
                           <div className="flex justify-start">
                             <MessageActions

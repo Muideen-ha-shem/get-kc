@@ -22,6 +22,11 @@ _HUMAN_REQUEST_KEYWORDS: tuple[str, ...] = (
     "technical support",
     "customer support",
     "escalate",
+    "specialist",
+    "arrange a chat",
+    "arrange a call",
+    "live chat",
+    "quick chat",
 )
 
 
