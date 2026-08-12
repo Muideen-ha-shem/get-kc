@@ -1,5 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { apiJson } from '../../lib/apiClient';
+import { Select } from '../../components/Select';
+import { CARD, INPUT_CLASS, SECONDARY_BUTTON } from '../../lib/uiClassNames';
 import { AdminGuard } from './AdminGuard';
 import { AdminLayout } from './AdminLayout';
 import type { AdminUser } from './adminTypes';
@@ -63,24 +65,24 @@ function AdminUsersContent() {
 
       {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3 mb-4">{error}</p>}
 
-      <div className="bg-white border border-ink/10 rounded-2xl p-3 mb-4 flex gap-2 items-end">
+      <div className={`${CARD} p-3 mb-4 flex gap-2 items-end`}>
         <label className="text-xs text-ink">
           Workspace id (for agent assignment)
-          <input value={roleWorkspaceId} onChange={(e) => setRoleWorkspaceId(e.target.value)} className="block border border-ink/10 rounded-xl px-3 py-1.5 mt-1 text-sm bg-paper text-ink outline-none focus:border-gold-400" />
+          <input value={roleWorkspaceId} onChange={(e) => setRoleWorkspaceId(e.target.value)} className={INPUT_CLASS} />
         </label>
-        <label className="text-xs text-ink">
+        <label className="text-xs text-ink w-56">
           Department
-          <select value={roleDepartment} onChange={(e) => setRoleDepartment(e.target.value)} className="block border border-ink/10 rounded-xl px-3 py-1.5 mt-1 text-sm bg-paper text-ink outline-none focus:border-gold-400">
+          <Select value={roleDepartment} onChange={(e) => setRoleDepartment(e.target.value)} className="mt-1">
             {['Support', 'Sales', 'Solution Architect', 'Customer Success', 'General', 'Implementation', 'Training', 'Finance'].map(
               (d) => (
                 <option key={d} value={d}>{d}</option>
               ),
             )}
-          </select>
+          </Select>
         </label>
       </div>
 
-      <div className="bg-white border border-ink/10 rounded-2xl divide-y divide-ink/10">
+      <div className={`${CARD} divide-y divide-ink/10`}>
         {users.map((u) => (
           <div key={u.id} className="flex items-center justify-between px-4 py-3">
             <div>
@@ -88,9 +90,9 @@ function AdminUsersContent() {
               <p className="text-xs text-ink/50">{u.email}</p>
             </div>
             <div className="flex gap-2">
-              <button onClick={() => suspend(u.id)} className="rounded-full border border-ink/15 text-ink px-3 py-1 text-xs transition hover:border-gold-400 hover:text-gold-700">Suspend</button>
+              <button onClick={() => suspend(u.id)} className={SECONDARY_BUTTON}>Suspend</button>
               <button onClick={() => reactivate(u.id)} className="rounded-full bg-green-50 text-green-700 border border-green-200 px-3 py-1 text-xs transition hover:bg-green-100">Reactivate</button>
-              <button onClick={() => resetPassword(u.id, u.email ?? '')} className="rounded-full border border-ink/15 text-ink px-3 py-1 text-xs transition hover:border-gold-400 hover:text-gold-700">Reset Password</button>
+              <button onClick={() => resetPassword(u.id, u.email ?? '')} className={SECONDARY_BUTTON}>Reset Password</button>
               <form onSubmit={(e) => assignAgent(e, u.id, u.email, u.full_name)} className="inline">
                 <button type="submit" className="rounded-full bg-gold-50 text-gold-700 border border-gold-200 px-3 py-1 text-xs transition hover:bg-gold-100">Make Agent</button>
               </form>

@@ -1,9 +1,23 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { apiJson } from '../../lib/apiClient';
+import { StatusBadge, type BadgeTone } from '../../components/StatusBadge';
+import { PRIMARY_BUTTON } from '../../lib/uiClassNames';
 import { AdminGuard } from './AdminGuard';
 import { AdminLayout } from './AdminLayout';
 import type { WorkspaceAdmin } from './adminTypes';
+
+function workspaceStatusTone(w: WorkspaceAdmin): BadgeTone {
+  if (w.deleted_at) return 'danger';
+  if (w.is_active) return 'success';
+  return 'neutral';
+}
+
+function workspaceStatusLabel(w: WorkspaceAdmin): string {
+  if (w.deleted_at) return 'Deleted';
+  if (w.archived_at) return 'Archived';
+  return w.is_active ? 'Active' : 'Suspended';
+}
 
 function AdminWorkspacesContent() {
   const [workspaces, setWorkspaces] = useState<WorkspaceAdmin[]>([]);
@@ -16,7 +30,7 @@ function AdminWorkspacesContent() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-display font-semibold text-ink">Workspaces</h1>
-        <Link to="/admin/workspaces/new" className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-paper transition hover:bg-ink-soft">
+        <Link to="/admin/workspaces/new" className={PRIMARY_BUTTON}>
           + New Workspace
         </Link>
       </div>
@@ -41,8 +55,8 @@ function AdminWorkspacesContent() {
               </td>
               <td className="px-4 py-2 text-ink/50">{w.slug}</td>
               <td className="px-4 py-2 text-ink/50">{w.host ?? '—'}</td>
-              <td className="px-4 py-2 text-ink">
-                {w.deleted_at ? 'Deleted' : w.archived_at ? 'Archived' : w.is_active ? 'Active' : 'Suspended'}
+              <td className="px-4 py-2">
+                <StatusBadge tone={workspaceStatusTone(w)}>{workspaceStatusLabel(w)}</StatusBadge>
               </td>
               <td className="px-4 py-2 text-ink/50">{w.created_at?.slice(0, 10) ?? '—'}</td>
             </tr>

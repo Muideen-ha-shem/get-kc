@@ -45,6 +45,13 @@ class WorkspaceCreateResponse(BaseModel):
     api_key: str
 
 
+class WorkspaceHardDeleteRequest(BaseModel):
+    """confirm_name must exactly match the workspace's current name — the
+    type-to-confirm gate in front of an irreversible hard delete."""
+
+    confirm_name: str = Field(..., min_length=1)
+
+
 class WorkspaceBrandingUpdateRequest(BaseModel):
     logo: str | None = None
     primary_color: str | None = None

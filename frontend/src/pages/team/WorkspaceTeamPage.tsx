@@ -1,14 +1,17 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { apiJson } from '../../lib/apiClient';
+import { Select } from '../../components/Select';
+import { StatusBadge, type BadgeTone } from '../../components/StatusBadge';
+import { INPUT_CLASS, PRIMARY_BUTTON } from '../../lib/uiClassNames';
 import type { Department, InvitationRole, WorkspaceInvitation } from './teamTypes';
 
 const DEPARTMENTS: Department[] = ['Support', 'Sales', 'Solution Architect', 'Customer Success', 'General'];
 
-const STATUS_STYLES: Record<string, string> = {
-  pending: 'bg-gold-100 text-gold-700',
-  accepted: 'bg-green-100 text-green-700',
-  revoked: 'bg-ink/10 text-ink/50',
+const STATUS_TONE: Record<string, BadgeTone> = {
+  pending: 'warning',
+  accepted: 'success',
+  revoked: 'neutral',
 };
 
 function WorkspaceTeamContent({ workspaceId }: { workspaceId: string }) {
@@ -83,37 +86,29 @@ function WorkspaceTeamContent({ workspaceId }: { workspaceId: string }) {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            className="w-full border border-ink/10 rounded-xl px-3 py-1.5 mt-1 bg-paper text-ink text-sm outline-none focus:border-gold-400"
+            className={INPUT_CLASS}
           />
         </label>
         <label className="text-sm text-ink">
           Role
-          <select
-            value={role}
-            onChange={(e) => setRole(e.target.value as InvitationRole)}
-            className="w-full border border-ink/10 rounded-xl px-3 py-1.5 mt-1 bg-paper text-ink text-sm outline-none focus:border-gold-400"
-          >
+          <Select value={role} onChange={(e) => setRole(e.target.value as InvitationRole)} className="mt-1">
             <option value="agent">Support Agent</option>
             <option value="workspace_admin">Workspace Admin</option>
-          </select>
+          </Select>
         </label>
         {role === 'agent' && (
           <label className="text-sm text-ink">
             Department
-            <select
-              value={department}
-              onChange={(e) => setDepartment(e.target.value as Department)}
-              className="w-full border border-ink/10 rounded-xl px-3 py-1.5 mt-1 bg-paper text-ink text-sm outline-none focus:border-gold-400"
-            >
+            <Select value={department} onChange={(e) => setDepartment(e.target.value as Department)} className="mt-1">
               {DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
-            </select>
+            </Select>
           </label>
         )}
         {errorMessage && <p className="text-sm text-red-600">{errorMessage}</p>}
         <button
           type="submit"
           disabled={submitting}
-          className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-paper transition hover:bg-ink-soft self-start disabled:opacity-50"
+          className={`${PRIMARY_BUTTON} self-start disabled:opacity-50`}
         >
           {submitting ? 'Sending...' : 'Send invite'}
         </button>
@@ -129,9 +124,7 @@ function WorkspaceTeamContent({ workspaceId }: { workspaceId: string }) {
               </p>
             </div>
             <div className="flex items-center gap-3">
-              <span className={`text-xs rounded-full px-2 py-1 ${STATUS_STYLES[i.status] ?? ''}`}>
-                {i.status}
-              </span>
+              <StatusBadge tone={STATUS_TONE[i.status] ?? 'neutral'}>{i.status}</StatusBadge>
               {i.status === 'pending' && (
                 <button onClick={() => revoke(i.id)} className="rounded-full bg-red-50 text-red-700 border border-red-200 px-3 py-1 text-xs transition hover:bg-red-100">
                   Revoke

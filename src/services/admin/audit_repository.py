@@ -30,9 +30,25 @@ class AuditRepository:
         response = self._client.table(_TABLE).insert(payload).execute()
         return AuditLogEntry.from_row(response.data[0])
 
-    def list_recent(self, workspace_id: str | None, limit: int) -> list[AuditLogEntry]:
+    def list_recent(
+        self,
+        workspace_id: str | None,
+        limit: int,
+        action: str | None = None,
+        actor_auth_user_id: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> list[AuditLogEntry]:
         query = self._client.table(_TABLE).select("*")
         if workspace_id is not None:
             query = query.eq("workspace_id", workspace_id)
+        if action is not None:
+            query = query.eq("action", action)
+        if actor_auth_user_id is not None:
+            query = query.eq("actor_auth_user_id", actor_auth_user_id)
+        if start_date is not None:
+            query = query.gte("created_at", start_date)
+        if end_date is not None:
+            query = query.lte("created_at", end_date)
         response = query.order("created_at", desc=True).limit(limit).execute()
         return [AuditLogEntry.from_row(row) for row in response.data]

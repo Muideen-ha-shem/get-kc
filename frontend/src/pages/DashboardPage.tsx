@@ -6,6 +6,8 @@ import {
   GitCompare,
   LogOut,
   MessageSquarePlus,
+  PanelLeft,
+  PanelLeftClose,
   Pencil,
   Search,
   SendHorizonal,
@@ -19,11 +21,14 @@ import { SourceChips } from '../components/message/SourceChips';
 import { MessageActions } from '../components/message/MessageActions';
 import { CompareSolutionsModal } from '../components/CompareSolutionsModal';
 import { DemoRequestModal } from '../components/DemoRequestModal';
+import { ConversationStartState } from '../components/ConversationStartState';
+import { PageContainer } from '../components/PageContainer';
 import { useAuth } from '../lib/authContext';
 import { apiJson } from '../lib/apiClient';
 import { useSolutions } from '../lib/useSolutions';
 import { getSessionId } from '../lib/sessionId';
 import { downloadMarkdown, messagesToMarkdown } from '../lib/exportConversation';
+import { useSidebarCollapse } from '../lib/useSidebarCollapse';
 import type { Solution } from '../solutions';
 
 type ConversationSummary = {
@@ -75,6 +80,7 @@ export function DashboardPage() {
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   const [isSupportAgent, setIsSupportAgent] = useState(false);
   const [adminWorkspaces, setAdminWorkspaces] = useState<{ id: string; slug: string; name: string }[]>([]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useSidebarCollapse('havisiq-dashboard-sidebar-collapsed');
 
   const loadConversations = (search?: string) => {
     setIsLoadingList(true);
@@ -123,7 +129,7 @@ export function DashboardPage() {
     setSection('conversations');
   };
 
-  const startNewConversation = async () => {
+  const startNewConversation = async (initialMessage?: string) => {
     const row = await apiJson<ConversationSummary>('/conversations', {
       method: 'POST',
       body: JSON.stringify({}),
@@ -131,6 +137,9 @@ export function DashboardPage() {
     setConversations((prev) => [row, ...prev]);
     setSelected({ conversation: row, messages: [] });
     setSection('conversations');
+    if (initialMessage && initialMessage.trim()) {
+      await sendMessage(row.id, initialMessage.trim());
+    }
   };
 
   const deleteConversation = async (id: string) => {
@@ -151,30 +160,34 @@ export function DashboardPage() {
     setSelected((prev) => (prev && prev.conversation.id === id ? { ...prev, conversation: row } : prev));
   };
 
-  const handleSend = async (event: FormEvent) => {
-    event.preventDefault();
-    const trimmed = input.trim();
-    if (!trimmed || isSending || !selected) return;
+  // Shared by the bottom "continue this conversation" form and the
+  // centered start-state input (ConversationStartState) — both funnel
+  // through the same /chat call and optimistic-update logic, keyed by an
+  // explicit conversationId rather than reading `selected` from closure,
+  // since the start-state flow calls this immediately after creating a
+  // brand-new conversation, before that setSelected() has flushed.
+  const sendMessage = async (conversationId: string, text: string) => {
     setIsSending(true);
-    setInput('');
 
     const optimisticUser: ConversationMessage = {
       id: `local-${Date.now()}`,
       role: 'user',
-      content: trimmed,
+      content: text,
       citations: [],
       metadata: {},
       created_at: null,
     };
-    setSelected((prev) => (prev ? { ...prev, messages: [...prev.messages, optimisticUser] } : prev));
+    setSelected((prev) =>
+      prev && prev.conversation.id === conversationId ? { ...prev, messages: [...prev.messages, optimisticUser] } : prev
+    );
 
     try {
       const response = await apiJson<{ answer: string; sources: string[]; session_id: string | null }>('/chat', {
         method: 'POST',
         body: JSON.stringify({
-          message: trimmed,
+          message: text,
           session_id: getSessionId(),
-          conversation_id: selected.conversation.id,
+          conversation_id: conversationId,
         }),
       });
 
@@ -186,13 +199,23 @@ export function DashboardPage() {
         metadata: {},
         created_at: null,
       };
-      setSelected((prev) => (prev ? { ...prev, messages: [...prev.messages, assistantMessage] } : prev));
+      setSelected((prev) =>
+        prev && prev.conversation.id === conversationId ? { ...prev, messages: [...prev.messages, assistantMessage] } : prev
+      );
       setConversations((prev) =>
-        prev.map((c) => (c.id === selected.conversation.id ? { ...c, updated_at: new Date().toISOString() } : c))
+        prev.map((c) => (c.id === conversationId ? { ...c, updated_at: new Date().toISOString() } : c))
       );
     } finally {
       setIsSending(false);
     }
+  };
+
+  const handleSend = async (event: FormEvent) => {
+    event.preventDefault();
+    const trimmed = input.trim();
+    if (!trimmed || isSending || !selected) return;
+    setInput('');
+    await sendMessage(selected.conversation.id, trimmed);
   };
 
   const handleExport = () => {
@@ -205,28 +228,50 @@ export function DashboardPage() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-paper text-ink">
-      <aside className="sticky top-0 flex h-screen w-72 shrink-0 flex-col gap-6 border-r border-ink/10 bg-white/70 px-5 py-6">
-        <div className="flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-3">
+    <div className="relative flex h-screen overflow-hidden bg-paper text-ink">
+      {sidebarCollapsed ? (
+        <button
+          onClick={() => setSidebarCollapsed(false)}
+          className="absolute left-3 top-3 z-10 rounded-full border border-ink/10 bg-white p-2 text-ink/60 shadow-sm transition hover:text-ink"
+          aria-label="Show sidebar"
+        >
+          <PanelLeft size={16} />
+        </button>
+      ) : null}
+      <aside
+        className={`sticky top-0 flex h-screen shrink-0 flex-col gap-6 overflow-hidden border-r border-ink/10 bg-white/70 py-6 transition-[width] duration-200 ${
+          sidebarCollapsed ? 'w-0 px-0 border-r-0' : 'w-72 px-5'
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <Link to="/" className="flex items-center gap-3 min-w-0">
             <HavisIQMark size={36} />
-            <div>
+            <div className="min-w-0">
               <p className="font-display text-base tracking-tight">HavisIQ</p>
               <p className="text-[10px] uppercase tracking-[0.28em] text-ink/50">Customer Dashboard</p>
             </div>
           </Link>
-          <button
-            onClick={() => setSection('notifications')}
-            className="relative rounded-full p-1.5 text-ink/50 transition hover:bg-paper hover:text-ink"
-            aria-label={unreadCount > 0 ? `${unreadCount} unread notifications` : 'Notifications'}
-          >
-            <Bell size={18} />
-            {unreadCount > 0 ? (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-gold-500 px-1 text-[9px] font-bold text-ink">
-                {unreadCount > 9 ? '9+' : unreadCount}
-              </span>
-            ) : null}
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              onClick={() => setSection('notifications')}
+              className="relative rounded-full p-1.5 text-ink/50 transition hover:bg-paper hover:text-ink"
+              aria-label={unreadCount > 0 ? `${unreadCount} unread notifications` : 'Notifications'}
+            >
+              <Bell size={18} />
+              {unreadCount > 0 ? (
+                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-gold-500 px-1 text-[9px] font-bold text-ink">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              ) : null}
+            </button>
+            <button
+              onClick={() => setSidebarCollapsed(true)}
+              className="rounded-full p-1.5 text-ink/50 transition hover:bg-paper hover:text-ink"
+              aria-label="Hide sidebar"
+            >
+              <PanelLeftClose size={18} />
+            </button>
+          </div>
         </div>
 
         <nav className="flex flex-col gap-1 text-sm font-medium text-ink/70">
@@ -363,6 +408,7 @@ export function DashboardPage() {
       </aside>
 
       <main className="flex-1 overflow-y-auto p-8">
+        <PageContainer className={section === 'conversations' ? 'flex h-full flex-col' : ''}>
         {section === 'conversations' ? (
           selected ? (
             <div className="flex h-full flex-col">
@@ -433,7 +479,13 @@ export function DashboardPage() {
               </form>
             </div>
           ) : (
-            <EmptyState icon={<MessageSquarePlus size={28} />} title="Select or start a conversation" />
+            <ConversationStartState
+              userName={user?.full_name}
+              isSending={isSending}
+              onSubmit={(message) => startNewConversation(message)}
+              onOpenCompare={() => setCompareModal({ open: true })}
+              onGoToSavedRecommendations={() => setSection('recommendations')}
+            />
           )
         ) : null}
 
@@ -448,6 +500,7 @@ export function DashboardPage() {
         {section === 'notifications' ? (
           <NotificationsSection onUnreadCountChange={setUnreadCount} />
         ) : null}
+        </PageContainer>
       </main>
 
       <CompareSolutionsModal

@@ -276,3 +276,20 @@ class TestDashboardAndAudit:
 
         assert response.status_code == 200
         assert response.json()[0]["action"] == "workspace.created"
+
+    def test_audit_log_listing_threads_filter_params(self, client):
+        _authenticate_as_admin()
+        with patch("src.api.routes.admin_workspaces._audit_service.list_recent", return_value=[]) as mock_list:
+            response = client.get(
+                "/admin/audit",
+                params={
+                    "workspace_id": "w1", "action": "workspace.archived", "actor_auth_user_id": "admin-1",
+                    "start_date": "2026-01-01", "end_date": "2026-01-31", "limit": 50,
+                },
+            )
+
+        assert response.status_code == 200
+        mock_list.assert_called_once_with(
+            workspace_id="w1", limit=50, action="workspace.archived", actor_auth_user_id="admin-1",
+            start_date="2026-01-01", end_date="2026-01-31",
+        )
