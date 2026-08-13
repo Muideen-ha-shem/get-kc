@@ -77,6 +77,7 @@ type CustomerEscalation = {
   resolved_at: string | null;
   closed_at: string | null;
   messages?: CustomerEscalationMessage[] | null;
+  handoff_recap: string | null;
 };
 
 const ESCALATION_STATUS_TONE: Record<EscalationStatus, BadgeTone> = {
@@ -273,6 +274,12 @@ export function DashboardPage() {
       prev && prev.conversation.id === conversationId ? { ...prev, messages: [...prev.messages, optimisticUser] } : prev
     );
 
+    // AI Rejoin: a handoff_recap set by an agent's "Hand back to AI" is
+    // consumed exactly once, on this next message, then cleared locally —
+    // never resent on subsequent turns of the same conversation.
+    const handoffRecap =
+      escalation?.conversation_id === conversationId ? escalation.handoff_recap ?? undefined : undefined;
+
     try {
       const response = await apiJson<{
         answer: string;
@@ -285,8 +292,12 @@ export function DashboardPage() {
           message: text,
           session_id: getSessionId(),
           conversation_id: conversationId,
+          handoff_context: handoffRecap,
         }),
       });
+      if (handoffRecap) {
+        setEscalation((prev) => (prev ? { ...prev, handoff_recap: null } : prev));
+      }
 
       const assistantMessage: ConversationMessage = {
         id: `local-${Date.now() + 1}`,
@@ -560,7 +571,7 @@ export function DashboardPage() {
               <div className="mb-4 flex items-center justify-between gap-3">
                 <h2 className="font-display text-xl">{selected.conversation.title}</h2>
                 <div className="flex shrink-0 items-center gap-2">
-                  {!escalation || escalation.status === 'resolved' || escalation.status === 'closed' ? (
+                  {!isSupportAgent && (!escalation || escalation.status === 'resolved' || escalation.status === 'closed') ? (
                     <button
                       onClick={() => requestHumanEscalation()}
                       disabled={isEscalating}
@@ -614,7 +625,7 @@ export function DashboardPage() {
                             />
                           </div>
                         ) : null}
-                        {m.role === 'assistant' && m.escalationSuggested && !escalation ? (
+                        {m.role === 'assistant' && m.escalationSuggested && !escalation && !isSupportAgent ? (
                           <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-gold-200 bg-gold-50 px-3 py-2 text-xs text-gold-700">
                             <span>Would you like to talk to a human about this?</span>
                             <button

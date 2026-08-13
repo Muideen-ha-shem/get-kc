@@ -151,7 +151,12 @@ def build_confirmation_summary(pending: PendingAction) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _match_product(text: str) -> str | None:
+def match_product(text: str) -> str | None:
+    """Whole-word/alias match against PRODUCT_REGISTRY. Public — also used
+    by ChatOrchestrator to check whether the message that *triggered* a
+    demo request already names a product explicitly, which must take
+    priority over a stale ``session_state.last_product()`` (see the
+    live-confirmed bug in ``_start_pending_action``'s docstring)."""
     lowered = text.lower()
     for name, info in PRODUCT_REGISTRY.items():
         if name.lower() in lowered:
@@ -192,7 +197,7 @@ def collect_field(
         pending.fields["slot_label"], pending.fields["date"], pending.fields["time"] = matched
 
     elif field == "product":
-        product = _match_product(cleaned)
+        product = match_product(cleaned)
         if product is None:
             return pending, "I didn't recognize that solution — which HavisIQ product would you like a demo of?"
         pending.fields["product"] = product

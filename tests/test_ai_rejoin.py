@@ -144,7 +144,10 @@ class TestRejoinAiRoute:
              ), patch(
                  "src.api.routes.escalation._escalation_repository.set_ai_engaged",
                  return_value=_escalation(status="resolved", ai_engaged=True),
-             ) as mock_set_ai_engaged:
+             ) as mock_set_ai_engaged, patch(
+                 "src.api.routes.escalation._escalation_repository.merge_summary",
+                 return_value=_escalation(status="resolved", ai_engaged=True),
+             ):
             response = client.post("/agent/escalations/e1/rejoin-ai")
 
         assert response.status_code == 200

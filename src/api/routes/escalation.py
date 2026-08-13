@@ -37,6 +37,7 @@ from ..schemas import (
     CustomerEscalationSchema,
     CustomerTimelineSchema,
     EscalationActionRequest,
+    EscalationCloseRequest,
     EscalationCreateRequest,
     EscalationMessageCreateRequest,
     EscalationMessageSchema,
@@ -152,6 +153,7 @@ def _to_customer_schema(escalation, messages=None) -> CustomerEscalationSchema:
             if messages is not None
             else None
         ),
+        handoff_recap=(escalation.summary or {}).get("handoff_recap"),
     )
 
 
@@ -252,7 +254,31 @@ def resolve_escalation(
     if escalation.status not in ("assigned", "active", "waiting_for_customer"):
         raise HTTPException(status_code=409, detail="Escalation is not in an active/assigned state")
     updated = _escalation_repository.mark_resolved(request.escalation_id)
+    # Best-effort: a drafted summary is a convenience for the Review ->
+    # Close step below, never a precondition for resolving — a generation
+    # failure must not block the agent's Resolve action.
+    resolution = _escalation_service.generate_resolution_summary(request.escalation_id)
+    if resolution:
+        updated = _escalation_repository.merge_summary(request.escalation_id, {"resolution": resolution})
     return _to_schema(updated)
+
+
+@router.post("/agent/escalations/{escalation_id}/close", response_model=EscalationSchema)
+def close_escalation(
+    escalation_id: str,
+    request: EscalationCloseRequest,
+    agent: SupportAgent = Depends(get_current_agent),
+) -> EscalationSchema:
+    """Finalizes the AI-drafted (and possibly agent-edited) resolution
+    summary and genuinely closes the ticket — the first route to ever call
+    EscalationRepository.mark_closed(), making status="closed" reachable."""
+    escalation = _get_escalation_or_404(escalation_id, agent.workspace_id)
+    if escalation.status != "resolved":
+        raise HTTPException(status_code=409, detail="Escalation must be resolved before it can be closed")
+    if request.resolution_summary is not None:
+        _escalation_repository.merge_summary(escalation_id, {"resolution": request.resolution_summary})
+    closed = _escalation_repository.mark_closed(escalation_id)
+    return _to_schema(closed)
 
 
 @router.post("/agent/escalations/{escalation_id}/wait-for-customer", response_model=EscalationSchema)
@@ -300,9 +326,16 @@ def send_escalation_message(
         # authenticated customer who knew/guessed an escalation_id in their
         # own workspace could post into someone else's thread (IDOR).
         _require_customer_owned_escalation(escalation, user, access_token)
+    elif agent.id != escalation.assigned_agent_id:
+        # Live-confirmed gap: an agent who is NOT the assigned agent for
+        # this escalation (unclaimed, or claimed by someone else) used to
+        # fall through and get silently mislabeled sender_type="customer"
+        # instead of being rejected — a different-agent-in-same-workspace
+        # authorization gap, not just a cosmetic mislabel. An agent must
+        # claim an escalation via POST /agent/accept before posting to it.
+        raise HTTPException(status_code=403, detail="You are not the assigned agent for this escalation")
 
-    is_assigned_agent = agent is not None and agent.id == escalation.assigned_agent_id
-    sender_type = "agent" if is_assigned_agent else "customer"
+    sender_type = "agent" if agent is not None else "customer"
 
     # Check-then-write: must run before add_message so "first message"
     # detection sees an empty history.
@@ -375,6 +408,12 @@ def rejoin_ai(
 
     resolved = _escalation_repository.mark_resolved(escalation_id)
     resolved = _escalation_repository.set_ai_engaged(escalation_id, True)
+    # Persisted (not just returned) so the customer's OWN next poll of this
+    # escalation (GET /chat/escalations/{id}) can pick it up and thread it
+    # into their next /chat call as handoff_context — the agent's response
+    # here lives only in the agent's own browser session, which the
+    # customer never sees.
+    resolved = _escalation_repository.merge_summary(escalation_id, {"handoff_recap": handoff_recap})
     return RejoinAiResponseSchema(escalation=_to_schema(resolved), handoff_recap=handoff_recap)
 
 

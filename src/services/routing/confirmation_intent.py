@@ -31,6 +31,21 @@ _NO_EXACT: frozenset[str] = frozenset({"no", "nope", "not now"})
 
 _CANCEL_PHRASES: tuple[str, ...] = ("cancel", "never mind", "nevermind")
 
+# Live-confirmed bug: once a pending action is cleared (the demo request
+# above was already submitted), "Cancel that" has nothing left to cancel —
+# `detect_confirmation` is never even consulted (no pending action for
+# ChatOrchestrator's Step 0.6 to gate it on), so the bare phrase fell
+# straight through to ordinary RAG, which hallucinated an unrelated
+# "cancel your PayCheq subscription" answer. `detect_bare_cancellation`
+# closes that gap WITHOUT a pending action — but deliberately exact-match,
+# not substring, so a real product question like "How do I cancel my
+# PayCheq subscription?" still reaches RAG (which may have a real answer)
+# instead of being swallowed by this.
+_BARE_CANCEL_PHRASES: frozenset[str] = frozenset({
+    "cancel", "cancel that", "cancel this", "actually cancel", "stop",
+    "stop that", "never mind", "nevermind",
+})
+
 
 def detect_confirmation(question: str | None) -> Literal["yes", "no"] | None:
     """Classify *question* as a confirmation ``"yes"``, ``"no"``, or
@@ -46,3 +61,16 @@ def detect_confirmation(question: str | None) -> Literal["yes", "no"] | None:
     if any(phrase in cleaned for phrase in _CANCEL_PHRASES):
         return "no"
     return None
+
+
+def detect_bare_cancellation(question: str | None) -> bool:
+    """True for a short cancel/stop phrase with no pending action to
+    attach it to — used by ChatOrchestrator to respond honestly ("nothing
+    active to cancel") instead of letting it reach RAG. Exact-match on the
+    whole trimmed message, unlike ``detect_confirmation``'s substring
+    match, precisely so a real, longer product question isn't swallowed.
+    """
+    if not question:
+        return False
+    cleaned = question.strip().lower().rstrip("!.")
+    return cleaned in _BARE_CANCEL_PHRASES

@@ -19,7 +19,9 @@ from ...services.admin.audit_service import AuditService
 from ...services.admin.feature_flag_service import FeatureFlagService
 from ...services.admin.product_service import ProductService
 from ...services.admin.settings_service import SettingsService
+from ...services.admin.tenant_analytics_service import TenantAnalyticsService
 from ...services.admin.tenant_service import TenantService
+from ...services.admin.workspace_analyst import answer_question
 from ...services.admin.workspace_deletion_service import (
     WorkspaceDeletionConfirmationError,
     WorkspaceHardDeleteService,
@@ -34,12 +36,15 @@ from ..schemas_admin import (
     PlatformDashboardSchema,
     WorkspaceAdminSchema,
     WorkspaceAnalyticsSchema,
+    WorkspaceAskRequest,
+    WorkspaceAskResponseSchema,
     WorkspaceBrandingUpdateRequest,
     WorkspaceCreateRequest,
     WorkspaceCreateResponse,
     WorkspaceHardDeleteRequest,
     WorkspaceProductSchema,
     WorkspaceProductsUpdateRequest,
+    WorkspaceReportSchema,
     WorkspaceSettingsSchema,
     WorkspaceSettingsUpdateRequest,
 )
@@ -47,6 +52,7 @@ from ..schemas_admin import (
 router = APIRouter()
 
 _tenant_service = TenantService()
+_tenant_analytics_service = TenantAnalyticsService()
 _settings_service = SettingsService()
 _feature_flag_service = FeatureFlagService()
 _product_service = ProductService()
@@ -126,6 +132,30 @@ def get_workspace_analytics(
 ) -> WorkspaceAnalyticsSchema:
     _get_workspace_or_404(workspace_id)
     return WorkspaceAnalyticsSchema(**_tenant_service.workspace_analytics(workspace_id))
+
+
+@router.get("/admin/workspaces/{workspace_id}/report", response_model=WorkspaceReportSchema)
+def get_workspace_report(
+    workspace_id: str, user: AuthUser = Depends(require_workspace_admin)
+) -> WorkspaceReportSchema:
+    """Extends the basic analytics above with resolution rate/timing, a
+    per-agent breakdown, and customer/AI trend signals — see
+    TenantAnalyticsService.workspace_operational_report()."""
+    _get_workspace_or_404(workspace_id)
+    return WorkspaceReportSchema(**_tenant_analytics_service.workspace_operational_report(workspace_id))
+
+
+@router.post("/admin/workspaces/{workspace_id}/ask", response_model=WorkspaceAskResponseSchema)
+def ask_workspace_analyst(
+    workspace_id: str, request: WorkspaceAskRequest, user: AuthUser = Depends(require_workspace_admin)
+) -> WorkspaceAskResponseSchema:
+    """"Ask HavisIQ" — answers grounded in this workspace's real
+    operational metrics, never another workspace's (workspace_id is
+    require_workspace_admin's own resolved value, never accepted as
+    free-form input beyond that)."""
+    _get_workspace_or_404(workspace_id)
+    result = answer_question(workspace_id, request.question, analytics_service=_tenant_analytics_service)
+    return WorkspaceAskResponseSchema(answer=result["answer"])
 
 
 @router.patch("/admin/workspaces/{workspace_id}/branding", response_model=WorkspaceAdminSchema)

@@ -325,6 +325,14 @@ class EscalationSummarySchema(BaseModel):
     problem: str
     actions_already_taken: list[dict]
     suggested_resolution: list[dict]
+    resolution: str | None = Field(
+        None, description="AI-drafted resolution summary, generated on Resolve and "
+        "editable by the agent before Close. None until the escalation is resolved."
+    )
+    handoff_recap: str | None = Field(
+        None, description="Set by /rejoin-ai — consumed once by the customer's next "
+        "/chat call as handoff_context, then cleared client-side."
+    )
 
 
 class EscalationMessageSchema(BaseModel):
@@ -389,6 +397,12 @@ class CustomerEscalationSchema(BaseModel):
     resolved_at: str | None = None
     closed_at: str | None = None
     messages: list[EscalationMessageSchema] | None = None
+    handoff_recap: str | None = Field(
+        None, description="Set once by /rejoin-ai — the ONE internal-summary field "
+        "deliberately exposed to the customer, since it exists specifically to be "
+        "threaded back as the next /chat call's handoff_context so the AI resumes "
+        "without the customer repeating themselves."
+    )
 
 
 class EscalationCreateRequest(BaseModel):
@@ -398,6 +412,13 @@ class EscalationCreateRequest(BaseModel):
 
 class EscalationActionRequest(BaseModel):
     escalation_id: str
+
+
+class EscalationCloseRequest(BaseModel):
+    resolution_summary: str | None = Field(
+        None, description="The agent's possibly-edited version of the AI-drafted "
+        "resolution summary. None keeps whatever was drafted at Resolve time as-is."
+    )
 
 
 class EscalationMessageCreateRequest(BaseModel):

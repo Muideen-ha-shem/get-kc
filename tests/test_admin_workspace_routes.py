@@ -5,7 +5,7 @@ without require_super_admin overridden."""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -293,3 +293,74 @@ class TestDashboardAndAudit:
             workspace_id="w1", limit=50, action="workspace.archived", actor_auth_user_id="admin-1",
             start_date="2026-01-01", end_date="2026-01-31",
         )
+
+
+_REPORT_FIXTURE = {
+    "conversation_count": 10, "escalation_count": 4,
+    "escalation_status_breakdown": {
+        "waiting": 0, "assigned": 0, "active": 0, "waiting_for_customer": 0, "resolved": 1, "closed": 1,
+    },
+    "appointment_count": 0, "saved_recommendation_count": 0, "saved_comparison_count": 0,
+    "feedback_helpful_count": 0, "feedback_not_helpful_count": 0,
+    "resolution_rate": 0.5, "average_resolution_minutes": 45.0,
+    "department_activity": {"Support": 2}, "frustrated_conversation_count": 1,
+    "agents": [{"id": "a1", "name": "Ada", "department": "Support", "status": "available", "current_workload": 2}],
+    "requested_products": {"SPIDIFY": 2}, "ai_resolved_rate_estimate": 0.8,
+    "ai_resolved_rate_caveat": "Approximate.",
+    "knowledge_gaps": None, "frequently_searched_topics": None,
+    "insufficient_evidence_questions": None, "source_failures": None,
+    "knowledge_tracking_note": "Not tracked yet.",
+}
+
+
+class TestWorkspaceReportAndAnalyst:
+    def test_report_requires_workspace_admin(self, client):
+        response = client.get("/admin/workspaces/w1/report")
+        assert response.status_code == 401
+
+    def test_report_returns_extended_metrics(self, client):
+        _authenticate_as_admin()
+        with patch("src.api.routes.admin_workspaces._tenant_service.get_workspace", return_value=_workspace()), \
+             patch(
+                 "src.api.routes.admin_workspaces._tenant_analytics_service.workspace_operational_report",
+                 return_value=_REPORT_FIXTURE,
+             ) as mock_report:
+            response = client.get("/admin/workspaces/w1/report")
+
+        assert response.status_code == 200
+        assert response.json()["resolution_rate"] == 0.5
+        assert response.json()["knowledge_gaps"] is None
+        mock_report.assert_called_once_with("w1")
+
+    def test_report_404s_for_unknown_workspace(self, client):
+        _authenticate_as_admin()
+        with patch("src.api.routes.admin_workspaces._tenant_service.get_workspace", return_value=None):
+            response = client.get("/admin/workspaces/w1/report")
+
+        assert response.status_code == 404
+
+    def test_ask_requires_workspace_admin(self, client):
+        response = client.post("/admin/workspaces/w1/ask", json={"question": "How did we do?"})
+        assert response.status_code == 401
+
+    def test_ask_returns_grounded_answer(self, client):
+        _authenticate_as_admin()
+        with patch("src.api.routes.admin_workspaces._tenant_service.get_workspace", return_value=_workspace()), \
+             patch(
+                 "src.api.routes.admin_workspaces.answer_question",
+                 return_value={"answer": "FACT: 4 escalations this week."},
+             ) as mock_ask:
+            response = client.post("/admin/workspaces/w1/ask", json={"question": "How did support perform?"})
+
+        assert response.status_code == 200
+        assert response.json()["answer"] == "FACT: 4 escalations this week."
+        mock_ask.assert_called_once_with(
+            "w1", "How did support perform?", analytics_service=ANY,
+        )
+
+    def test_ask_404s_for_unknown_workspace(self, client):
+        _authenticate_as_admin()
+        with patch("src.api.routes.admin_workspaces._tenant_service.get_workspace", return_value=None):
+            response = client.post("/admin/workspaces/w1/ask", json={"question": "How did we do?"})
+
+        assert response.status_code == 404

@@ -37,6 +37,7 @@ from ..services.advisory.action_workflow import (
     build_field_prompt,
     collect_field,
     execute_action,
+    match_product,
     required_fields,
 )
 from ..services.advisory.session_context import PendingAction, SessionState
@@ -44,7 +45,8 @@ from ..services.appointments.appointment_service import AppointmentService
 from ..services.escalation.decision import decide_escalation
 from ..services.escalation.escalation_service import EscalationService
 from ..services.routing.action_intent import detect_action_intent
-from ..services.routing.confirmation_intent import detect_confirmation
+from ..services.routing.confirmation_intent import detect_bare_cancellation, detect_confirmation
+from ..services.routing.message_segmentation import segment_message
 from ..services.knowledge import KnowledgeService
 from ..services.support import SupportService
 from ..services.routing import SourceRouter, ProductRouter
@@ -459,6 +461,68 @@ class ChatOrchestrator:
                 "session_id": session_id, "escalation_recommended": False, "escalation_reason": None,
             }
 
+        # Live-confirmed bug: once a pending action completes (or was never
+        # started), a bare "Cancel that" has nothing to attach to — with no
+        # pending_action to gate on, it used to fall straight through to
+        # RAG, which hallucinated an unrelated product-cancellation answer
+        # (e.g. "cancel your PayCheq subscription"). Exact-match, not
+        # substring (see detect_bare_cancellation) — a real question like
+        # "How do I cancel my PayCheq subscription?" still reaches RAG.
+        if detect_bare_cancellation(message):
+            return {
+                "answer": (
+                    "There's nothing active for me to cancel right now — was there "
+                    "something specific you wanted to stop or change?"
+                ),
+                "sources": [], "citations": [], "next_actions": [],
+                "session_id": session_id, "escalation_recommended": False, "escalation_reason": None,
+            }
+
+        # Multi-intent handling: live-confirmed bug — "I want to understand
+        # SPIDIFY, compare it with V-Login, and then book a demo." jumped
+        # straight to "Could I get your name?", silently dropping the two
+        # knowledge requests that came first, because a single action
+        # keyword anywhere in the message hijacked the whole thing.
+        # Deliberately narrow: segment_message() only ever splits on an
+        # explicit "and then"/", then" marker (see its own docstring for
+        # why), so this branch activates only for a genuine sequence of
+        # clauses — every other message (the overwhelming majority) sees
+        # `segments == [message]` and falls straight through, unaffected.
+        segments = segment_message(message)
+        if len(segments) > 1 and self._session_service is not None and session_id:
+            action_index = next((i for i, seg in enumerate(segments) if detect_action_intent(seg)), None)
+            if action_index is not None:
+                action_match_multi = detect_action_intent(segments[action_index])
+                knowledge_segments = [seg for i, seg in enumerate(segments) if i != action_index]
+                knowledge_answer: str | None = None
+                knowledge_sources: list[str] = []
+                knowledge_citations: list[dict[str, Any]] = []
+                if knowledge_segments:
+                    kresult = self._answer_knowledge_segment(
+                        ". ".join(knowledge_segments),
+                        workspace_id=workspace_id, workspace_name=workspace_name,
+                        workspace_welcome_message=workspace_welcome_message,
+                    )
+                    knowledge_answer = kresult["answer"]
+                    knowledge_sources = kresult["sources"]
+                    knowledge_citations = kresult["citations"]
+
+                # Full original `message` (not just the action segment) so
+                # an explicit product named in an EARLIER clause ("...
+                # understand SPIDIFY...") is still picked up by
+                # _seed_known_demo_product's match_product() scan.
+                new_pending = self._start_pending_action(action_match_multi.kind, session_state, message)
+                action_prompt = self._render_pending_action_prompt(new_pending, workspace_id=workspace_id)
+                self._session_service.set_pending_action(session_id, new_pending)
+
+                answer = f"{knowledge_answer}\n\n{action_prompt}" if knowledge_answer else action_prompt
+                return {
+                    "answer": answer, "sources": knowledge_sources, "citations": knowledge_citations,
+                    "next_actions": [], "session_id": session_id,
+                    "escalation_recommended": new_pending.status == "awaiting_confirmation" and new_pending.kind == "escalation",
+                    "escalation_reason": "explicit_request" if new_pending.kind == "escalation" and new_pending.status == "awaiting_confirmation" else None,
+                }
+
         action_match = detect_action_intent(message)
         if action_match is not None:
             if self._session_service is None or not session_id:
@@ -661,6 +725,55 @@ class ChatOrchestrator:
             "I'll get it booked?"
         )
 
+    def _answer_knowledge_segment(
+        self,
+        question: str,
+        *,
+        workspace_id: str | None,
+        workspace_name: str | None,
+        workspace_welcome_message: str | None,
+    ) -> dict[str, Any]:
+        """A minimal, self-contained route -> retrieve -> generate for the
+        knowledge portion of a multi-intent message — the same
+        `self._source_router`/`self._search_manager`/`self._response_generator`
+        collaborators used everywhere else, but kept deliberately separate
+        from the main pipeline's inline Steps 1-3 (advisory enrichment,
+        clarification short-circuit, escalation-recommendation signal)
+        rather than a refactor of that sensitive block: this multi-intent
+        knowledge answer trades away advisory framing for a much smaller,
+        lower-risk change to the single-intent path every existing test
+        exercises. Still a fully grounded, cited answer from the real
+        pipeline — not a new capability, just calling `generate()` again on
+        a recombined question."""
+        if self._source_router:
+            decision = self._source_router.route(question, workspace_name=workspace_name)
+        else:
+            from ..services.routing.source_router import RoutingDecision
+            decision = RoutingDecision(knowledge=True, web=True)
+
+        evidence = (
+            self._search_manager.retrieve(
+                question, decision=decision, workspace_id=workspace_id, workspace_name=workspace_name
+            )
+            if self._search_manager else []
+        )
+
+        if self._response_generator:
+            result = self._response_generator.generate(
+                question=question,
+                context=evidence,
+                workspace_name=workspace_name,
+                workspace_welcome_message=workspace_welcome_message,
+            )
+            answer = result.get("answer", "")
+            citations = result.get("citations", [])
+        else:
+            answer = NO_EVIDENCE_FALLBACK
+            citations = []
+
+        sources = list({c["url"] for c in citations if c and c.get("url")})
+        return {"answer": answer, "sources": sources, "citations": citations}
+
     def _build_stateless_action_ack(self, kind: str, workspace_id: str | None) -> str:
         """Single-turn ack used only when no session_service is configured
         (so there's nowhere to carry collected fields across turns) — never
@@ -691,12 +804,30 @@ class ChatOrchestrator:
             missing=required_fields(kind, session_state),
             original_question=message,
         )
-        self._seed_known_demo_product(pending, session_state)
+        self._seed_known_demo_product(pending, session_state, message)
         return pending
 
     @staticmethod
-    def _seed_known_demo_product(pending: PendingAction, session_state: SessionState | None) -> None:
-        if pending.kind != "demo" or "product" in pending.missing:
+    def _seed_known_demo_product(
+        pending: PendingAction, session_state: SessionState | None, message: str
+    ) -> None:
+        """Live-confirmed bug: "I'd like a demo of SPIDIFY" got summarized
+        as "Product: V-Login" — the session's *stale* last-discussed
+        product (from an earlier turn) was seeded instead of the product
+        the customer explicitly named in the very message that triggered
+        this demo request. An explicit mention in *message* always wins
+        over ``session_state.last_product()``, and overrides an already-
+        computed ``missing`` list (``required_fields`` only sees session
+        state, not this message, so it can't know the product was
+        actually already given)."""
+        if pending.kind != "demo":
+            return
+        explicit = match_product(message)
+        if explicit:
+            pending.fields["product"] = explicit
+            pending.missing = [f for f in pending.missing if f != "product"]
+            return
+        if "product" in pending.missing:
             return
         known = session_state.last_product() if session_state else None
         if known:
