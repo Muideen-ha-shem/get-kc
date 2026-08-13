@@ -48,6 +48,30 @@ export type WorkspaceAnalytics = {
   feedback_not_helpful_count: number;
 };
 
+export type WorkspaceAgentBreakdown = {
+  id: string;
+  name: string;
+  department: string;
+  status: string;
+  current_workload: number;
+};
+
+export type WorkspaceReport = WorkspaceAnalytics & {
+  resolution_rate: number | null;
+  average_resolution_minutes: number | null;
+  department_activity: Record<string, number>;
+  frustrated_conversation_count: number;
+  agents: WorkspaceAgentBreakdown[];
+  requested_products: Record<string, number>;
+  ai_resolved_rate_estimate: number | null;
+  ai_resolved_rate_caveat: string;
+  knowledge_gaps: string[] | null;
+  frequently_searched_topics: string[] | null;
+  insufficient_evidence_questions: string[] | null;
+  source_failures: string[] | null;
+  knowledge_tracking_note: string;
+};
+
 export type PlatformDashboard = {
   total_workspace_count: number;
   active_workspace_count: number;

@@ -11,12 +11,13 @@ import type {
   WorkspaceAdmin,
   WorkspaceAnalytics,
   WorkspaceProduct,
+  WorkspaceReport,
   WorkspaceSettings,
 } from './adminTypes';
 
-type Tab = 'branding' | 'settings' | 'products' | 'flags' | 'apikey' | 'analytics';
+type Tab = 'branding' | 'settings' | 'products' | 'flags' | 'apikey' | 'analytics' | 'report';
 
-const TABS: Tab[] = ['branding', 'settings', 'products', 'flags', 'apikey', 'analytics'];
+const TABS: Tab[] = ['branding', 'settings', 'products', 'flags', 'apikey', 'analytics', 'report'];
 
 function BrandingTab({ workspace, onSaved }: { workspace: WorkspaceAdmin; onSaved: (w: WorkspaceAdmin) => void }) {
   const [logo, setLogo] = useState(workspace.logo ?? '');
@@ -303,6 +304,127 @@ function AnalyticsTab({ workspaceId }: { workspaceId: string }) {
   );
 }
 
+function formatMetricLabel(key: string): string {
+  return key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' ');
+}
+
+function ReportTab({ workspaceId }: { workspaceId: string }) {
+  const [report, setReport] = useState<WorkspaceReport | null>(null);
+  const [question, setQuestion] = useState('');
+  const [answer, setAnswer] = useState<string | null>(null);
+  const [asking, setAsking] = useState(false);
+
+  useEffect(() => {
+    apiJson<WorkspaceReport>(`/admin/workspaces/${workspaceId}/report`).then(setReport).catch(() => {});
+  }, [workspaceId]);
+
+  async function askHavisIQ(event: FormEvent) {
+    event.preventDefault();
+    if (!question.trim() || asking) return;
+    setAsking(true);
+    try {
+      const result = await apiJson<{ answer: string }>(`/admin/workspaces/${workspaceId}/ask`, {
+        method: 'POST',
+        body: JSON.stringify({ question }),
+      });
+      setAnswer(result.answer);
+    } finally {
+      setAsking(false);
+    }
+  }
+
+  if (!report) return <p className="text-sm text-ink/40">Loading…</p>;
+
+  return (
+    <div className="max-w-3xl space-y-6">
+      <div className="grid grid-cols-3 gap-4">
+        <MetricCard
+          label="Resolution Rate"
+          value={report.resolution_rate != null ? `${Math.round(report.resolution_rate * 100)}%` : '—'}
+          icon={LifeBuoy}
+          tone="green"
+        />
+        <MetricCard
+          label="Avg. Resolution Time"
+          value={report.average_resolution_minutes != null ? `${Math.round(report.average_resolution_minutes)}m` : '—'}
+          icon={Calendar}
+          tone="gold"
+        />
+        <MetricCard
+          label="AI-Resolved Rate (est.)"
+          value={report.ai_resolved_rate_estimate != null ? `${Math.round(report.ai_resolved_rate_estimate * 100)}%` : '—'}
+          icon={MessageSquare}
+          tone="ink"
+        />
+      </div>
+      <p className="text-xs text-ink/40">{report.ai_resolved_rate_caveat}</p>
+
+      <div className={`${CARD} p-4`}>
+        <p className="text-xs text-ink/50 uppercase mb-2">Agents</p>
+        {report.agents.length === 0 ? (
+          <p className="text-sm text-ink/40">No agents in this workspace yet.</p>
+        ) : (
+          <div className="divide-y divide-ink/10">
+            {report.agents.map((agent) => (
+              <div key={agent.id} className="flex items-center justify-between py-2 text-sm text-ink">
+                <span>{agent.name} · {agent.department}</span>
+                <span className="text-ink/50">{agent.status} · workload {agent.current_workload}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className={`${CARD} p-4`}>
+        <p className="text-xs text-ink/50 uppercase mb-2">Department Activity</p>
+        {Object.keys(report.department_activity).length === 0 ? (
+          <p className="text-sm text-ink/40">No resolved escalations yet.</p>
+        ) : (
+          <div className="flex flex-wrap gap-4 text-sm text-ink">
+            {Object.entries(report.department_activity).map(([dept, count]) => (
+              <span key={dept}>{dept}: <strong>{count}</strong></span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className={`${CARD} p-4`}>
+        <p className="text-xs text-ink/50 uppercase mb-2">Requested Products</p>
+        {Object.keys(report.requested_products).length === 0 ? (
+          <p className="text-sm text-ink/40">No saved recommendations yet.</p>
+        ) : (
+          <div className="flex flex-wrap gap-4 text-sm text-ink">
+            {Object.entries(report.requested_products).map(([product, count]) => (
+              <span key={product}>{product}: <strong>{count}</strong></span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className={`${CARD} p-4`}>
+        <p className="text-xs text-ink/50 uppercase mb-2">Knowledge</p>
+        <p className="text-sm text-ink/50">{report.knowledge_tracking_note}</p>
+      </div>
+
+      <div className={`${CARD} p-4`}>
+        <p className="text-sm font-semibold text-ink mb-2">Ask HavisIQ</p>
+        <form onSubmit={askHavisIQ} className="flex gap-2">
+          <input
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            placeholder='e.g. "How did support perform this week?" or "Which agents are overloaded?"'
+            className="flex-1 border border-ink/10 rounded-xl px-3 py-2 text-sm bg-paper text-ink outline-none focus:border-gold-400"
+          />
+          <button type="submit" className={PRIMARY_BUTTON} disabled={asking}>
+            {asking ? 'Asking…' : 'Ask'}
+          </button>
+        </form>
+        {answer ? <p className="mt-3 text-sm text-ink whitespace-pre-wrap">{answer}</p> : null}
+      </div>
+    </div>
+  );
+}
+
 function AdminWorkspaceDetailContent() {
   const { workspaceId } = useParams<{ workspaceId: string }>();
   const navigate = useNavigate();
@@ -420,6 +542,7 @@ function AdminWorkspaceDetailContent() {
       {tab === 'flags' && <FlagsTab workspaceId={workspaceId} />}
       {tab === 'apikey' && <ApiKeyTab workspaceId={workspaceId} />}
       {tab === 'analytics' && <AnalyticsTab workspaceId={workspaceId} />}
+      {tab === 'report' && <ReportTab workspaceId={workspaceId} />}
 
       <ConfirmDeleteModal
         isOpen={deleteModalOpen}
