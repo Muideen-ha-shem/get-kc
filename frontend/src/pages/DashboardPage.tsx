@@ -4,8 +4,11 @@ import {
   Bell,
   Check,
   GitCompare,
+  LifeBuoy,
   LogOut,
   MessageSquarePlus,
+  PanelLeft,
+  PanelLeftClose,
   Pencil,
   Search,
   SendHorizonal,
@@ -15,15 +18,21 @@ import {
 } from 'lucide-react';
 import { HavisIQMark } from '../components/HavisIQMark';
 import { MessageContent } from '../components/message/MessageContent';
-import { SourceChips } from '../components/message/SourceChips';
 import { MessageActions } from '../components/message/MessageActions';
+import { SourceChips } from '../components/message/SourceChips';
+import { isSourceRequest } from '../lib/sourceRequest';
 import { CompareSolutionsModal } from '../components/CompareSolutionsModal';
 import { DemoRequestModal } from '../components/DemoRequestModal';
+import { ConversationStartState } from '../components/ConversationStartState';
+import { PageContainer } from '../components/PageContainer';
+import { StatusBadge, type BadgeTone } from '../components/StatusBadge';
 import { useAuth } from '../lib/authContext';
 import { apiJson } from '../lib/apiClient';
 import { useSolutions } from '../lib/useSolutions';
 import { getSessionId } from '../lib/sessionId';
 import { downloadMarkdown, messagesToMarkdown } from '../lib/exportConversation';
+import { useSidebarCollapse } from '../lib/useSidebarCollapse';
+import { INPUT_CLASS, PRIMARY_BUTTON, SECONDARY_BUTTON } from '../lib/uiClassNames';
 import type { Solution } from '../solutions';
 
 type ConversationSummary = {
@@ -40,12 +49,69 @@ type ConversationMessage = {
   citations: string[];
   metadata: Record<string, unknown>;
   created_at: string | null;
+  escalationSuggested?: boolean;
 };
 
 type ConversationDetail = {
   conversation: ConversationSummary;
   messages: ConversationMessage[];
 };
+
+type EscalationStatus = 'waiting' | 'assigned' | 'active' | 'waiting_for_customer' | 'resolved' | 'closed';
+
+type CustomerEscalationMessage = {
+  id: string;
+  sender_type: 'agent' | 'customer';
+  content: string;
+  created_at: string | null;
+};
+
+type CustomerEscalation = {
+  id: string;
+  conversation_id: string | null;
+  status: EscalationStatus;
+  assigned_agent_name: string | null;
+  department: string | null;
+  created_at: string | null;
+  assigned_at: string | null;
+  resolved_at: string | null;
+  closed_at: string | null;
+  messages?: CustomerEscalationMessage[] | null;
+  handoff_recap: string | null;
+};
+
+const ESCALATION_STATUS_TONE: Record<EscalationStatus, BadgeTone> = {
+  waiting: 'neutral',
+  assigned: 'gold',
+  active: 'gold',
+  waiting_for_customer: 'warning',
+  resolved: 'success',
+  closed: 'success',
+};
+
+const ESCALATION_STATUS_LABEL: Record<EscalationStatus, string> = {
+  waiting: 'Waiting for an agent',
+  assigned: 'Agent assigned',
+  active: 'In progress',
+  waiting_for_customer: 'Waiting on you',
+  resolved: 'Resolved',
+  closed: 'Closed',
+};
+
+const ESCALATION_POLL_INTERVAL_MS = 2500;
+
+const TITLE_MAX_LEN = 60;
+
+// Mirrors ConversationService._title_from_message on the backend (same
+// 60-char truncation, break on the last whole word) so a conversation's
+// title reads consistently regardless of which code path derived it.
+function titleFromMessage(message: string): string {
+  const collapsed = message.trim().split(/\s+/).join(' ');
+  if (collapsed.length <= TITLE_MAX_LEN) return collapsed || 'New conversation';
+  const truncated = collapsed.slice(0, TITLE_MAX_LEN);
+  const lastSpace = truncated.lastIndexOf(' ');
+  return `${lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated}…`;
+}
 
 type Section = 'conversations' | 'recommendations' | 'comparisons' | 'profile' | 'notifications';
 
@@ -75,6 +141,10 @@ export function DashboardPage() {
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   const [isSupportAgent, setIsSupportAgent] = useState(false);
   const [adminWorkspaces, setAdminWorkspaces] = useState<{ id: string; slug: string; name: string }[]>([]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useSidebarCollapse('havisiq-dashboard-sidebar-collapsed');
+  const [escalation, setEscalation] = useState<CustomerEscalation | null>(null);
+  const [escalationInput, setEscalationInput] = useState('');
+  const [isEscalating, setIsEscalating] = useState(false);
 
   const loadConversations = (search?: string) => {
     setIsLoadingList(true);
@@ -118,19 +188,28 @@ export function DashboardPage() {
   }, [searchTerm]);
 
   const openConversation = async (id: string) => {
+    setEscalation(null);
     const detail = await apiJson<ConversationDetail>(`/conversations/${id}`);
     setSelected(detail);
     setSection('conversations');
+    apiJson<CustomerEscalation | null>(`/chat/conversations/${id}/escalation`)
+      .then(setEscalation)
+      .catch(() => setEscalation(null));
   };
 
-  const startNewConversation = async () => {
+  const startNewConversation = async (initialMessage?: string) => {
+    const trimmedInitial = initialMessage?.trim();
     const row = await apiJson<ConversationSummary>('/conversations', {
       method: 'POST',
-      body: JSON.stringify({}),
+      body: JSON.stringify({ first_message: trimmedInitial || null }),
     });
     setConversations((prev) => [row, ...prev]);
     setSelected({ conversation: row, messages: [] });
+    setEscalation(null);
     setSection('conversations');
+    if (trimmedInitial) {
+      await sendMessage(row.id, trimmedInitial);
+    }
   };
 
   const deleteConversation = async (id: string) => {
@@ -151,32 +230,74 @@ export function DashboardPage() {
     setSelected((prev) => (prev && prev.conversation.id === id ? { ...prev, conversation: row } : prev));
   };
 
-  const handleSend = async (event: FormEvent) => {
-    event.preventDefault();
-    const trimmed = input.trim();
-    if (!trimmed || isSending || !selected) return;
+  // Shared by the bottom "continue this conversation" form and the
+  // centered start-state input (ConversationStartState) — both funnel
+  // through the same /chat call and optimistic-update logic, keyed by an
+  // explicit conversationId rather than reading `selected` from closure,
+  // since the start-state flow calls this immediately after creating a
+  // brand-new conversation, before that setSelected() has flushed.
+  const sendMessage = async (conversationId: string, text: string) => {
     setIsSending(true);
-    setInput('');
+
+    // A conversation created via the plain "New conversation" sidebar
+    // button (no first_message passed) keeps the literal "New
+    // conversation" placeholder title until its first message is sent —
+    // rename it here so the sidebar reads as something meaningful without
+    // requiring a manual rename. Conversations started with an initial
+    // message (ConversationStartState) already get a derived title from
+    // the backend at creation time, so this only fires for the gap case.
+    const shouldAutoTitle =
+      selected?.conversation.id === conversationId &&
+      selected.messages.length === 0 &&
+      selected.conversation.title === 'New conversation';
+    if (shouldAutoTitle) {
+      apiJson<ConversationSummary>(`/conversations/${conversationId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ title: titleFromMessage(text) }),
+      })
+        .then((row) => {
+          setConversations((prev) => prev.map((c) => (c.id === conversationId ? row : c)));
+          setSelected((prev) => (prev && prev.conversation.id === conversationId ? { ...prev, conversation: row } : prev));
+        })
+        .catch(() => {});
+    }
 
     const optimisticUser: ConversationMessage = {
       id: `local-${Date.now()}`,
       role: 'user',
-      content: trimmed,
+      content: text,
       citations: [],
       metadata: {},
       created_at: null,
     };
-    setSelected((prev) => (prev ? { ...prev, messages: [...prev.messages, optimisticUser] } : prev));
+    setSelected((prev) =>
+      prev && prev.conversation.id === conversationId ? { ...prev, messages: [...prev.messages, optimisticUser] } : prev
+    );
+
+    // AI Rejoin: a handoff_recap set by an agent's "Hand back to AI" is
+    // consumed exactly once, on this next message, then cleared locally —
+    // never resent on subsequent turns of the same conversation.
+    const handoffRecap =
+      escalation?.conversation_id === conversationId ? escalation.handoff_recap ?? undefined : undefined;
 
     try {
-      const response = await apiJson<{ answer: string; sources: string[]; session_id: string | null }>('/chat', {
+      const response = await apiJson<{
+        answer: string;
+        sources: string[];
+        session_id: string | null;
+        escalation_recommended?: boolean;
+      }>('/chat', {
         method: 'POST',
         body: JSON.stringify({
-          message: trimmed,
+          message: text,
           session_id: getSessionId(),
-          conversation_id: selected.conversation.id,
+          conversation_id: conversationId,
+          handoff_context: handoffRecap,
         }),
       });
+      if (handoffRecap) {
+        setEscalation((prev) => (prev ? { ...prev, handoff_recap: null } : prev));
+      }
 
       const assistantMessage: ConversationMessage = {
         id: `local-${Date.now() + 1}`,
@@ -185,15 +306,73 @@ export function DashboardPage() {
         citations: response.sources || [],
         metadata: {},
         created_at: null,
+        escalationSuggested: Boolean(response.escalation_recommended),
       };
-      setSelected((prev) => (prev ? { ...prev, messages: [...prev.messages, assistantMessage] } : prev));
+      setSelected((prev) =>
+        prev && prev.conversation.id === conversationId ? { ...prev, messages: [...prev.messages, assistantMessage] } : prev
+      );
       setConversations((prev) =>
-        prev.map((c) => (c.id === selected.conversation.id ? { ...c, updated_at: new Date().toISOString() } : c))
+        prev.map((c) => (c.id === conversationId ? { ...c, updated_at: new Date().toISOString() } : c))
       );
     } finally {
       setIsSending(false);
     }
   };
+
+  const handleSend = async (event: FormEvent) => {
+    event.preventDefault();
+    const trimmed = input.trim();
+    if (!trimmed || isSending || !selected) return;
+    setInput('');
+    await sendMessage(selected.conversation.id, trimmed);
+  };
+
+  const requestHumanEscalation = async (question?: string) => {
+    if (!selected || isEscalating) return;
+    setIsEscalating(true);
+    try {
+      const lastUserMessage = [...selected.messages].reverse().find((m) => m.role === 'user')?.content;
+      const result = await apiJson<CustomerEscalation>('/chat/escalate', {
+        method: 'POST',
+        body: JSON.stringify({
+          conversation_id: selected.conversation.id,
+          question: question || lastUserMessage || "I'd like to talk to a human.",
+        }),
+      });
+      setEscalation(result);
+    } finally {
+      setIsEscalating(false);
+    }
+  };
+
+  const handleSendEscalationMessage = async (event: FormEvent) => {
+    event.preventDefault();
+    const trimmed = escalationInput.trim();
+    if (!trimmed || !escalation) return;
+    setEscalationInput('');
+    const optimistic: CustomerEscalationMessage = { id: `local-${Date.now()}`, sender_type: 'customer', content: trimmed, created_at: null };
+    setEscalation((prev) => (prev ? { ...prev, messages: [...(prev.messages ?? []), optimistic] } : prev));
+    await apiJson(`/agent/escalations/${escalation.id}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content: trimmed }),
+    });
+    const refreshed = await apiJson<CustomerEscalation>(`/chat/escalations/${escalation.id}`);
+    setEscalation(refreshed);
+  };
+
+  // Poll the open escalation thread while it's live, mirroring
+  // AgentDashboardPage's poll pattern — stops once resolved/closed so a
+  // finished thread doesn't keep getting hammered.
+  useEffect(() => {
+    if (!escalation || escalation.status === 'resolved' || escalation.status === 'closed') return;
+    const escalationId = escalation.id;
+    const interval = window.setInterval(() => {
+      apiJson<CustomerEscalation>(`/chat/escalations/${escalationId}`)
+        .then(setEscalation)
+        .catch(() => {});
+    }, ESCALATION_POLL_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [escalation?.id, escalation?.status]);
 
   const handleExport = () => {
     if (!selected || selected.messages.length === 0) return;
@@ -205,28 +384,50 @@ export function DashboardPage() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-paper text-ink">
-      <aside className="sticky top-0 flex h-screen w-72 shrink-0 flex-col gap-6 border-r border-ink/10 bg-white/70 px-5 py-6">
-        <div className="flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-3">
+    <div className="relative flex h-screen overflow-hidden bg-paper text-ink">
+      {sidebarCollapsed ? (
+        <button
+          onClick={() => setSidebarCollapsed(false)}
+          className="absolute left-3 top-3 z-10 rounded-full border border-ink/10 bg-white p-2 text-ink/60 shadow-sm transition hover:text-ink"
+          aria-label="Show sidebar"
+        >
+          <PanelLeft size={16} />
+        </button>
+      ) : null}
+      <aside
+        className={`sticky top-0 flex h-screen shrink-0 flex-col gap-6 overflow-hidden border-r border-ink/10 bg-white/70 py-6 transition-[width] duration-200 ${
+          sidebarCollapsed ? 'w-0 px-0 border-r-0' : 'w-72 px-5'
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <Link to="/" className="flex items-center gap-3 min-w-0">
             <HavisIQMark size={36} />
-            <div>
+            <div className="min-w-0">
               <p className="font-display text-base tracking-tight">HavisIQ</p>
               <p className="text-[10px] uppercase tracking-[0.28em] text-ink/50">Customer Dashboard</p>
             </div>
           </Link>
-          <button
-            onClick={() => setSection('notifications')}
-            className="relative rounded-full p-1.5 text-ink/50 transition hover:bg-paper hover:text-ink"
-            aria-label={unreadCount > 0 ? `${unreadCount} unread notifications` : 'Notifications'}
-          >
-            <Bell size={18} />
-            {unreadCount > 0 ? (
-              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-gold-500 px-1 text-[9px] font-bold text-ink">
-                {unreadCount > 9 ? '9+' : unreadCount}
-              </span>
-            ) : null}
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              onClick={() => setSection('notifications')}
+              className="relative rounded-full p-1.5 text-ink/50 transition hover:bg-paper hover:text-ink"
+              aria-label={unreadCount > 0 ? `${unreadCount} unread notifications` : 'Notifications'}
+            >
+              <Bell size={18} />
+              {unreadCount > 0 ? (
+                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-gold-500 px-1 text-[9px] font-bold text-ink">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              ) : null}
+            </button>
+            <button
+              onClick={() => setSidebarCollapsed(true)}
+              className="rounded-full p-1.5 text-ink/50 transition hover:bg-paper hover:text-ink"
+              aria-label="Hide sidebar"
+            >
+              <PanelLeftClose size={18} />
+            </button>
+          </div>
         </div>
 
         <nav className="flex flex-col gap-1 text-sm font-medium text-ink/70">
@@ -363,57 +564,127 @@ export function DashboardPage() {
       </aside>
 
       <main className="flex-1 overflow-y-auto p-8">
+        <PageContainer className={section === 'conversations' ? 'flex h-full flex-col' : ''}>
         {section === 'conversations' ? (
           selected ? (
             <div className="flex h-full flex-col">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <h2 className="font-display text-xl">{selected.conversation.title}</h2>
-                {selected.messages.length > 0 ? (
-                  <button
-                    onClick={handleExport}
-                    className="shrink-0 rounded-full border border-ink/15 px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-gold-400 hover:text-gold-700"
-                  >
-                    Export
-                  </button>
-                ) : null}
+                <div className="flex shrink-0 items-center gap-2">
+                  {!isSupportAgent && (!escalation || escalation.status === 'resolved' || escalation.status === 'closed') ? (
+                    <button
+                      onClick={() => requestHumanEscalation()}
+                      disabled={isEscalating}
+                      className={`flex items-center gap-1.5 ${SECONDARY_BUTTON} disabled:cursor-not-allowed disabled:opacity-50`}
+                    >
+                      <LifeBuoy size={13} /> {isEscalating ? 'Requesting…' : 'Talk to a human'}
+                    </button>
+                  ) : null}
+                  {selected.messages.length > 0 ? (
+                    <button
+                      onClick={handleExport}
+                      className="rounded-full border border-ink/15 px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-gold-400 hover:text-gold-700"
+                    >
+                      Export
+                    </button>
+                  ) : null}
+                </div>
               </div>
-              <div className="flex-1 space-y-4 overflow-y-auto rounded-2xl border border-ink/10 bg-white p-5">
-                {selected.messages.length === 0 ? (
-                  <p className="text-sm text-ink/50">Ask HavisIQ anything to continue this conversation.</p>
-                ) : null}
-                {selected.messages.map((m) => {
-                  const precedingQuestion =
-                    m.role === 'assistant'
-                      ? selected.messages[selected.messages.indexOf(m) - 1]?.content ?? ''
-                      : '';
-                  return (
-                    <div key={m.id} className={m.role === 'user' ? 'text-right' : 'text-left'}>
-                      <div
-                        className={`inline-block max-w-2xl rounded-2xl px-4 py-2.5 text-sm ${
-                          m.role === 'user' ? 'bg-ink text-paper' : 'bg-paper text-ink'
-                        }`}
-                      >
-                        {m.role === 'assistant' ? (
-                          <MessageContent content={m.content} solutions={solutions} />
-                        ) : (
-                          m.content
-                        )}
-                      </div>
-                      {m.role === 'assistant' && m.citations.length > 0 ? (
-                        <div className="mt-1"><SourceChips sources={m.citations} /></div>
-                      ) : null}
-                      {m.role === 'assistant' ? (
-                        <div className="flex justify-start">
-                          <MessageActions
-                            question={precedingQuestion}
-                            answer={m.content}
-                            conversationId={selected.conversation.id}
-                          />
+              <div className="flex-1 space-y-4 overflow-y-auto">
+                <div className="max-h-[50vh] space-y-4 overflow-y-auto rounded-2xl border border-ink/10 bg-white p-5">
+                  {selected.messages.length === 0 ? (
+                    <p className="text-sm text-ink/50">Ask HavisIQ anything to continue this conversation.</p>
+                  ) : null}
+                  {selected.messages.map((m) => {
+                    const precedingQuestion =
+                      m.role === 'assistant'
+                        ? selected.messages[selected.messages.indexOf(m) - 1]?.content ?? ''
+                        : '';
+                    return (
+                      <div key={m.id} className={m.role === 'user' ? 'text-right' : 'text-left'}>
+                        <div
+                          className={`inline-block max-w-2xl rounded-2xl px-4 py-2.5 text-sm ${
+                            m.role === 'user' ? 'bg-ink text-paper' : 'bg-paper text-ink'
+                          }`}
+                        >
+                          {m.role === 'assistant' ? (
+                            <MessageContent content={m.content} solutions={solutions} />
+                          ) : (
+                            m.content
+                          )}
+                          {m.role === 'assistant' && m.citations.length > 0 && isSourceRequest(precedingQuestion) ? (
+                            <div className="mt-1"><SourceChips sources={m.citations} /></div>
+                          ) : null}
                         </div>
-                      ) : null}
+                        {m.role === 'assistant' ? (
+                          <div className="flex justify-start">
+                            <MessageActions
+                              question={precedingQuestion}
+                              answer={m.content}
+                              conversationId={selected.conversation.id}
+                            />
+                          </div>
+                        ) : null}
+                        {m.role === 'assistant' && m.escalationSuggested && !escalation && !isSupportAgent ? (
+                          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-gold-200 bg-gold-50 px-3 py-2 text-xs text-gold-700">
+                            <span>Would you like to talk to a human about this?</span>
+                            <button
+                              onClick={() => requestHumanEscalation(precedingQuestion || m.content)}
+                              className="font-semibold underline"
+                            >
+                              Talk to a human
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {escalation ? (
+                  <div className="rounded-2xl border border-ink/10 bg-white p-5">
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-ink">
+                        <LifeBuoy size={16} className="text-gold-600" />
+                        <h3 className="font-display text-base">
+                          {escalation.assigned_agent_name
+                            ? `Talking with ${escalation.assigned_agent_name}`
+                            : 'Waiting for an agent…'}
+                        </h3>
+                      </div>
+                      <StatusBadge tone={ESCALATION_STATUS_TONE[escalation.status]}>
+                        {ESCALATION_STATUS_LABEL[escalation.status]}
+                      </StatusBadge>
                     </div>
-                  );
-                })}
+                    <div className="max-h-72 space-y-3 overflow-y-auto">
+                      {(escalation.messages ?? []).length === 0 ? (
+                        <p className="text-sm text-ink/50">A member of our support team will join shortly.</p>
+                      ) : null}
+                      {(escalation.messages ?? []).map((m) => (
+                        <div key={m.id} className={m.sender_type === 'customer' ? 'text-right' : 'text-left'}>
+                          <span
+                            className={`inline-block max-w-md rounded-2xl px-4 py-2 text-sm ${
+                              m.sender_type === 'customer' ? 'bg-ink text-paper' : 'bg-paper text-ink'
+                            }`}
+                          >
+                            {m.content}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    {escalation.status !== 'resolved' && escalation.status !== 'closed' ? (
+                      <form onSubmit={handleSendEscalationMessage} className="mt-3 flex items-center gap-2">
+                        <input
+                          value={escalationInput}
+                          onChange={(e) => setEscalationInput(e.target.value)}
+                          placeholder="Message the agent..."
+                          className={`flex-1 ${INPUT_CLASS} mt-0`}
+                        />
+                        <button type="submit" className={PRIMARY_BUTTON}>Send</button>
+                      </form>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
               <form onSubmit={handleSend} className="mt-4 flex items-center gap-2">
                 <input
@@ -433,7 +704,13 @@ export function DashboardPage() {
               </form>
             </div>
           ) : (
-            <EmptyState icon={<MessageSquarePlus size={28} />} title="Select or start a conversation" />
+            <ConversationStartState
+              userName={user?.full_name}
+              isSending={isSending}
+              onSubmit={(message) => startNewConversation(message)}
+              onOpenCompare={() => setCompareModal({ open: true })}
+              onGoToSavedRecommendations={() => setSection('recommendations')}
+            />
           )
         ) : null}
 
@@ -448,6 +725,7 @@ export function DashboardPage() {
         {section === 'notifications' ? (
           <NotificationsSection onUnreadCountChange={setUnreadCount} />
         ) : null}
+        </PageContainer>
       </main>
 
       <CompareSolutionsModal

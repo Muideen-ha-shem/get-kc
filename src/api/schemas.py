@@ -325,6 +325,14 @@ class EscalationSummarySchema(BaseModel):
     problem: str
     actions_already_taken: list[dict]
     suggested_resolution: list[dict]
+    resolution: str | None = Field(
+        None, description="AI-drafted resolution summary, generated on Resolve and "
+        "editable by the agent before Close. None until the escalation is resolved."
+    )
+    handoff_recap: str | None = Field(
+        None, description="Set by /rejoin-ai — consumed once by the customer's next "
+        "/chat call as handoff_context, then cleared client-side."
+    )
 
 
 class EscalationMessageSchema(BaseModel):
@@ -370,6 +378,33 @@ class EscalationSchema(BaseModel):
     )
 
 
+class CustomerEscalationSchema(BaseModel):
+    """Customer-facing escalation view — deliberately a separate, lighter
+    shape from EscalationSchema rather than reusing it with fields hidden
+    at the call site: omits workspace_id, assigned_agent_id (raw id),
+    trigger_reason, ai_engaged, summary (AI-authored internal intent/
+    sentiment), and notes (agent-internal) — structurally, not just by
+    convention, since this schema has no field to accidentally populate
+    with any of them."""
+
+    id: str
+    conversation_id: str | None = None
+    status: str
+    assigned_agent_name: str | None = None
+    department: str | None = None
+    created_at: str | None = None
+    assigned_at: str | None = None
+    resolved_at: str | None = None
+    closed_at: str | None = None
+    messages: list[EscalationMessageSchema] | None = None
+    handoff_recap: str | None = Field(
+        None, description="Set once by /rejoin-ai — the ONE internal-summary field "
+        "deliberately exposed to the customer, since it exists specifically to be "
+        "threaded back as the next /chat call's handoff_context so the AI resumes "
+        "without the customer repeating themselves."
+    )
+
+
 class EscalationCreateRequest(BaseModel):
     conversation_id: str | None = None
     question: str = Field(..., min_length=1)
@@ -377,6 +412,13 @@ class EscalationCreateRequest(BaseModel):
 
 class EscalationActionRequest(BaseModel):
     escalation_id: str
+
+
+class EscalationCloseRequest(BaseModel):
+    resolution_summary: str | None = Field(
+        None, description="The agent's possibly-edited version of the AI-drafted "
+        "resolution summary. None keeps whatever was drafted at Resolve time as-is."
+    )
 
 
 class EscalationMessageCreateRequest(BaseModel):

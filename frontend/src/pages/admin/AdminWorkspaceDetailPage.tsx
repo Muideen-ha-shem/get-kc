@@ -1,6 +1,10 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Calendar, GitCompare, LifeBuoy, MessageSquare, Star, ThumbsDown, ThumbsUp } from 'lucide-react';
 import { apiJson } from '../../lib/apiClient';
+import { ConfirmDeleteModal } from '../../components/ConfirmDeleteModal';
+import { MetricCard } from '../../components/MetricCard';
+import { CARD, DANGER_BUTTON, INPUT_CLASS, PRIMARY_BUTTON, SECONDARY_BUTTON } from '../../lib/uiClassNames';
 import { AdminLayout } from './AdminLayout';
 import type {
   FeatureFlag,
@@ -30,19 +34,19 @@ function BrandingTab({ workspace, onSaved }: { workspace: WorkspaceAdmin; onSave
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-3 max-w-md">
-      <label className="text-sm">
+      <label className="text-sm text-ink">
         Logo URL
-        <input value={logo} onChange={(e) => setLogo(e.target.value)} className="w-full border rounded px-3 py-2 mt-1" />
+        <input value={logo} onChange={(e) => setLogo(e.target.value)} className={INPUT_CLASS} />
       </label>
-      <label className="text-sm">
+      <label className="text-sm text-ink">
         Primary color
-        <input type="color" value={primaryColor} onChange={(e) => setPrimaryColor(e.target.value)} className="w-full border rounded px-3 py-2 mt-1 h-10" />
+        <input type="color" value={primaryColor} onChange={(e) => setPrimaryColor(e.target.value)} className={`${INPUT_CLASS} h-10`} />
       </label>
-      <label className="text-sm">
+      <label className="text-sm text-ink">
         Welcome message
-        <input value={welcomeMessage} onChange={(e) => setWelcomeMessage(e.target.value)} className="w-full border rounded px-3 py-2 mt-1" />
+        <input value={welcomeMessage} onChange={(e) => setWelcomeMessage(e.target.value)} className={INPUT_CLASS} />
       </label>
-      <button type="submit" className="bg-blue-600 text-white rounded px-4 py-2 text-sm self-start">
+      <button type="submit" className={`${PRIMARY_BUTTON} self-start`}>
         Save Branding
       </button>
     </form>
@@ -76,14 +80,15 @@ function SettingsTab({ workspaceId }: { workspaceId: string }) {
     setSettings(updated);
   }
 
-  if (!settings) return <p className="text-sm text-gray-400">Loading…</p>;
+  if (!settings) return <p className="text-sm text-ink/40">Loading…</p>;
 
   const toggle = (key: keyof WorkspaceSettings) => (
-    <label className="flex items-center gap-2 text-sm">
+    <label className="flex items-center gap-2 text-sm text-ink">
       <input
         type="checkbox"
         checked={Boolean(settings[key])}
         onChange={(e) => setSettings({ ...settings, [key]: e.target.checked })}
+        className="accent-gold-500"
       />
       {key.replace(/_/g, ' ')}
     </label>
@@ -97,31 +102,31 @@ function SettingsTab({ workspaceId }: { workspaceId: string }) {
       {toggle('chat_enabled')}
       {toggle('offline_mode')}
       {toggle('auto_assignment_enabled')}
-      <label className="text-sm">
+      <label className="text-sm text-ink">
         Greeting message
         <input
           value={settings.greeting_message ?? ''}
           onChange={(e) => setSettings({ ...settings, greeting_message: e.target.value })}
-          className="w-full border rounded px-3 py-2 mt-1"
+          className={INPUT_CLASS}
         />
       </label>
-      <label className="text-sm">
+      <label className="text-sm text-ink">
         Company name
         <input
           value={settings.company_name ?? ''}
           onChange={(e) => setSettings({ ...settings, company_name: e.target.value })}
-          className="w-full border rounded px-3 py-2 mt-1"
+          className={INPUT_CLASS}
         />
       </label>
-      <label className="text-sm">
+      <label className="text-sm text-ink">
         Footer text
         <input
           value={settings.footer_text ?? ''}
           onChange={(e) => setSettings({ ...settings, footer_text: e.target.value })}
-          className="w-full border rounded px-3 py-2 mt-1"
+          className={INPUT_CLASS}
         />
       </label>
-      <button type="submit" className="bg-blue-600 text-white rounded px-4 py-2 text-sm self-start">
+      <button type="submit" className={`${PRIMARY_BUTTON} self-start`}>
         Save Settings
       </button>
     </form>
@@ -155,23 +160,23 @@ function ProductsTab({ workspaceId }: { workspaceId: string }) {
 
   return (
     <div className="max-w-md">
-      <div className="bg-white border rounded divide-y mb-4">
+      <div className={`${CARD} divide-y divide-ink/10 mb-4`}>
         {products.map((p) => (
           <div key={p.product_id} className="flex items-center justify-between px-4 py-2">
-            <span className="text-sm">{p.product_id}</span>
-            <input type="checkbox" checked={p.enabled} onChange={(e) => toggle(p.product_id, e.target.checked)} />
+            <span className="text-sm text-ink">{p.product_id}</span>
+            <input type="checkbox" checked={p.enabled} onChange={(e) => toggle(p.product_id, e.target.checked)} className="accent-gold-500" />
           </div>
         ))}
-        {products.length === 0 && <p className="px-4 py-2 text-sm text-gray-400">No products configured yet.</p>}
+        {products.length === 0 && <p className="px-4 py-2 text-sm text-ink/40">No products configured yet.</p>}
       </div>
       <form onSubmit={addProduct} className="flex gap-2">
         <input
           value={newProductId}
           onChange={(e) => setNewProductId(e.target.value)}
           placeholder="Product id (e.g. SPIDIFY)"
-          className="flex-1 border rounded px-3 py-2 text-sm"
+          className="flex-1 border border-ink/10 rounded-xl px-3 py-2 text-sm bg-paper text-ink outline-none focus:border-gold-400"
         />
-        <button type="submit" className="bg-blue-600 text-white rounded px-4 py-2 text-sm">
+        <button type="submit" className={PRIMARY_BUTTON}>
           Add
         </button>
       </form>
@@ -206,23 +211,23 @@ function FlagsTab({ workspaceId }: { workspaceId: string }) {
 
   return (
     <div className="max-w-md">
-      <div className="bg-white border rounded divide-y mb-4">
+      <div className={`${CARD} divide-y divide-ink/10 mb-4`}>
         {flags.map((f) => (
           <div key={f.flag_key} className="flex items-center justify-between px-4 py-2">
-            <span className="text-sm">{f.flag_key}</span>
-            <input type="checkbox" checked={f.enabled} onChange={(e) => toggle(f.flag_key, e.target.checked)} />
+            <span className="text-sm text-ink">{f.flag_key}</span>
+            <input type="checkbox" checked={f.enabled} onChange={(e) => toggle(f.flag_key, e.target.checked)} className="accent-gold-500" />
           </div>
         ))}
-        {flags.length === 0 && <p className="px-4 py-2 text-sm text-gray-400">No flags configured yet.</p>}
+        {flags.length === 0 && <p className="px-4 py-2 text-sm text-ink/40">No flags configured yet.</p>}
       </div>
       <form onSubmit={addFlag} className="flex gap-2">
         <input
           value={newFlagKey}
           onChange={(e) => setNewFlagKey(e.target.value)}
           placeholder="Flag key (e.g. ai_copilot)"
-          className="flex-1 border rounded px-3 py-2 text-sm"
+          className="flex-1 border border-ink/10 rounded-xl px-3 py-2 text-sm bg-paper text-ink outline-none focus:border-gold-400"
         />
-        <button type="submit" className="bg-blue-600 text-white rounded px-4 py-2 text-sm">
+        <button type="submit" className={PRIMARY_BUTTON}>
           Add
         </button>
       </form>
@@ -243,18 +248,18 @@ function ApiKeyTab({ workspaceId }: { workspaceId: string }) {
 
   return (
     <div className="max-w-md">
-      <p className="text-sm text-gray-600 mb-3">
+      <p className="text-sm text-ink/60 mb-3">
         For security, the raw API key is never shown after creation — only at the moment it's generated.
       </p>
-      <button onClick={regenerate} className="bg-red-600 text-white rounded px-4 py-2 text-sm">
+      <button onClick={regenerate} className={DANGER_BUTTON}>
         Regenerate API Key
       </button>
       {newKey && (
-        <div className="mt-4 text-xs bg-yellow-50 border border-yellow-200 rounded p-3">
-          <p className="font-semibold text-yellow-700 mb-1">New key — copy it now, it won't be shown again:</p>
-          <code>{newKey}</code>
-          <p className="font-semibold text-yellow-700 mt-3 mb-1">Embed snippet:</p>
-          <pre className="bg-gray-900 text-gray-100 rounded p-3 overflow-x-auto whitespace-pre-wrap">
+        <div className="mt-4 text-xs bg-gold-50 border border-gold-200 rounded-2xl p-3">
+          <p className="font-semibold text-gold-700 mb-1">New key — copy it now, it won't be shown again:</p>
+          <code className="text-ink">{newKey}</code>
+          <p className="font-semibold text-gold-700 mt-3 mb-1">Embed snippet:</p>
+          <pre className="bg-ink text-paper rounded-xl p-3 overflow-x-auto whitespace-pre-wrap">
 {`<script src="https://cdn.havisiq.com/sdk.js"></script>
 <script>
   HavisIQ.init({ apiKey: "${newKey}" });
@@ -273,27 +278,20 @@ function AnalyticsTab({ workspaceId }: { workspaceId: string }) {
     apiJson<WorkspaceAnalytics>(`/admin/workspaces/${workspaceId}/analytics`).then(setAnalytics).catch(() => {});
   }, [workspaceId]);
 
-  if (!analytics) return <p className="text-sm text-gray-400">Loading…</p>;
+  if (!analytics) return <p className="text-sm text-ink/40">Loading…</p>;
 
   return (
     <div className="grid grid-cols-3 gap-4 max-w-2xl">
-      {[
-        ['Conversations', analytics.conversation_count],
-        ['Escalations', analytics.escalation_count],
-        ['Appointments', analytics.appointment_count],
-        ['Saved Recommendations', analytics.saved_recommendation_count],
-        ['Saved Comparisons', analytics.saved_comparison_count],
-        ['Feedback: Helpful', analytics.feedback_helpful_count],
-        ['Feedback: Not Helpful', analytics.feedback_not_helpful_count],
-      ].map(([label, value]) => (
-        <div key={label as string} className="bg-white border rounded p-4">
-          <p className="text-xs text-gray-500 uppercase">{label}</p>
-          <p className="text-xl font-semibold mt-1">{value}</p>
-        </div>
-      ))}
-      <div className="bg-white border rounded p-4 col-span-3">
-        <p className="text-xs text-gray-500 uppercase mb-2">Escalation Status Breakdown</p>
-        <div className="flex gap-4 text-sm">
+      <MetricCard label="Conversations" value={analytics.conversation_count} icon={MessageSquare} tone="ink" />
+      <MetricCard label="Escalations" value={analytics.escalation_count} icon={LifeBuoy} tone="red" />
+      <MetricCard label="Appointments" value={analytics.appointment_count} icon={Calendar} tone="gold" />
+      <MetricCard label="Saved Recommendations" value={analytics.saved_recommendation_count} icon={Star} tone="gold" />
+      <MetricCard label="Saved Comparisons" value={analytics.saved_comparison_count} icon={GitCompare} tone="ink" />
+      <MetricCard label="Feedback: Helpful" value={analytics.feedback_helpful_count} icon={ThumbsUp} tone="green" />
+      <MetricCard label="Feedback: Not Helpful" value={analytics.feedback_not_helpful_count} icon={ThumbsDown} tone="red" />
+      <div className={`${CARD} p-4 col-span-3`}>
+        <p className="text-xs text-ink/50 uppercase mb-2">Escalation Status Breakdown</p>
+        <div className="flex gap-4 text-sm text-ink">
           {Object.entries(analytics.escalation_status_breakdown).map(([status, count]) => (
             <span key={status}>
               {status}: <strong>{count}</strong>
@@ -307,9 +305,11 @@ function AnalyticsTab({ workspaceId }: { workspaceId: string }) {
 
 function AdminWorkspaceDetailContent() {
   const { workspaceId } = useParams<{ workspaceId: string }>();
+  const navigate = useNavigate();
   const [workspace, setWorkspace] = useState<WorkspaceAdmin | null>(null);
   const [tab, setTab] = useState<Tab>('branding');
   const [forbidden, setForbidden] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   // Lifecycle actions (suspend/archive/delete) and the Flags tab stay
   // super-admin-only even after Phase 28 widened the rest of this page to
   // workspace_admins — best-effort probe, not a hard gate (mirrors
@@ -329,58 +329,70 @@ function AdminWorkspaceDetailContent() {
       .catch(() => setIsPlatformAdmin(false));
   }, [workspaceId]);
 
-  async function lifecycleAction(action: 'suspend' | 'reactivate' | 'archive' | 'delete') {
+  async function lifecycleAction(action: 'suspend' | 'reactivate' | 'archive') {
     if (!workspaceId) return;
     const updated = await apiJson<WorkspaceAdmin>(`/admin/workspaces/${workspaceId}/${action}`, { method: 'POST' });
     setWorkspace(updated);
   }
 
+  async function hardDeleteWorkspace() {
+    if (!workspaceId || !workspace) return;
+    await apiJson(`/admin/workspaces/${workspaceId}/hard-delete`, {
+      method: 'POST',
+      body: JSON.stringify({ confirm_name: workspace.name }),
+    });
+    navigate('/admin/workspaces');
+  }
+
   if (forbidden) {
     return (
-      <div className="p-8 text-center">
-        <p className="text-lg font-medium">You don't have admin access to this workspace.</p>
-        <Link to="/admin" className="text-blue-600 underline">Back to Admin</Link>
+      <div className="min-h-screen bg-paper p-8 text-center">
+        <p className="text-lg font-display text-ink">You don't have admin access to this workspace.</p>
+        <Link to="/admin" className="text-gold-700 underline hover:text-gold-600">Back to Admin</Link>
       </div>
     );
   }
 
-  if (!workspace || !workspaceId) return <p className="text-sm text-gray-400">Loading…</p>;
+  if (!workspace || !workspaceId) return <p className="text-sm text-ink/40">Loading…</p>;
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h1 className="text-xl font-semibold">{workspace.name}</h1>
-          <p className="text-xs text-gray-500">{workspace.slug}</p>
+          <h1 className="text-xl font-display font-semibold text-ink">{workspace.name}</h1>
+          <p className="text-xs text-ink/50">{workspace.slug}</p>
         </div>
         <div className="flex gap-2">
           <Link
             to={`/admin/workspaces/${workspaceId}/knowledge`}
-            className="text-xs bg-blue-600 text-white rounded px-3 py-2 flex items-center"
+            className="rounded-full bg-ink px-3 py-2 text-xs font-semibold text-paper transition hover:bg-ink-soft flex items-center"
           >
             Knowledge
           </Link>
           <Link
             to={`/admin/workspaces/${workspaceId}/team`}
-            className="text-xs bg-blue-600 text-white rounded px-3 py-2 flex items-center"
+            className="rounded-full bg-ink px-3 py-2 text-xs font-semibold text-paper transition hover:bg-ink-soft flex items-center"
           >
             Team
           </Link>
           {isPlatformAdmin ? (
             <>
               {workspace.is_active ? (
-                <button onClick={() => lifecycleAction('suspend')} className="text-xs bg-gray-200 rounded px-3 py-2">
+                <button onClick={() => lifecycleAction('suspend')} className={SECONDARY_BUTTON}>
                   Suspend
                 </button>
               ) : (
-                <button onClick={() => lifecycleAction('reactivate')} className="text-xs bg-green-600 text-white rounded px-3 py-2">
+                <button onClick={() => lifecycleAction('reactivate')} className="rounded-full bg-green-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-green-700">
                   Reactivate
                 </button>
               )}
-              <button onClick={() => lifecycleAction('archive')} className="text-xs bg-gray-200 rounded px-3 py-2">
+              <button onClick={() => lifecycleAction('archive')} className={SECONDARY_BUTTON}>
                 Archive
               </button>
-              <button onClick={() => lifecycleAction('delete')} className="text-xs bg-red-100 text-red-700 rounded px-3 py-2">
+              <button
+                onClick={() => setDeleteModalOpen(true)}
+                className="rounded-full bg-red-50 text-red-700 border border-red-200 px-3 py-2 text-xs transition hover:bg-red-100"
+              >
                 Delete
               </button>
             </>
@@ -388,12 +400,14 @@ function AdminWorkspaceDetailContent() {
         </div>
       </div>
 
-      <div className="flex gap-2 mb-6 border-b">
+      <div className="flex gap-2 mb-6 border-b border-ink/10">
         {TABS.filter((t) => t !== 'flags' || isPlatformAdmin).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`px-3 py-2 text-sm capitalize ${tab === t ? 'border-b-2 border-blue-600 text-blue-700 font-medium' : 'text-gray-500'}`}
+            className={`px-3 py-2 text-sm capitalize transition ${
+              tab === t ? 'border-b-2 border-gold-500 text-ink font-medium' : 'text-ink/50 hover:text-ink'
+            }`}
           >
             {t}
           </button>
@@ -406,6 +420,14 @@ function AdminWorkspaceDetailContent() {
       {tab === 'flags' && <FlagsTab workspaceId={workspaceId} />}
       {tab === 'apikey' && <ApiKeyTab workspaceId={workspaceId} />}
       {tab === 'analytics' && <AnalyticsTab workspaceId={workspaceId} />}
+
+      <ConfirmDeleteModal
+        isOpen={deleteModalOpen}
+        onClose={() => setDeleteModalOpen(false)}
+        resourceLabel={workspace.name}
+        resourceType="workspace"
+        onConfirm={hardDeleteWorkspace}
+      />
     </div>
   );
 }

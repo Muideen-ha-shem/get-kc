@@ -25,6 +25,13 @@ _FAKE_WORKSPACE = WorkspaceContext(workspace_id="w1", slug="acme", name="Acme")
 
 
 def _make_orchestrator(*, advisory_layer=None, evidence=None):
+    if advisory_layer is not None:
+        # MagicMock() auto-creates attributes returning a truthy MagicMock
+        # by default — without this, ChatOrchestrator's zero-signal guard
+        # clause would incorrectly short-circuit every test here that
+        # passes a mocked advisory_layer.
+        advisory_layer.check_zero_signal.return_value = None
+
     source_router = MagicMock()
     source_router.route.return_value = RoutingDecision(knowledge=True, web=False)
 
@@ -137,7 +144,10 @@ class TestRejoinAiRoute:
              ), patch(
                  "src.api.routes.escalation._escalation_repository.set_ai_engaged",
                  return_value=_escalation(status="resolved", ai_engaged=True),
-             ) as mock_set_ai_engaged:
+             ) as mock_set_ai_engaged, patch(
+                 "src.api.routes.escalation._escalation_repository.merge_summary",
+                 return_value=_escalation(status="resolved", ai_engaged=True),
+             ):
             response = client.post("/agent/escalations/e1/rejoin-ai")
 
         assert response.status_code == 200

@@ -25,6 +25,22 @@ class TestDetectHumanRequest:
     def test_negative_example(self):
         assert detect_human_request("What does SPIDIFY cost?") is False
 
+    def test_live_confirmed_action_hallucination_transcript(self):
+        """Live-confirmed bug: neither turn of this real transcript matched
+        any keyword before this fix, so nothing flagged it as a human-
+        request at all — it fell straight through to retrieval and a web
+        search instead."""
+        assert detect_human_request("Can you arrange a quick chat with a specialist?") is True
+        assert detect_human_request("Today 1:45pm WAT, live chat") is True
+
+    def test_no_collision_with_product_catalog(self):
+        """None of the new keywords ("specialist", "live chat", "quick
+        chat", "arrange a chat/call") should false-positive on an ordinary
+        product question — confirmed no product in the catalog is named or
+        described using any of these phrases."""
+        assert detect_human_request("What does SPIDIFY cost?") is False
+        assert detect_human_request("Compare PayCheq with Xpend") is False
+
 
 class TestDetectCriticalIntent:
     def test_billing(self):

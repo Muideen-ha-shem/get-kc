@@ -51,6 +51,8 @@ from typing import Any, Sequence
 
 from ...shared.logging import get_logger
 from ..routing.source_router import SourceRouter, RoutingDecision
+from ..routing.action_intent import detect_action_intent
+from ..routing.self_identity import is_self_identity_question
 from ..merger.context_merger import ContextMerger, EvidenceItem, _CONFIDENCE_THRESHOLD
 
 logger: logging.Logger = get_logger(__name__)
@@ -227,6 +229,7 @@ class SearchManager:
         question: str,
         decision: RoutingDecision | None = None,
         workspace_id: str | None = None,
+        workspace_name: str | None = None,
     ) -> list[EvidenceItem]:
         """Execute the retrieval plan for *question* and return evidence.
 
@@ -234,6 +237,9 @@ class SearchManager:
             question: The user's natural-language question.
             decision: An optional pre-computed routing decision.  When
                       ``None``, the ``SourceRouter`` is called automatically.
+            workspace_name: The tenant's own name, if known — forwarded to
+                the router, and also used directly by this method's own
+                fallback-to-web guards below (see ``is_self_identity_question``).
 
         Returns:
             A list of :class:`~services.merger.EvidenceItem` ordered by
@@ -244,7 +250,10 @@ class SearchManager:
             ValueError: If ``question`` is empty after stripping.
         """
         # --- Step 1: Route ---
-        actual_decision = decision if decision is not None else self._source_router.route(question)
+        actual_decision = (
+            decision if decision is not None
+            else self._source_router.route(question, workspace_name=workspace_name)
+        )
         logger.info(
             "SearchManager.retrieve: question=%r, decision=%s.",
             question,
@@ -273,15 +282,31 @@ class SearchManager:
                 _CONFIDENCE_THRESHOLD,
             )
             if kb_confidence < _CONFIDENCE_THRESHOLD and not actual_decision.web:
-                logger.info(
-                    "SearchManager: KB confidence %.4f below threshold %.2f — "
-                    "triggering live search fallback.",
-                    kb_confidence,
-                    _CONFIDENCE_THRESHOLD,
-                )
-                actual_decision = RoutingDecision(knowledge=True, web=True)
-                web_search_results = self._retrieve_web_search(question)
-                live_page_chunks = self._retrieve_live_pages(question, web_search_results)
+                if is_self_identity_question(question, workspace_name):
+                    logger.info(
+                        "SearchManager: KB confidence %.4f below threshold but question is "
+                        "a self-identity question about workspace %r — NOT falling back to "
+                        "web search; the workspace's own KB gap is the honest answer here.",
+                        kb_confidence, workspace_name,
+                    )
+                elif detect_action_intent(question) is not None:
+                    logger.info(
+                        "SearchManager: KB confidence %.4f below threshold but question is "
+                        "an action request (live-chat/escalation/appointment) — NOT falling "
+                        "back to web search; this belongs to the action-intent short-circuit, "
+                        "not retrieval.",
+                        kb_confidence,
+                    )
+                else:
+                    logger.info(
+                        "SearchManager: KB confidence %.4f below threshold %.2f — "
+                        "triggering live search fallback.",
+                        kb_confidence,
+                        _CONFIDENCE_THRESHOLD,
+                    )
+                    actual_decision = RoutingDecision(knowledge=True, web=True)
+                    web_search_results = self._retrieve_web_search(question)
+                    live_page_chunks = self._retrieve_live_pages(question, web_search_results)
             elif actual_decision.web and self._named_product_with_adequate_confidence(kb_confidence):
                 # A question that explicitly names one or more of our own
                 # products (e.g. "Compare STAAS and WeCare") can still
@@ -313,11 +338,25 @@ class SearchManager:
         # If the routing didn't include web search but we have no KB evidence,
         # try web search as a last resort before returning empty.
         if not knowledge_evidence and not web_search_results and not live_page_chunks:
-            logger.info(
-                "SearchManager: no evidence from any source — attempting live search fallback."
-            )
-            web_search_results = self._retrieve_web_search(question)
-            live_page_chunks = self._retrieve_live_pages(question, web_search_results)
+            if is_self_identity_question(question, workspace_name):
+                logger.info(
+                    "SearchManager: no evidence from any source, but question is a "
+                    "self-identity question about workspace %r — skipping the enterprise "
+                    "web-search fallback rather than risking an unrelated same-named result.",
+                    workspace_name,
+                )
+            elif detect_action_intent(question) is not None:
+                logger.info(
+                    "SearchManager: no evidence from any source, but question is an action "
+                    "request (live-chat/escalation/appointment) — skipping the enterprise "
+                    "web-search fallback; this belongs to the action-intent short-circuit."
+                )
+            else:
+                logger.info(
+                    "SearchManager: no evidence from any source — attempting live search fallback."
+                )
+                web_search_results = self._retrieve_web_search(question)
+                live_page_chunks = self._retrieve_live_pages(question, web_search_results)
 
         # --- Step 4: Merge with freshness awareness ---
         evidence = self._context_merger.merge(

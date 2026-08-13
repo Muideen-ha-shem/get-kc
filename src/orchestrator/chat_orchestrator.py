@@ -32,7 +32,21 @@ import logging
 from typing import Any
 
 from ..api.schemas import ChatResponse
+from ..services.advisory.action_workflow import (
+    build_confirmation_summary,
+    build_field_prompt,
+    collect_field,
+    execute_action,
+    match_product,
+    required_fields,
+)
+from ..services.advisory.session_context import PendingAction, SessionState
+from ..services.appointments.appointment_service import AppointmentService
 from ..services.escalation.decision import decide_escalation
+from ..services.escalation.escalation_service import EscalationService
+from ..services.routing.action_intent import detect_action_intent
+from ..services.routing.confirmation_intent import detect_bare_cancellation, detect_confirmation
+from ..services.routing.message_segmentation import segment_message
 from ..services.knowledge import KnowledgeService
 from ..services.support import SupportService
 from ..services.routing import SourceRouter, ProductRouter
@@ -47,6 +61,7 @@ from ..services.validation import CitationValidator
 from ..services.advisory import AdvisoryResponseLayer, AnalyticsService
 from ..services.session.session_service import SessionService
 from ..shared.cache import TTLCache
+from ..shared.customer_copy import NO_EVIDENCE_FALLBACK
 from ..shared.logging import get_logger
 
 logger: logging.Logger = get_logger(__name__)
@@ -104,6 +119,8 @@ class ChatOrchestrator:
         enable_background_learning: bool | None = None,
         advisory_layer: Any = None,
         session_service: SessionService | None = None,
+        appointment_service: Any = None,
+        escalation_service: Any = None,
     ) -> None:
         # Legacy services
         self._knowledge_service = knowledge_service or KnowledgeService()
@@ -126,6 +143,15 @@ class ChatOrchestrator:
         # discussed products/recommendations/comparisons/business problem).
         # None preserves exact prior behaviour: every call is stateless.
         self._session_service = session_service
+        # Optional — used only by the action-intent short-circuit (Step 0.6)
+        # to surface REAL open appointment slots instead of ever inventing
+        # one. None degrades gracefully to a generic (still honest) ack.
+        self._appointment_service = appointment_service
+        # Optional — used only by Step 0.6's confirmed-escalation path
+        # (execute_action) to create a REAL escalation once the customer
+        # confirms. None degrades to an honest "couldn't submit" message
+        # rather than pretending to have raised the request.
+        self._escalation_service = escalation_service
 
         # Whether to trigger background learning after responses
         if enable_background_learning is None:
@@ -163,7 +189,10 @@ class ChatOrchestrator:
         session_id: str | None = None,
         profile_context: str | None = None,
         workspace_id: str | None = None,
+        workspace_name: str | None = None,
+        workspace_welcome_message: str | None = None,
         handoff_context: str | None = None,
+        conversation_id: str | None = None,
     ) -> dict[str, Any]:
         """Process a user message and return a response.
 
@@ -200,7 +229,10 @@ class ChatOrchestrator:
                 session_id=session_id,
                 profile_context=profile_context,
                 workspace_id=workspace_id,
+                workspace_name=workspace_name,
+                workspace_welcome_message=workspace_welcome_message,
                 handoff_context=handoff_context,
+                conversation_id=conversation_id,
             )
         return self._chat_legacy(message)
 
@@ -219,7 +251,10 @@ class ChatOrchestrator:
         session_id: str | None = None,
         profile_context: str | None = None,
         workspace_id: str | None = None,
+        workspace_name: str | None = None,
+        workspace_welcome_message: str | None = None,
         handoff_context: str | None = None,
+        conversation_id: str | None = None,
     ) -> ChatResponse:
         """Process a request and return a Pydantic ``ChatResponse``.
 
@@ -239,7 +274,10 @@ class ChatOrchestrator:
             session_id=session_id,
             profile_context=profile_context,
             workspace_id=workspace_id,
+            workspace_name=workspace_name,
+            workspace_welcome_message=workspace_welcome_message,
             handoff_context=handoff_context,
+            conversation_id=conversation_id,
         )
         next_actions = result.get("next_actions") or None
         return ChatResponse(
@@ -260,7 +298,7 @@ class ChatOrchestrator:
         matches, _, parent_urls = self._knowledge_service.retrieve_context(message)
         if not matches:
             return {
-                "answer": "I couldn't find enough relevant context in the knowledge base for that question.",
+                "answer": NO_EVIDENCE_FALLBACK,
                 "sources": [],
             }
 
@@ -281,7 +319,10 @@ class ChatOrchestrator:
         session_id: str | None = None,
         profile_context: str | None = None,
         workspace_id: str | None = None,
+        workspace_name: str | None = None,
+        workspace_welcome_message: str | None = None,
         handoff_context: str | None = None,
+        conversation_id: str | None = None,
     ) -> dict[str, Any]:
         """Full multi-source pipeline with router, manager, merger, generator."""
         # --- Step 0: Session wiring (Phase 20, optional) ---
@@ -306,9 +347,207 @@ class ChatOrchestrator:
         if handoff_context:
             advisory_question = f"{handoff_context}. {advisory_question}"
 
+        # --- Step 0.5: Zero-signal guard (vague-recommendation-ask fix) ---
+        # Fires only when the question shows genuinely zero product/theme
+        # signal AND is explicitly phrased as a recommendation ask (see
+        # AdvisoryResponseLayer.check_zero_signal / ClarificationEngine
+        # .check_zero_signal). Runs BEFORE SourceRouter.route()/
+        # SearchManager.retrieve() — a real skip, not a post-hoc discard:
+        # for this one narrow case the web search that previously ran
+        # unconditionally (SourceRouter has no vagueness awareness) never
+        # executes at all, so the answer can never end up naming a
+        # competitor product surfaced by that search.
+        #
+        # Every other query shape — named product, ambiguous-two-product,
+        # business-theme, normal knowledge question, or any call where
+        # advisory_layer is None — does not take this branch and reaches
+        # Step 1 exactly as it does today.
+        if self._advisory_layer is not None:
+            zero_signal_question = self._advisory_layer.check_zero_signal(advisory_question)
+            if zero_signal_question is not None:
+                return {
+                    "answer": zero_signal_question,
+                    "sources": [],
+                    "citations": [],
+                    "next_actions": [],
+                    "session_id": session_id,
+                    "escalation_recommended": False,
+                    "escalation_reason": None,
+                }
+
+        # --- Step 0.6: Action-request workflow (Phase 2 — confirmed, ---
+        # --- stateful escalation/appointment/demo requests) ---
+        # Live-confirmed bug: "Can you arrange a quick chat with a specialist?"
+        # got an improvised "Absolutely — I can set up a quick chat..." (no
+        # backend action taken), and the follow-up "Today 1:45pm WAT, live
+        # chat" had zero KB evidence and fell through to a live web search
+        # (unrelated timezone/city results). Detected BEFORE Step 1/2 so
+        # these messages never reach retrieval at all. A pending action is
+        # tracked per-session across turns (see
+        # session_context.PendingAction): fields are collected one at a
+        # time, a plain summary is shown, and a real backend write only
+        # ever happens once the customer explicitly confirms — see
+        # services.advisory.action_workflow, the only module here with side
+        # effects. Without a session_service configured there's nowhere to
+        # carry state across turns, so this degrades to a single-turn ack.
+        session_state = self._session_service.get_state(session_id) if self._session_service else None
+        pending = self._session_service.get_pending_action(session_id) if self._session_service else None
+
+        if pending is not None:
+            confirmation = detect_confirmation(message)
+            if pending.status == "awaiting_confirmation" and confirmation == "yes":
+                answer = execute_action(
+                    pending,
+                    workspace_id=workspace_id,
+                    workspace_name=workspace_name,
+                    conversation_id=conversation_id,
+                    escalation_service=self._escalation_service,
+                    appointment_service=self._appointment_service,
+                )
+                self._session_service.set_pending_action(session_id, None)
+                return {
+                    "answer": answer, "sources": [], "citations": [], "next_actions": [],
+                    "session_id": session_id, "escalation_recommended": False, "escalation_reason": None,
+                }
+            if confirmation == "no":
+                self._session_service.set_pending_action(session_id, None)
+                return {
+                    "answer": "No problem — I've cancelled that. Anything else I can help with?",
+                    "sources": [], "citations": [], "next_actions": [],
+                    "session_id": session_id, "escalation_recommended": False, "escalation_reason": None,
+                }
+
+            # Intent switch (Phase 28): a message that itself expresses a
+            # DIFFERENT action request must never be silently swallowed as
+            # this field's answer — live-confirmed bug: an appointment
+            # request typed mid-way through a demo's name/email collection
+            # got misfiled as the customer's name. Checked before any
+            # field-specific handling so a switch always wins, even at the
+            # confirmation step (a customer can change their mind there
+            # too), and even for a field that already has its own strict
+            # validator (email/slot) — those only run below, once we know
+            # this genuinely isn't a switch.
+            switch_match = detect_action_intent(message)
+            if switch_match is not None and switch_match.kind != pending.kind:
+                new_pending = self._start_pending_action(switch_match.kind, session_state, message)
+                answer = "Sure — let's do that instead. " + self._render_pending_action_prompt(
+                    new_pending, workspace_id=workspace_id
+                )
+                self._session_service.set_pending_action(session_id, new_pending)
+                return {
+                    "answer": answer, "sources": [], "citations": [], "next_actions": [],
+                    "session_id": session_id,
+                    "escalation_recommended": new_pending.status == "awaiting_confirmation" and new_pending.kind == "escalation",
+                    "escalation_reason": "explicit_request" if new_pending.kind == "escalation" and new_pending.status == "awaiting_confirmation" else None,
+                }
+
+            if pending.status == "collecting_info":
+                pending, answer = collect_field(
+                    pending, message,
+                    appointment_service=self._appointment_service, workspace_id=workspace_id,
+                )
+                self._session_service.set_pending_action(session_id, pending)
+                return {
+                    "answer": answer, "sources": [], "citations": [], "next_actions": [],
+                    "session_id": session_id,
+                    "escalation_recommended": pending.status == "awaiting_confirmation" and pending.kind == "escalation",
+                    "escalation_reason": None,
+                }
+            # awaiting_confirmation but the reply wasn't a bare yes/no/switch —
+            # gently re-ask rather than silently dropping the pending action.
+            return {
+                "answer": build_confirmation_summary(pending),
+                "sources": [], "citations": [], "next_actions": [],
+                "session_id": session_id, "escalation_recommended": False, "escalation_reason": None,
+            }
+
+        # Live-confirmed bug: once a pending action completes (or was never
+        # started), a bare "Cancel that" has nothing to attach to — with no
+        # pending_action to gate on, it used to fall straight through to
+        # RAG, which hallucinated an unrelated product-cancellation answer
+        # (e.g. "cancel your PayCheq subscription"). Exact-match, not
+        # substring (see detect_bare_cancellation) — a real question like
+        # "How do I cancel my PayCheq subscription?" still reaches RAG.
+        if detect_bare_cancellation(message):
+            return {
+                "answer": (
+                    "There's nothing active for me to cancel right now — was there "
+                    "something specific you wanted to stop or change?"
+                ),
+                "sources": [], "citations": [], "next_actions": [],
+                "session_id": session_id, "escalation_recommended": False, "escalation_reason": None,
+            }
+
+        # Multi-intent handling: live-confirmed bug — "I want to understand
+        # SPIDIFY, compare it with V-Login, and then book a demo." jumped
+        # straight to "Could I get your name?", silently dropping the two
+        # knowledge requests that came first, because a single action
+        # keyword anywhere in the message hijacked the whole thing.
+        # Deliberately narrow: segment_message() only ever splits on an
+        # explicit "and then"/", then" marker (see its own docstring for
+        # why), so this branch activates only for a genuine sequence of
+        # clauses — every other message (the overwhelming majority) sees
+        # `segments == [message]` and falls straight through, unaffected.
+        segments = segment_message(message)
+        if len(segments) > 1 and self._session_service is not None and session_id:
+            action_index = next((i for i, seg in enumerate(segments) if detect_action_intent(seg)), None)
+            if action_index is not None:
+                action_match_multi = detect_action_intent(segments[action_index])
+                knowledge_segments = [seg for i, seg in enumerate(segments) if i != action_index]
+                knowledge_answer: str | None = None
+                knowledge_sources: list[str] = []
+                knowledge_citations: list[dict[str, Any]] = []
+                if knowledge_segments:
+                    kresult = self._answer_knowledge_segment(
+                        ". ".join(knowledge_segments),
+                        workspace_id=workspace_id, workspace_name=workspace_name,
+                        workspace_welcome_message=workspace_welcome_message,
+                    )
+                    knowledge_answer = kresult["answer"]
+                    knowledge_sources = kresult["sources"]
+                    knowledge_citations = kresult["citations"]
+
+                # Full original `message` (not just the action segment) so
+                # an explicit product named in an EARLIER clause ("...
+                # understand SPIDIFY...") is still picked up by
+                # _seed_known_demo_product's match_product() scan.
+                new_pending = self._start_pending_action(action_match_multi.kind, session_state, message)
+                action_prompt = self._render_pending_action_prompt(new_pending, workspace_id=workspace_id)
+                self._session_service.set_pending_action(session_id, new_pending)
+
+                answer = f"{knowledge_answer}\n\n{action_prompt}" if knowledge_answer else action_prompt
+                return {
+                    "answer": answer, "sources": knowledge_sources, "citations": knowledge_citations,
+                    "next_actions": [], "session_id": session_id,
+                    "escalation_recommended": new_pending.status == "awaiting_confirmation" and new_pending.kind == "escalation",
+                    "escalation_reason": "explicit_request" if new_pending.kind == "escalation" and new_pending.status == "awaiting_confirmation" else None,
+                }
+
+        action_match = detect_action_intent(message)
+        if action_match is not None:
+            if self._session_service is None or not session_id:
+                # No session to carry state across turns — a degraded,
+                # single-turn ack rather than pretending to collect
+                # information that can never be received back.
+                answer = self._build_stateless_action_ack(action_match.kind, workspace_id)
+                return {
+                    "answer": answer, "sources": [], "citations": [], "next_actions": [],
+                    "session_id": session_id, "escalation_recommended": action_match.kind == "escalation",
+                    "escalation_reason": "explicit_request" if action_match.kind == "escalation" else None,
+                }
+            new_pending = self._start_pending_action(action_match.kind, session_state, message)
+            answer = self._render_pending_action_prompt(new_pending, workspace_id=workspace_id)
+            self._session_service.set_pending_action(session_id, new_pending)
+            return {
+                "answer": answer, "sources": [], "citations": [], "next_actions": [],
+                "session_id": session_id,
+                "escalation_recommended": new_pending.status == "awaiting_confirmation" and new_pending.kind == "escalation",
+                "escalation_reason": "explicit_request" if new_pending.kind == "escalation" and new_pending.status == "awaiting_confirmation" else None,
+            }
+
         # --- Step 1: Route (SourceRouter) ---
         if self._source_router:
-            decision = self._source_router.route(message)
+            decision = self._source_router.route(message, workspace_name=workspace_name)
         else:
             # If no router was injected, default to both
             from ..services.routing.source_router import RoutingDecision
@@ -316,7 +555,9 @@ class ChatOrchestrator:
 
         # --- Step 2: Retrieve (SearchManager) ---
         if self._search_manager:
-            evidence = self._search_manager.retrieve(message, decision=decision, workspace_id=workspace_id)
+            evidence = self._search_manager.retrieve(
+                message, decision=decision, workspace_id=workspace_id, workspace_name=workspace_name,
+            )
         else:
             # Fallback: use legacy knowledge service
             matches, _, _ = self._knowledge_service.retrieve_context(message)
@@ -385,6 +626,8 @@ class ChatOrchestrator:
                 context=evidence,
                 primary_product=primary_product,
                 complementary_products=complementary_products,
+                workspace_name=workspace_name,
+                workspace_welcome_message=workspace_welcome_message,
             )
             answer = result.get("answer", "")
             citations = result.get("citations", [])
@@ -397,7 +640,7 @@ class ChatOrchestrator:
                 answer = result.get("answer", "")
                 citations = []
             else:
-                answer = "I couldn't find enough relevant context to answer that question."
+                answer = NO_EVIDENCE_FALLBACK
                 citations = []
 
         # --- Step 4: Background learning (fire-and-forget) ---
@@ -439,6 +682,165 @@ class ChatOrchestrator:
                 self._session_service.record_business_problem(session_id, category)
         except Exception as exc:
             logger.warning("ChatOrchestrator: session recording failed — %s.", exc)
+
+    def _build_appointment_availability_ack(self, workspace_id: str | None) -> str:
+        """Deterministic, zero-LLM-call ack for an appointment/scheduling
+        request — lists REAL open slots from AppointmentService so the
+        answer can never echo back a time the customer invented (e.g. the
+        live-confirmed bug's "1:45pm", which doesn't match any bookable
+        slot). Degrades to a generic-but-honest ack when no
+        appointment_service is configured, rather than fabricating slots.
+        """
+        if self._appointment_service is None:
+            return (
+                "I can help you get an appointment booked — could you let me know your "
+                "preferred day, plus your name and email, and I'll take it from there?"
+            )
+        try:
+            availability = self._appointment_service.get_availability(days=4, workspace_id=workspace_id)
+        except Exception as exc:
+            logger.warning("ChatOrchestrator: appointment availability lookup failed — %s.", exc)
+            return (
+                "I can help you get an appointment booked — could you let me know your "
+                "preferred day, plus your name and email, and I'll take it from there?"
+            )
+
+        open_slots = [
+            f"{day.day_label} {slot['time']}"
+            for day in availability
+            if not day.fully_booked
+            for slot in day.slots
+            if slot.get("available")
+        ]
+        if not open_slots:
+            return (
+                "I'd love to get that booked, but I'm not seeing any open slots in the "
+                "next few days — could you tell me your name and email, and I'll follow up "
+                "with the next available time?"
+            )
+        slots_text = ", ".join(open_slots[:5])
+        return (
+            f"I can help set that up — here's what's actually open: {slots_text}. "
+            "Could you tell me which time works for you, plus your name and email, and "
+            "I'll get it booked?"
+        )
+
+    def _answer_knowledge_segment(
+        self,
+        question: str,
+        *,
+        workspace_id: str | None,
+        workspace_name: str | None,
+        workspace_welcome_message: str | None,
+    ) -> dict[str, Any]:
+        """A minimal, self-contained route -> retrieve -> generate for the
+        knowledge portion of a multi-intent message — the same
+        `self._source_router`/`self._search_manager`/`self._response_generator`
+        collaborators used everywhere else, but kept deliberately separate
+        from the main pipeline's inline Steps 1-3 (advisory enrichment,
+        clarification short-circuit, escalation-recommendation signal)
+        rather than a refactor of that sensitive block: this multi-intent
+        knowledge answer trades away advisory framing for a much smaller,
+        lower-risk change to the single-intent path every existing test
+        exercises. Still a fully grounded, cited answer from the real
+        pipeline — not a new capability, just calling `generate()` again on
+        a recombined question."""
+        if self._source_router:
+            decision = self._source_router.route(question, workspace_name=workspace_name)
+        else:
+            from ..services.routing.source_router import RoutingDecision
+            decision = RoutingDecision(knowledge=True, web=True)
+
+        evidence = (
+            self._search_manager.retrieve(
+                question, decision=decision, workspace_id=workspace_id, workspace_name=workspace_name
+            )
+            if self._search_manager else []
+        )
+
+        if self._response_generator:
+            result = self._response_generator.generate(
+                question=question,
+                context=evidence,
+                workspace_name=workspace_name,
+                workspace_welcome_message=workspace_welcome_message,
+            )
+            answer = result.get("answer", "")
+            citations = result.get("citations", [])
+        else:
+            answer = NO_EVIDENCE_FALLBACK
+            citations = []
+
+        sources = list({c["url"] for c in citations if c and c.get("url")})
+        return {"answer": answer, "sources": sources, "citations": citations}
+
+    def _build_stateless_action_ack(self, kind: str, workspace_id: str | None) -> str:
+        """Single-turn ack used only when no session_service is configured
+        (so there's nowhere to carry collected fields across turns) — never
+        pretends to collect information it can't remember on the next
+        message."""
+        if kind == "escalation":
+            return (
+                "I can raise this with a support specialist for you — I'll flag it now "
+                "so someone follows up. Would you like me to go ahead?"
+            )
+        if kind == "appointment":
+            return self._build_appointment_availability_ack(workspace_id)
+        return (
+            "I can help you request a demo — could you tell me your name, email, and "
+            "which HavisIQ solution you'd like to see, and I'll pass it along?"
+        )
+
+    def _start_pending_action(
+        self, kind: str, session_state: SessionState | None, message: str
+    ) -> PendingAction:
+        """Build a fresh :class:`PendingAction` for *kind* — required-field
+        queue via ``action_workflow.required_fields``, plus the known-
+        product seed (Phase 28 fix): a session that already discussed a
+        product must never show a demo's product as "the solution you
+        mentioned" just because asking for it was skipped."""
+        pending = PendingAction(
+            kind=kind,
+            missing=required_fields(kind, session_state),
+            original_question=message,
+        )
+        self._seed_known_demo_product(pending, session_state, message)
+        return pending
+
+    @staticmethod
+    def _seed_known_demo_product(
+        pending: PendingAction, session_state: SessionState | None, message: str
+    ) -> None:
+        """Live-confirmed bug: "I'd like a demo of SPIDIFY" got summarized
+        as "Product: V-Login" — the session's *stale* last-discussed
+        product (from an earlier turn) was seeded instead of the product
+        the customer explicitly named in the very message that triggered
+        this demo request. An explicit mention in *message* always wins
+        over ``session_state.last_product()``, and overrides an already-
+        computed ``missing`` list (``required_fields`` only sees session
+        state, not this message, so it can't know the product was
+        actually already given)."""
+        if pending.kind != "demo":
+            return
+        explicit = match_product(message)
+        if explicit:
+            pending.fields["product"] = explicit
+            pending.missing = [f for f in pending.missing if f != "product"]
+            return
+        if "product" in pending.missing:
+            return
+        known = session_state.last_product() if session_state else None
+        if known:
+            pending.fields["product"] = known
+
+    def _render_pending_action_prompt(self, pending: PendingAction, *, workspace_id: str | None) -> str:
+        """The first turn's response for a freshly-started (or switched-to)
+        pending action — the next field question, or straight to the
+        confirmation summary when nothing is required (escalation)."""
+        if pending.missing:
+            return build_field_prompt(pending, appointment_service=self._appointment_service, workspace_id=workspace_id)
+        pending.status = "awaiting_confirmation"
+        return build_confirmation_summary(pending)
 
     # ------------------------------------------------------------------
     # Background learning
@@ -581,6 +983,8 @@ _embedding_cache = TTLCache(ttl_seconds=3600.0, maxsize=1024)
 _context_merger = ContextMerger(ngram_threshold=0.75)
 _analytics_service = AnalyticsService()
 _session_service = SessionService()
+_appointment_service = AppointmentService()
+_escalation_service = EscalationService()
 
 chat_orchestrator = ChatOrchestrator(
     source_router=SourceRouter(),
@@ -597,4 +1001,6 @@ chat_orchestrator = ChatOrchestrator(
     response_generator=ResponseGenerator(citation_validator=CitationValidator()),
     advisory_layer=AdvisoryResponseLayer(analytics=_analytics_service),
     session_service=_session_service,
+    appointment_service=_appointment_service,
+    escalation_service=_escalation_service,
 )

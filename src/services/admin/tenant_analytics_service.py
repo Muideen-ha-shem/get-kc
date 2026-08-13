@@ -10,6 +10,7 @@ tables — no caching, no second pipeline, mirroring the exact query style
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from supabase import Client
@@ -19,6 +20,17 @@ from ...sb import get_client
 from ..agents.agent_repository import AgentRepository
 from ..escalation.escalation_repository import EscalationRepository
 from ..profile.profile_service import ProfileService
+
+# Honest limitation, not a silent gap: kb_confidence and evidence-
+# sufficiency are computed per-request in SearchManager and never written
+# to storage — nothing here can compute these without new, separate
+# tracking infrastructure. workspace_operational_report() returns these as
+# None with this note attached, and the Workspace Analyst (workspace_
+# analyst.py) is instructed to say so plainly rather than guess.
+_KNOWLEDGE_TRACKING_NOTE = (
+    "Not tracked yet — no persistent logging exists for search queries, "
+    "evidence-sufficiency outcomes, or KB confidence scores."
+)
 
 
 def _count(client: Client, table: str, workspace_id: str, **extra_filters: Any) -> int:
@@ -88,6 +100,109 @@ class TenantAnalyticsService:
             "total_agent_count": sum(
                 len(self._agents.list_by_workspace(w.id)) for w in workspaces if w.deleted_at is None
             ),
+        }
+
+    def workspace_operational_report(self, workspace_id: str) -> dict[str, Any]:
+        """Extends workspace_stats() with resolution rate/timing, per-agent
+        breakdown, and honest-effort customer/AI trend signals — everything
+        here is a real query against real data; anything that would need
+        new tracking infrastructure (knowledge gaps, search topics,
+        insufficient-evidence questions, source failures) is returned as
+        None with _KNOWLEDGE_TRACKING_NOTE rather than guessed."""
+        stats = self.workspace_stats(workspace_id)
+        breakdown = stats["escalation_status_breakdown"]
+        resolved_count = breakdown["resolved"] + breakdown["closed"]
+        resolution_rate = (resolved_count / stats["escalation_count"]) if stats["escalation_count"] else None
+
+        resolved_rows = (
+            self._client.table("escalations")
+            .select("assigned_agent_id,department,created_at,resolved_at,summary")
+            .eq("workspace_id", workspace_id)
+            .in_("status", ["resolved", "closed"])
+            .execute()
+        ).data or []
+
+        durations: list[float] = []
+        department_activity: dict[str, int] = {}
+        frustrated_count = 0
+        for row in resolved_rows:
+            created_at, resolved_at = row.get("created_at"), row.get("resolved_at")
+            if created_at and resolved_at:
+                created = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                resolved = datetime.fromisoformat(resolved_at.replace("Z", "+00:00"))
+                durations.append((resolved - created).total_seconds() / 60)
+            department = row.get("department")
+            if department:
+                department_activity[department] = department_activity.get(department, 0) + 1
+            summary = row.get("summary") or {}
+            if summary.get("sentiment") == "frustrated":
+                frustrated_count += 1
+        average_resolution_minutes = (sum(durations) / len(durations)) if durations else None
+
+        agents = self._agents.list_by_workspace(workspace_id)
+        agent_breakdown = [
+            {
+                "id": agent.id,
+                "name": agent.name,
+                "department": agent.department,
+                "status": agent.status,
+                "current_workload": self._escalations.count_active_for_agent(agent.id),
+            }
+            for agent in agents
+        ]
+
+        # Requested products — from saved_recommendations only (workspace-
+        # scoped, unlike demo_requests which has no workspace_id column and
+        # so can't be safely attributed to this workspace — see
+        # demo_requests_for_workspace_customer's own caveat below).
+        recommendation_rows = (
+            self._client.table("saved_recommendations")
+            .select("products")
+            .eq("workspace_id", workspace_id)
+            .execute()
+        ).data or []
+        requested_products: dict[str, int] = {}
+        for row in recommendation_rows:
+            for product in row.get("products") or []:
+                requested_products[product] = requested_products.get(product, 0) + 1
+
+        # AI-resolved-conversation rate — an honest proxy, not a precise
+        # "AI fully resolved this" signal (a conversation can have an
+        # escalation and still continue with AI afterward).
+        escalated_conversation_ids = {
+            row["conversation_id"]
+            for row in (
+                self._client.table("escalations")
+                .select("conversation_id")
+                .eq("workspace_id", workspace_id)
+                .execute()
+            ).data or []
+            if row.get("conversation_id")
+        }
+        ai_resolved_rate_estimate = (
+            (stats["conversation_count"] - len(escalated_conversation_ids)) / stats["conversation_count"]
+            if stats["conversation_count"]
+            else None
+        )
+
+        return {
+            **stats,
+            "resolution_rate": resolution_rate,
+            "average_resolution_minutes": average_resolution_minutes,
+            "department_activity": department_activity,
+            "frustrated_conversation_count": frustrated_count,
+            "agents": agent_breakdown,
+            "requested_products": requested_products,
+            "ai_resolved_rate_estimate": ai_resolved_rate_estimate,
+            "ai_resolved_rate_caveat": (
+                "Approximate — a conversation with an escalation may still have "
+                "continued with AI afterward, so this understates true AI resolution."
+            ),
+            "knowledge_gaps": None,
+            "frequently_searched_topics": None,
+            "insufficient_evidence_questions": None,
+            "source_failures": None,
+            "knowledge_tracking_note": _KNOWLEDGE_TRACKING_NOTE,
         }
 
     def demo_requests_for_workspace_customer(self, workspace_id: str, auth_user_id: str) -> list[dict]:

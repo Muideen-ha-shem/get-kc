@@ -45,7 +45,10 @@ def chat(
             session_id=request.session_id,
             profile_context=_profile_context(user, access_token),
             workspace_id=workspace.workspace_id,
+            workspace_name=workspace.name,
+            workspace_welcome_message=workspace.welcome_message,
             handoff_context=request.handoff_context,
+            conversation_id=request.conversation_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

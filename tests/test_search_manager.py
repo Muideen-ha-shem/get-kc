@@ -1292,3 +1292,203 @@ class TestSearchManagerSuppressesWebForNamedProductMatch:
         manager.retrieve("Compare our pricing with competitors", decision=RoutingDecision(knowledge=True, web=True))
 
         mock_search.search.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# Self-identity guard — a "tell me about {workspace}" question with an
+# empty/weak KB must never fall back to web search, at either fallback
+# site, since an unrelated same-named real-world entity is exactly how a
+# prior incident produced a completely wrong answer.
+# ---------------------------------------------------------------------------
+
+
+class TestSearchManagerSelfIdentityGuard:
+    def test_confidence_fallback_skipped_for_self_identity_question(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+
+        mock_kb = _make_mock_knowledge_service(matches=[
+            {"chunk_content": "Weak match.", "similarity": 0.1, "parent_url": "https://ha-shem.com/"},
+        ])
+        mock_search = _make_mock_search_service()
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=mock_search,
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+        )
+
+        manager.retrieve(
+            "Tell me about Ha-Shem",
+            decision=RoutingDecision(knowledge=True, web=False),
+            workspace_name="Ha-Shem",
+        )
+
+        mock_search.search.assert_not_called()
+
+    def test_confidence_fallback_still_runs_when_workspace_name_omitted(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+
+        mock_kb = _make_mock_knowledge_service(matches=[
+            {"chunk_content": "Weak match.", "similarity": 0.1, "parent_url": "https://ha-shem.com/"},
+        ])
+        mock_search = _make_mock_search_service()
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=mock_search,
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+        )
+
+        manager.retrieve("Tell me about Ha-Shem", decision=RoutingDecision(knowledge=True, web=False))
+
+        mock_search.search.assert_called()
+
+    def test_enterprise_fallback_skipped_for_self_identity_question(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+
+        mock_kb = _make_mock_knowledge_service(matches=[])  # empty KB
+        mock_search = _make_mock_search_service()  # search() returns [] by default
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=mock_search,
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+        )
+
+        # decision.web already True bypasses the confidence-fallback guard
+        # entirely (its `not actual_decision.web` condition is False), so
+        # this isolates the second, "enterprise fallback" guard site.
+        manager.retrieve(
+            "Tell me about Ha-Shem",
+            decision=RoutingDecision(knowledge=True, web=True),
+            workspace_name="Ha-Shem",
+        )
+
+        # Exactly one call — the initial `if actual_decision.web:` search —
+        # with the enterprise-fallback's extra call suppressed by the guard.
+        assert mock_search.search.call_count == 1
+
+    def test_enterprise_fallback_still_runs_when_workspace_name_omitted(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+
+        mock_kb = _make_mock_knowledge_service(matches=[])
+        mock_search = _make_mock_search_service()
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=mock_search,
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+        )
+
+        manager.retrieve("Tell me about Ha-Shem", decision=RoutingDecision(knowledge=True, web=True))
+
+        # Both the initial web call and the enterprise-fallback's extra
+        # call fire (existing pre-guard behavior) when no workspace_name
+        # is supplied.
+        assert mock_search.search.call_count == 2
+
+    def test_guard_is_workspace_specific_not_a_blanket_about_suppressor(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+
+        mock_kb = _make_mock_knowledge_service(matches=[
+            {"chunk_content": "Weak match.", "similarity": 0.1, "parent_url": "https://ha-shem.com/"},
+        ])
+        mock_search = _make_mock_search_service()
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=mock_search,
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+        )
+
+        # Question asks about "Ha-Shem" but the workspace making the call
+        # is "Acme" — the guard must not fire for a mismatched name.
+        manager.retrieve(
+            "Tell me about Ha-Shem",
+            decision=RoutingDecision(knowledge=True, web=False),
+            workspace_name="Acme",
+        )
+
+        mock_search.search.assert_called()
+
+
+class TestSearchManagerActionIntentGuard:
+    """Live-confirmed bug: "Today 1:45pm WAT, live chat" had zero KB
+    evidence and fell straight through to a live web search, returning
+    unrelated timezone/city content instead of being recognized as a
+    live-chat/escalation follow-up."""
+
+    def test_confidence_fallback_skipped_for_action_request(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+
+        mock_kb = _make_mock_knowledge_service(matches=[])
+        mock_search = _make_mock_search_service()
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=mock_search,
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+        )
+
+        manager.retrieve(
+            "Today 1:45pm WAT, live chat",
+            decision=RoutingDecision(knowledge=True, web=False),
+        )
+
+        mock_search.search.assert_not_called()
+
+    def test_enterprise_fallback_skipped_for_action_request(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+
+        mock_kb = _make_mock_knowledge_service(matches=[])
+        mock_search = _make_mock_search_service()
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=mock_search,
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+        )
+
+        manager.retrieve(
+            "Can you arrange a quick chat with a specialist?",
+            decision=RoutingDecision(knowledge=True, web=True),
+        )
+
+        # Only the initial `if actual_decision.web:` call — the
+        # enterprise-fallback's extra call is suppressed by the guard.
+        assert mock_search.search.call_count == 1
+
+    def test_ordinary_question_still_falls_back_normally(self):
+        from src.services.manager.search_manager import SearchManager
+        from src.services.routing.source_router import RoutingDecision
+
+        mock_kb = _make_mock_knowledge_service(matches=[])
+        mock_search = _make_mock_search_service()
+
+        manager = SearchManager(
+            knowledge_service=mock_kb,
+            search_service=mock_search,
+            page_fetcher=_make_mock_page_fetcher(),
+            ephemeral_rag=_make_mock_ephemeral_rag(),
+        )
+
+        manager.retrieve(
+            "What is the latest news about identity verification?",
+            decision=RoutingDecision(knowledge=True, web=False),
+        )
+
+        mock_search.search.assert_called()

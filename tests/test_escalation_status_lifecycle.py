@@ -111,8 +111,9 @@ class TestMessageAutoFlipsBackToActive:
         )
         with patch(
             "src.api.routes.escalation._escalation_repository.get",
-            return_value=_escalation(status="waiting_for_customer", assigned_agent_id="a-other"),
+            return_value=_escalation(status="waiting_for_customer", assigned_agent_id="a-other", conversation_id="c1"),
         ), patch("src.api.routes.escalation._agent_service.get_by_auth_user_id_any_workspace", return_value=None), \
+           patch("src.api.routes.escalation._conversation_service.get_conversation", return_value=MagicMock()), \
            patch("src.api.routes.escalation._escalation_repository.mark_active_if_first_message"), \
            patch("src.api.routes.escalation._escalation_repository.set_active") as mock_set_active, \
            patch("src.api.routes.escalation._escalation_repository.add_message", return_value=message_row):

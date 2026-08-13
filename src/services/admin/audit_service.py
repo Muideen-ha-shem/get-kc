@@ -19,5 +19,16 @@ class AuditService:
     ) -> AuditLogEntry:
         return self._repo.insert(workspace_id, actor_auth_user_id, action, metadata)
 
-    def list_recent(self, workspace_id: str | None = None, limit: int = 100) -> list[AuditLogEntry]:
-        return self._repo.list_recent(workspace_id, limit)
+    def list_recent(
+        self,
+        workspace_id: str | None = None,
+        limit: int = 100,
+        action: str | None = None,
+        actor_auth_user_id: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> list[AuditLogEntry]:
+        return self._repo.list_recent(
+            workspace_id, limit, action=action, actor_auth_user_id=actor_auth_user_id,
+            start_date=start_date, end_date=end_date,
+        )

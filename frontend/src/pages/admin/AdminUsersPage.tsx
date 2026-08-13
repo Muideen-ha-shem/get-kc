@@ -1,5 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { apiJson } from '../../lib/apiClient';
+import { Select } from '../../components/Select';
+import { CARD, INPUT_CLASS, SECONDARY_BUTTON } from '../../lib/uiClassNames';
 import { AdminGuard } from './AdminGuard';
 import { AdminLayout } from './AdminLayout';
 import type { AdminUser } from './adminTypes';
@@ -59,48 +61,48 @@ function AdminUsersContent() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold mb-4">Users</h1>
+      <h1 className="text-xl font-display font-semibold mb-4 text-ink">Users</h1>
 
-      {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded p-3 mb-4">{error}</p>}
+      {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3 mb-4">{error}</p>}
 
-      <div className="bg-white border rounded p-3 mb-4 flex gap-2 items-end">
-        <label className="text-xs">
+      <div className={`${CARD} p-3 mb-4 flex gap-2 items-end`}>
+        <label className="text-xs text-ink">
           Workspace id (for agent assignment)
-          <input value={roleWorkspaceId} onChange={(e) => setRoleWorkspaceId(e.target.value)} className="block border rounded px-2 py-1 mt-1 text-sm" />
+          <input value={roleWorkspaceId} onChange={(e) => setRoleWorkspaceId(e.target.value)} className={INPUT_CLASS} />
         </label>
-        <label className="text-xs">
+        <label className="text-xs text-ink w-56">
           Department
-          <select value={roleDepartment} onChange={(e) => setRoleDepartment(e.target.value)} className="block border rounded px-2 py-1 mt-1 text-sm">
+          <Select value={roleDepartment} onChange={(e) => setRoleDepartment(e.target.value)} className="mt-1">
             {['Support', 'Sales', 'Solution Architect', 'Customer Success', 'General', 'Implementation', 'Training', 'Finance'].map(
               (d) => (
                 <option key={d} value={d}>{d}</option>
               ),
             )}
-          </select>
+          </Select>
         </label>
       </div>
 
-      <div className="bg-white border rounded divide-y">
+      <div className={`${CARD} divide-y divide-ink/10`}>
         {users.map((u) => (
           <div key={u.id} className="flex items-center justify-between px-4 py-3">
             <div>
-              <p className="text-sm font-medium">{u.full_name ?? '—'}</p>
-              <p className="text-xs text-gray-500">{u.email}</p>
+              <p className="text-sm font-medium text-ink">{u.full_name ?? '—'}</p>
+              <p className="text-xs text-ink/50">{u.email}</p>
             </div>
             <div className="flex gap-2">
-              <button onClick={() => suspend(u.id)} className="text-xs bg-gray-200 rounded px-2 py-1">Suspend</button>
-              <button onClick={() => reactivate(u.id)} className="text-xs bg-green-100 text-green-700 rounded px-2 py-1">Reactivate</button>
-              <button onClick={() => resetPassword(u.id, u.email ?? '')} className="text-xs bg-gray-200 rounded px-2 py-1">Reset Password</button>
+              <button onClick={() => suspend(u.id)} className={SECONDARY_BUTTON}>Suspend</button>
+              <button onClick={() => reactivate(u.id)} className="rounded-full bg-green-50 text-green-700 border border-green-200 px-3 py-1 text-xs transition hover:bg-green-100">Reactivate</button>
+              <button onClick={() => resetPassword(u.id, u.email ?? '')} className={SECONDARY_BUTTON}>Reset Password</button>
               <form onSubmit={(e) => assignAgent(e, u.id, u.email, u.full_name)} className="inline">
-                <button type="submit" className="text-xs bg-blue-100 text-blue-700 rounded px-2 py-1">Make Agent</button>
+                <button type="submit" className="rounded-full bg-gold-50 text-gold-700 border border-gold-200 px-3 py-1 text-xs transition hover:bg-gold-100">Make Agent</button>
               </form>
-              <button onClick={() => assignAdmin(u.id)} className="text-xs bg-purple-100 text-purple-700 rounded px-2 py-1">
+              <button onClick={() => assignAdmin(u.id)} className="rounded-full bg-ink text-paper px-3 py-1 text-xs transition hover:bg-ink-soft">
                 Make Admin
               </button>
             </div>
           </div>
         ))}
-        {users.length === 0 && !error && <p className="px-4 py-3 text-sm text-gray-400">No users.</p>}
+        {users.length === 0 && !error && <p className="px-4 py-3 text-sm text-ink/40">No users.</p>}
       </div>
     </div>
   );

@@ -3,6 +3,22 @@ import { FormEvent, useEffect, useState } from 'react';
 import { CheckCircle2, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/authContext';
+import { apiJson } from '../../lib/apiClient';
+
+/** A support agent has no business landing on the customer dashboard (it
+ * shows customer-only actions like "Talk to a human"). Same cheap
+ * 403-probe pattern DashboardPage already uses to decide whether to show
+ * the "Agent Dashboard" sidebar link — reused here so the redirect itself
+ * sends an agent straight to /agent instead of making them notice and
+ * click a secondary link after landing on the wrong page first. */
+async function resolvePostLoginDestination(): Promise<string> {
+  try {
+    await apiJson('/agents/me');
+    return '/agent';
+  } catch {
+    return '/dashboard';
+  }
+}
 
 type Mode = 'sign-in' | 'sign-up' | 'reset';
 type Status = 'idle' | 'submitting' | 'error' | 'reset-sent';
@@ -41,11 +57,11 @@ export function AuthModal({ isOpen, onClose, initialMode = 'sign-in' }: AuthModa
       if (mode === 'sign-in') {
         await signIn(email.trim(), password);
         onClose();
-        navigate('/dashboard');
+        navigate(await resolvePostLoginDestination());
       } else if (mode === 'sign-up') {
         await signUp(email.trim(), password, fullName.trim() || undefined);
         onClose();
-        navigate('/dashboard');
+        navigate(await resolvePostLoginDestination());
       } else {
         await requestPasswordReset(email.trim());
         setStatus('reset-sent');

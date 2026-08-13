@@ -20,12 +20,14 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any, Sequence
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
+from ...shared.customer_copy import GENERATION_FAILED_FALLBACK, NO_EVIDENCE_FALLBACK
 from ...shared.logging import get_logger
 from ..merger.context_merger import EvidenceItem
 
@@ -44,11 +46,122 @@ Rules:
 square brackets — for example ``[1]``, ``[2]``.
 3.  If multiple items support the same statement, cite all of them.
 4.  If the evidence does not contain enough information to answer the question \
-fully, say so clearly.  Do NOT guess or make up information.
+fully, say so — following the customer-tone guardrail below, not by describing your own \
+evidence/process.  Do NOT guess or make up information.
 5.  Include the source URLs at the end of your answer under a "Sources" heading.
 
 Evidence:
 {evidence_block}"""
+
+# Unconditional customer-tone guardrail — appended to every prompt, same
+# reasoning as the catalog guardrail below: a fully vague or unanswerable
+# question is exactly the case that must still sound like a human advisor,
+# not a retrieval-pipeline status report. Live-confirmed bug: "Find a
+# solution for employee onboarding" (no matching evidence) came back as "the
+# information provided does not include any details... Based on the
+# available evidence, I can't recommend a solution... I suggest reaching out
+# to HavisIQ sales or support" — internal/system phrasing, plus an
+# external-handoff suggestion as the *first* move instead of continuing to
+# help inside HavisIQ.
+_TONE_GUARDRAIL_TEMPLATE: str = """
+
+Customer-tone guardrail:
+9.  You are talking directly to a customer, not a developer. Never describe your own \
+process, and never use the words "evidence", "context", or "knowledge base" anywhere in \
+your answer — not "the evidence provided", not "the evidence we have", not "based on the \
+available evidence/context", not "I don't have that in my knowledge base", in any phrasing. \
+Speak naturally, the way a knowledgeable human advisor would, referring to what you know \
+about HavisIQ's own products directly instead.
+10. If you don't have enough to answer confidently, don't just refuse — acknowledge what \
+the customer is asking, be honest that you want to point them in the right direction rather \
+than guess, and invite them to continue: offer to help them explore relevant HavisIQ \
+solutions or connect with a Ha-Shem specialist *through HavisIQ* — never make an external \
+handoff (sales/support contact) your first or only suggestion; only mention direct contact \
+as a secondary option if continuing the conversation genuinely won't help.
+11. Never blame the customer for an unclear or unanswerable question (e.g. do NOT say "you \
+didn't provide enough information") — instead, ask a clarifying question yourself.
+12. Match your tone to the question. A plain factual question gets a plain, confident, \
+direct answer — do not force empathy language onto every sentence. Reserve empathy for when \
+the customer is confused, frustrated, or the answer involves a real limitation."""
+
+# Unconditional catalog guardrail — appended to every prompt regardless of
+# whether an advisory recommendation was made (primary_product/
+# complementary_products can both be None, e.g. a fully vague question),
+# since that's exactly the case a live-confirmed bug fell through: nothing
+# stopped the model from naming a third-party/competitor product surfaced
+# by an open web search. The allow-list is generated from PRODUCT_REGISTRY
+# at call time (see _build_catalog_guardrail) rather than hand-written here,
+# so it self-updates if a product is ever added/removed.
+_CATALOG_GUARDRAIL_TEMPLATE: str = """
+
+Product-catalog guardrail:
+6.  If the question asks for a recommendation or suggestion of a product or \
+solution, you may ONLY recommend from HavisIQ's own product catalog: \
+{catalog_names}. NEVER name, suggest, or endorse any third-party or \
+competitor product (for example Microsoft Dynamics 365, ClickUp, Wave \
+Apps, Gusto, or any other outside vendor) — even if such a name appears \
+in the evidence above.
+7.  If the evidence above does not support a clear recommendation from \
+that catalog (for example, it is generic third-party business-advice \
+content with no HavisIQ product coverage), do not use that evidence to \
+force a recommendation — follow the customer-tone guardrail below for how \
+to respond helpfully without one, instead of naming an outside product."""
+
+# Used only if building the primary template above fails (e.g. a
+# PRODUCT_REGISTRY import/format issue) — same intent, no registry
+# dependency, so a bug there degrades gracefully rather than breaking
+# every chat response.
+_CATALOG_GUARDRAIL_FALLBACK: str = """
+
+Product-catalog guardrail:
+6.  If the question asks for a recommendation, only recommend HavisIQ's own \
+products — never a third-party or competitor product, even if one appears \
+in the evidence above.
+7.  If the evidence does not support a HavisIQ-specific recommendation, do \
+not use it to force one — follow the customer-tone guardrail below for how \
+to respond helpfully without one, instead of naming an outside product."""
+
+# Unconditional (when workspace identity is known) — appended after the
+# catalog guardrail. Backstop for a live-confirmed incident: a question
+# asking "about" the vendor's own workspace (e.g. "Tell me about Ha-Shem")
+# reached the model with web-search evidence about an unrelated, same-named
+# real-world entity (the Jewish religious term "Ha-Shem"), and nothing told
+# the model that evidence didn't actually describe its own operator. The
+# routing/retrieval layers (SourceRouter, SearchManager) now suppress that
+# web search at the source — this is the containment layer for any phrasing
+# their keyword-based guard doesn't catch.
+_IDENTITY_GUARDRAIL_TEMPLATE: str = """
+
+Workspace-identity guardrail:
+8.  You are the AI advisor for {workspace_name}{welcome_clause}. If the \
+question asks about {workspace_name} itself (what it is, who runs it, what \
+it does, its history/background) and the evidence above does not clearly \
+describe {workspace_name} — for example because it is about an unrelated \
+person, place, term, or organization that merely shares part of the name — \
+do NOT use that evidence to answer. Instead say so in the same natural, \
+helpful way described in the customer-tone guardrail below, and offer to \
+keep helping them find what they need. Never present information about a \
+different, similarly-named entity or concept as if it describes \
+{workspace_name}."""
+
+# Unconditional — appended after the tone guardrail. Backstop for a
+# live-confirmed incident: asked "Can you arrange a quick chat with a
+# specialist?", the model replied "Absolutely — I can set up a quick
+# chat...", a promise with no backend action behind it. Nothing in this
+# generator has any awareness of whether escalation/appointment actions
+# actually exist or succeeded — the deterministic action-intent guard
+# upstream (see ``services.routing.action_intent``) is meant to short-
+# circuit these questions before they ever reach generation, but this is
+# the containment layer for any phrasing that guard doesn't catch.
+_ACTION_INTEGRITY_GUARDRAIL_TEMPLATE: str = """
+
+Action-integrity guardrail:
+13. You cannot book appointments, schedule calls, or connect the customer to a human \
+specialist yourself — no backend action has been taken as part of generating this answer. \
+Never say or imply that you have "booked", "scheduled", "arranged", "set up", or "connected" \
+anything, and never invent a specific date/time as confirmed. If the customer is asking to \
+talk to someone or book something, acknowledge the request, explain the concrete next step, \
+and ask what's needed to proceed — never state it is already done."""
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +239,8 @@ class ResponseGenerator:
         context: Sequence[EvidenceItem] | None = None,
         primary_product: str | None = None,
         complementary_products: Sequence[str] | None = None,
+        workspace_name: str | None = None,
+        workspace_welcome_message: str | None = None,
     ) -> dict[str, Any]:
         """Generate a grounded answer from *question* and *context*.
 
@@ -150,6 +265,16 @@ class ResponseGenerator:
                       e.g. a company-wide transformation touching several
                       unrelated departments equally). ``None``/empty means
                       no business-theme framing is added to the prompt.
+            workspace_name: The tenant's own name, if known. When set, an
+                      additional guardrail instructs the model not to
+                      present unrelated evidence as if it describes the
+                      workspace itself. ``None`` (the default) leaves the
+                      prompt byte-for-byte unchanged from before this
+                      parameter existed.
+            workspace_welcome_message: The workspace's own welcome
+                      message, if configured — folded into the identity
+                      guardrail for extra context. Only used when
+                      ``workspace_name`` is also set.
 
         Returns:
             A dict with keys:
@@ -181,7 +306,7 @@ class ResponseGenerator:
         if not evidence_block:
             logger.info("ResponseGenerator: no evidence provided.")
             return {
-                "answer": "I don't have enough information to answer that question.",
+                "answer": NO_EVIDENCE_FALLBACK,
                 "citations": [],
                 "raw": "",
             }
@@ -191,7 +316,19 @@ class ResponseGenerator:
             num_sources=len(evidence_list),
             evidence_block=evidence_block,
         )
+        system_prompt += _TONE_GUARDRAIL_TEMPLATE
         system_prompt += self._build_recommendation_framing(primary_product, complementary_products)
+        try:
+            system_prompt += self._build_catalog_guardrail()
+        except Exception as exc:
+            logger.warning("ResponseGenerator: catalog guardrail build failed — %s. Using generic guardrail.", exc)
+            system_prompt += _CATALOG_GUARDRAIL_FALLBACK
+        system_prompt += _ACTION_INTEGRITY_GUARDRAIL_TEMPLATE
+        if workspace_name:
+            welcome_clause = f' — "{workspace_welcome_message}"' if workspace_welcome_message else ""
+            system_prompt += _IDENTITY_GUARDRAIL_TEMPLATE.format(
+                workspace_name=workspace_name, welcome_clause=welcome_clause,
+            )
         user_prompt = question_clean
 
         logger.info(
@@ -230,7 +367,19 @@ class ResponseGenerator:
 
         answer = raw_answer.strip()
         if not answer:
-            answer = "I couldn't generate a grounded response from the available context."
+            answer = GENERATION_FAILED_FALLBACK
+
+        # If the model's answer cites nothing at all — e.g. it explicitly
+        # says the evidence doesn't cover the question, per the catalog/
+        # identity guardrails above — don't surface a "Sources" list
+        # underneath anyway. Live-confirmed: "Compare SPIDIFY and V-Login"
+        # correctly answered "I don't have that information" (zero [n]
+        # markers) while the web-fallback evidence behind the scenes was
+        # for the unrelated music service Spotify — showing those links as
+        # "Sources" under a disclaimed answer was misleading even though
+        # the answer text itself was already correct.
+        if not self._answer_cites_any_source(answer):
+            citations = []
 
         return {
             "answer": answer,
@@ -293,6 +442,20 @@ class ResponseGenerator:
 
         return ""
 
+    @staticmethod
+    def _build_catalog_guardrail() -> str:
+        """Unconditional prompt guardrail — appended for every call,
+        regardless of primary_product/complementary_products, because the
+        bug this fixes happens exactly when those are None (no advisory
+        recommendation was made, e.g. a fully vague query). Callers wrap
+        this in try/except (see generate()) so a PRODUCT_REGISTRY import/
+        format failure degrades to a generic (still-safe) instruction
+        rather than breaking generate() for everyone."""
+        from ...shared.product_registry import PRODUCT_REGISTRY
+
+        catalog_names = ", ".join(sorted(PRODUCT_REGISTRY.keys()))
+        return _CATALOG_GUARDRAIL_TEMPLATE.format(catalog_names=catalog_names)
+
     def _validate_citations(self, citations: list[dict[str, object]]) -> list[dict[str, object]]:
         """Run the injected citation validator, if any.
 
@@ -309,6 +472,20 @@ class ResponseGenerator:
         except Exception as exc:
             logger.warning("ResponseGenerator: citation validation failed — %s. Using unfiltered citations.", exc)
             return citations
+
+    # The prompt instructs the model to cite with plain ASCII "[1]", "[2]"
+    # notation, but this model occasionally emits the CJK/ideographic
+    # bracket variant "【1】" instead (confirmed live) — both must count as
+    # a citation, or a genuinely-grounded, correctly-cited answer gets its
+    # real sources wiped by _answer_cites_any_source's all-or-nothing check
+    # just as surely as an actually-uncited one should.
+    _CITATION_MARKER_RE = re.compile(r"[\[【]\d+[\]】]")
+
+    @staticmethod
+    def _answer_cites_any_source(answer: str) -> bool:
+        """True if *answer* references at least one ``[1]``- or
+        ``【1】``-style marker."""
+        return ResponseGenerator._CITATION_MARKER_RE.search(answer) is not None
 
     @staticmethod
     def _format_evidence(

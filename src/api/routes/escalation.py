@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from ...services.agents.agent_models import SupportAgent
 from ...services.agents.agent_service import AgentService
 from ...services.auth.auth_service import AuthUser
+from ...services.conversation.conversation_service import ConversationService
 from ...services.escalation.copilot import suggest_reply
 from ...services.escalation.customer_timeline import build_customer_timeline
 from ...services.escalation.escalation_repository import EscalationRepository
@@ -22,6 +23,7 @@ from ...services.escalation.escalation_service import EscalationService
 from ...services.profile.profile_service import ProfileService
 from ...services.workspace.workspace_context import WorkspaceContext
 from ..deps import (
+    get_current_access_token,
     get_current_agent,
     get_current_chat_workspace,
     get_current_user_optional,
@@ -32,8 +34,10 @@ from ..schemas import (
     AgentDashboardStatsSchema,
     CopilotSuggestReplyRequest,
     CopilotSuggestReplySchema,
+    CustomerEscalationSchema,
     CustomerTimelineSchema,
     EscalationActionRequest,
+    EscalationCloseRequest,
     EscalationCreateRequest,
     EscalationMessageCreateRequest,
     EscalationMessageSchema,
@@ -49,6 +53,7 @@ _agent_service = AgentService()
 _escalation_repository = EscalationRepository()
 _escalation_service = EscalationService(agent_service=_agent_service, repository=_escalation_repository)
 _profile_service = ProfileService()
+_conversation_service = ConversationService()
 
 
 def _customer_company(user: AuthUser | None) -> str | None:
@@ -123,6 +128,48 @@ def _get_escalation_or_404(escalation_id: str, workspace_id: str):
     return escalation
 
 
+def _to_customer_schema(escalation, messages=None) -> CustomerEscalationSchema:
+    return CustomerEscalationSchema(
+        id=escalation.id,
+        conversation_id=escalation.conversation_id,
+        status=escalation.status,
+        assigned_agent_name=_agent_name(escalation.assigned_agent_id),
+        department=escalation.department,
+        created_at=escalation.created_at,
+        assigned_at=escalation.assigned_at,
+        resolved_at=escalation.resolved_at,
+        closed_at=escalation.closed_at,
+        messages=(
+            [
+                EscalationMessageSchema(
+                    id=m.id,
+                    sender_type=m.sender_type,
+                    sender_auth_user_id=m.sender_auth_user_id,
+                    content=m.content,
+                    created_at=m.created_at,
+                )
+                for m in messages
+            ]
+            if messages is not None
+            else None
+        ),
+        handoff_recap=(escalation.summary or {}).get("handoff_recap"),
+    )
+
+
+def _require_customer_owned_escalation(escalation, user: AuthUser, access_token: str | None) -> None:
+    """Raises 404 unless `escalation` is linked to a conversation that
+    actually belongs to `user` — workspace membership alone (what
+    `_get_escalation_or_404` checks) isn't ownership. An escalation with no
+    conversation_id can't be proven to belong to any customer, so it's
+    treated as not-found for a customer caller."""
+    conversation_id = escalation.conversation_id
+    if conversation_id is None or _conversation_service.get_conversation(
+        conversation_id, user.id, access_token=access_token
+    ) is None:
+        raise HTTPException(status_code=404, detail="Escalation not found")
+
+
 @router.post("/chat/escalate", response_model=EscalationSchema)
 def escalate_conversation(
     request: EscalationCreateRequest,
@@ -137,6 +184,43 @@ def escalate_conversation(
         customer_company=_customer_company(user),
     )
     return _to_schema(escalation)
+
+
+@router.get("/chat/conversations/{conversation_id}/escalation", response_model=CustomerEscalationSchema | None)
+def get_escalation_for_conversation(
+    conversation_id: str,
+    user: AuthUser = Depends(get_current_user_required),
+    workspace: WorkspaceContext = Depends(get_current_chat_workspace),
+    access_token: str | None = Depends(get_current_access_token),
+) -> CustomerEscalationSchema | None:
+    """Lookup/resume — the customer dashboard calls this on every
+    conversation open to check whether an escalation already exists for
+    it, so a page reload or re-selecting a past conversation can resume
+    the live thread. Returns null (200), not 404, when none exists — this
+    is an existence probe, not a fetch-by-known-id."""
+    conversation = _conversation_service.get_conversation(conversation_id, user.id, access_token=access_token)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    escalations = _escalation_repository.list_by_conversation_ids([conversation_id])
+    if not escalations:
+        return None
+    return _to_customer_schema(escalations[0])
+
+
+@router.get("/chat/escalations/{escalation_id}", response_model=CustomerEscalationSchema)
+def get_customer_escalation(
+    escalation_id: str,
+    user: AuthUser = Depends(get_current_user_required),
+    workspace: WorkspaceContext = Depends(get_current_chat_workspace),
+    access_token: str | None = Depends(get_current_access_token),
+) -> CustomerEscalationSchema:
+    """Detail + messages for the customer's own escalation — the polling
+    target while a live thread is open. Notes are never fetched here at
+    all (agent-internal, structurally excluded by CustomerEscalationSchema)."""
+    escalation = _get_escalation_or_404(escalation_id, workspace.workspace_id)
+    _require_customer_owned_escalation(escalation, user, access_token)
+    messages = _escalation_repository.list_messages(escalation_id)
+    return _to_customer_schema(escalation, messages=messages)
 
 
 @router.get("/agent/queue", response_model=list[EscalationSchema])
@@ -170,7 +254,31 @@ def resolve_escalation(
     if escalation.status not in ("assigned", "active", "waiting_for_customer"):
         raise HTTPException(status_code=409, detail="Escalation is not in an active/assigned state")
     updated = _escalation_repository.mark_resolved(request.escalation_id)
+    # Best-effort: a drafted summary is a convenience for the Review ->
+    # Close step below, never a precondition for resolving — a generation
+    # failure must not block the agent's Resolve action.
+    resolution = _escalation_service.generate_resolution_summary(request.escalation_id)
+    if resolution:
+        updated = _escalation_repository.merge_summary(request.escalation_id, {"resolution": resolution})
     return _to_schema(updated)
+
+
+@router.post("/agent/escalations/{escalation_id}/close", response_model=EscalationSchema)
+def close_escalation(
+    escalation_id: str,
+    request: EscalationCloseRequest,
+    agent: SupportAgent = Depends(get_current_agent),
+) -> EscalationSchema:
+    """Finalizes the AI-drafted (and possibly agent-edited) resolution
+    summary and genuinely closes the ticket — the first route to ever call
+    EscalationRepository.mark_closed(), making status="closed" reachable."""
+    escalation = _get_escalation_or_404(escalation_id, agent.workspace_id)
+    if escalation.status != "resolved":
+        raise HTTPException(status_code=409, detail="Escalation must be resolved before it can be closed")
+    if request.resolution_summary is not None:
+        _escalation_repository.merge_summary(escalation_id, {"resolution": request.resolution_summary})
+    closed = _escalation_repository.mark_closed(escalation_id)
+    return _to_schema(closed)
 
 
 @router.post("/agent/escalations/{escalation_id}/wait-for-customer", response_model=EscalationSchema)
@@ -200,6 +308,7 @@ def send_escalation_message(
     request: EscalationMessageCreateRequest,
     user: AuthUser = Depends(get_current_user_required),
     workspace: WorkspaceContext = Depends(get_current_workspace),
+    access_token: str | None = Depends(get_current_access_token),
 ) -> EscalationMessageSchema:
     # This route is shared by both agents and customers, so it can't
     # depend on get_current_agent outright (that 404s non-agents). Instead:
@@ -212,8 +321,21 @@ def send_escalation_message(
     workspace_id = agent.workspace_id if agent is not None else workspace.workspace_id
     escalation = _get_escalation_or_404(escalation_id, workspace_id)
 
-    is_assigned_agent = agent is not None and agent.id == escalation.assigned_agent_id
-    sender_type = "agent" if is_assigned_agent else "customer"
+    if agent is None:
+        # Workspace match alone isn't ownership — without this, any
+        # authenticated customer who knew/guessed an escalation_id in their
+        # own workspace could post into someone else's thread (IDOR).
+        _require_customer_owned_escalation(escalation, user, access_token)
+    elif agent.id != escalation.assigned_agent_id:
+        # Live-confirmed gap: an agent who is NOT the assigned agent for
+        # this escalation (unclaimed, or claimed by someone else) used to
+        # fall through and get silently mislabeled sender_type="customer"
+        # instead of being rejected — a different-agent-in-same-workspace
+        # authorization gap, not just a cosmetic mislabel. An agent must
+        # claim an escalation via POST /agent/accept before posting to it.
+        raise HTTPException(status_code=403, detail="You are not the assigned agent for this escalation")
+
+    sender_type = "agent" if agent is not None else "customer"
 
     # Check-then-write: must run before add_message so "first message"
     # detection sees an empty history.
@@ -286,6 +408,12 @@ def rejoin_ai(
 
     resolved = _escalation_repository.mark_resolved(escalation_id)
     resolved = _escalation_repository.set_ai_engaged(escalation_id, True)
+    # Persisted (not just returned) so the customer's OWN next poll of this
+    # escalation (GET /chat/escalations/{id}) can pick it up and thread it
+    # into their next /chat call as handoff_context — the agent's response
+    # here lives only in the agent's own browser session, which the
+    # customer never sees.
+    resolved = _escalation_repository.merge_summary(escalation_id, {"handoff_recap": handoff_recap})
     return RejoinAiResponseSchema(escalation=_to_schema(resolved), handoff_recap=handoff_recap)
 
 

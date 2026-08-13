@@ -160,6 +160,22 @@ class EscalationRepository:
         )
         return Escalation.from_row(response.data[0])
 
+    def merge_summary(self, escalation_id: str, updates: dict[str, Any]) -> Escalation:
+        """Fetch-merge-write into the flexible `summary` JSON column —
+        used to attach fields (resolution summary, AI-rejoin handoff
+        recap) after creation without a schema migration, same precedent
+        as `build_summary()` populating this column in the first place."""
+        current = self.get(escalation_id)
+        summary = dict(current.summary) if current and current.summary else {}
+        summary.update(updates)
+        response = (
+            self._client.table(_ESCALATIONS)
+            .update({"summary": summary})
+            .eq("id", escalation_id)
+            .execute()
+        )
+        return Escalation.from_row(response.data[0])
+
     def mark_closed(self, escalation_id: str) -> Escalation:
         response = (
             self._client.table(_ESCALATIONS)

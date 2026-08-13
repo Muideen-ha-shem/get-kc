@@ -3,7 +3,7 @@ mirrors test_agent_dashboard_stats.py's averaging-query test style."""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from src.services.admin.tenant_analytics_service import TenantAnalyticsService
 
@@ -69,3 +69,117 @@ class TestPlatformDashboardStats:
 
         assert stats["total_workspace_count"] == 2
         assert stats["active_workspace_count"] == 1
+
+
+def _client_by_table_and_select(responses: dict[tuple[str, str], list[dict]]) -> MagicMock:
+    """A client where `.table(name).select(arg)...execute().data` resolves
+    per (table, select_arg) pair — precise enough to distinguish the three
+    distinct list-queries workspace_operational_report() makes (each uses
+    a different select() argument), unlike the flat count-only mock above
+    (which is fine for workspace_stats()'s uniform count queries, but not
+    for these)."""
+    client = MagicMock()
+
+    def table_fn(table_name):
+        table_mock = MagicMock()
+
+        def select_fn(select_arg, **_kwargs):
+            chain = MagicMock()
+            chain.eq.return_value = chain
+            chain.in_.return_value = chain
+            chain.gte.return_value = chain
+            response = MagicMock()
+            response.data = responses.get((table_name, select_arg), [])
+            chain.execute.return_value = response
+            return chain
+
+        table_mock.select.side_effect = select_fn
+        return table_mock
+
+    client.table.side_effect = table_fn
+    return client
+
+
+_BASE_STATS = {
+    "conversation_count": 10,
+    "escalation_count": 4,
+    "escalation_status_breakdown": {
+        "waiting": 0, "assigned": 0, "active": 0, "waiting_for_customer": 0, "resolved": 1, "closed": 1,
+    },
+    "appointment_count": 0,
+    "saved_recommendation_count": 0,
+    "saved_comparison_count": 0,
+    "feedback_helpful_count": 0,
+    "feedback_not_helpful_count": 0,
+}
+
+
+class TestWorkspaceOperationalReport:
+    def test_resolution_rate_and_average_time(self):
+        client = _client_by_table_and_select({
+            ("escalations", "assigned_agent_id,department,created_at,resolved_at,summary"): [
+                {
+                    "assigned_agent_id": "a1", "department": "Support",
+                    "created_at": "2026-01-01T00:00:00+00:00", "resolved_at": "2026-01-01T01:00:00+00:00",
+                    "summary": {"sentiment": "neutral"},
+                },
+                {
+                    "assigned_agent_id": "a1", "department": "Support",
+                    "created_at": "2026-01-01T00:00:00+00:00", "resolved_at": "2026-01-01T00:30:00+00:00",
+                    "summary": {"sentiment": "frustrated"},
+                },
+            ],
+            ("escalations", "conversation_id"): [{"conversation_id": "c1"}, {"conversation_id": "c2"}],
+            ("saved_recommendations", "products"): [{"products": ["SPIDIFY", "V-Login"]}, {"products": ["SPIDIFY"]}],
+        })
+        from types import SimpleNamespace
+
+        agent_repo = MagicMock()
+        agent_repo.list_by_workspace.return_value = [
+            SimpleNamespace(id="a1", name="Ada", department="Support", status="available"),
+        ]
+        escalation_repo = MagicMock()
+        escalation_repo.count_active_for_agent.return_value = 2
+        service = TenantAnalyticsService(client=client, agent_repository=agent_repo, escalation_repository=escalation_repo)
+
+        with patch.object(service, "workspace_stats", return_value=_BASE_STATS):
+            report = service.workspace_operational_report("w1")
+
+        assert report["resolution_rate"] == 0.5  # (resolved + closed) / escalation_count = 2/4
+        assert report["average_resolution_minutes"] == 45.0  # mean of 60 and 30
+        assert report["department_activity"] == {"Support": 2}
+        assert report["frustrated_conversation_count"] == 1
+        assert report["agents"] == [
+            {"id": "a1", "name": "Ada", "department": "Support", "status": "available", "current_workload": 2},
+        ]
+        assert report["requested_products"] == {"SPIDIFY": 2, "V-Login": 1}
+        assert report["ai_resolved_rate_estimate"] == 0.8  # (10 - 2) / 10
+
+    def test_zero_escalations_gives_none_resolution_rate(self):
+        client = _client_by_table_and_select({})
+        agent_repo = MagicMock()
+        agent_repo.list_by_workspace.return_value = []
+        service = TenantAnalyticsService(client=client, agent_repository=agent_repo)
+
+        stats = {**_BASE_STATS, "escalation_count": 0, "conversation_count": 0}
+        with patch.object(service, "workspace_stats", return_value=stats):
+            report = service.workspace_operational_report("w1")
+
+        assert report["resolution_rate"] is None
+        assert report["average_resolution_minutes"] is None
+        assert report["ai_resolved_rate_estimate"] is None
+
+    def test_knowledge_metrics_are_honestly_none_not_fabricated(self):
+        client = _client_by_table_and_select({})
+        agent_repo = MagicMock()
+        agent_repo.list_by_workspace.return_value = []
+        service = TenantAnalyticsService(client=client, agent_repository=agent_repo)
+
+        with patch.object(service, "workspace_stats", return_value=_BASE_STATS):
+            report = service.workspace_operational_report("w1")
+
+        assert report["knowledge_gaps"] is None
+        assert report["frequently_searched_topics"] is None
+        assert report["insufficient_evidence_questions"] is None
+        assert report["source_failures"] is None
+        assert "not tracked yet" in report["knowledge_tracking_note"].lower()
