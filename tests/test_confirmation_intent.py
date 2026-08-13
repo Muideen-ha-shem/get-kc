@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.services.routing.confirmation_intent import detect_confirmation
+from src.services.routing.confirmation_intent import detect_bare_cancellation, detect_confirmation
 
 
 class TestYes:
@@ -57,3 +57,31 @@ class TestNoMatch:
 
     def test_none(self):
         assert detect_confirmation(None) is None
+
+
+class TestDetectBareCancellation:
+    """Live-confirmed bug: after a demo request was already submitted
+    (pending action cleared), "Cancel that" fell through to RAG and
+    hallucinated an unrelated "cancel your PayCheq subscription" answer."""
+
+    @pytest.mark.parametrize(
+        "question",
+        ["cancel", "Cancel that", "cancel this", "actually cancel", "stop", "stop that", "never mind", "Nevermind!"],
+    )
+    def test_matches_bare_phrases(self, question):
+        assert detect_bare_cancellation(question) is True
+
+    @pytest.mark.parametrize(
+        "question",
+        [
+            "How do I cancel my PayCheq subscription?",  # a real question — must reach RAG
+            "What does SPIDIFY do?",
+            "I'd like to cancel my appointment for tomorrow",
+        ],
+    )
+    def test_longer_questions_do_not_match(self, question):
+        assert detect_bare_cancellation(question) is False
+
+    def test_empty_and_none(self):
+        assert detect_bare_cancellation("") is False
+        assert detect_bare_cancellation(None) is False

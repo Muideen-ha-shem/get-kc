@@ -16,6 +16,8 @@ from typing import Any
 from ...shared.logging import get_logger
 from ..advisory.advisory_layer import AdvisoryResult
 from ..agents.agent_service import AgentService
+from ..generator.response_generator import ResponseGenerator
+from ..merger.context_merger import EvidenceItem
 from ..notifications.notification_service import NotificationService
 from .decision import decide_escalation
 from .department_routing import determine_department
@@ -89,6 +91,46 @@ class EscalationService:
             customer_company=customer_company,
             trigger_reason=trigger_reason,
         )
+
+    def generate_resolution_summary(
+        self, escalation_id: str, response_generator: ResponseGenerator | None = None
+    ) -> str | None:
+        """Drafts a resolution summary — what the customer needed, what was
+        done, the outcome, and any follow-up — grounded strictly in the
+        escalation's real messages. Same construction pattern as
+        ``copilot.suggest_reply`` (a fresh ``ResponseGenerator``, never the
+        customer-chat singleton), reused rather than a second generation
+        system. Returns ``None`` (never raises) if there are no messages to
+        summarize or generation fails — callers treat this as best-effort,
+        same fire-and-forget-but-logged philosophy as
+        ``NotificationService.notify()``: a summary failure must never
+        block the Resolve action itself.
+        """
+        try:
+            messages = self._repository.list_messages(escalation_id)
+            if not messages:
+                return None
+
+            transcript = "\n".join(f"{m.sender_type}: {m.content}" for m in messages)
+            evidence = [EvidenceItem(
+                content=transcript, score=1.0, title="Support conversation transcript",
+                url="", source_type="escalation_transcript",
+            )]
+            question = (
+                "Summarize this support conversation in 2-4 concise sentences: what the "
+                "customer needed, what was done, the outcome, and any follow-up still "
+                "needed. Ground this strictly in the transcript below — never invent "
+                "details it doesn't contain."
+            )
+            generator = response_generator or ResponseGenerator()
+            result = generator.generate(question=question, context=evidence)
+            return result.get("answer") or None
+        except Exception as exc:
+            logger.warning(
+                "EscalationService: resolution summary generation failed for %s — %s.",
+                escalation_id, exc,
+            )
+            return None
 
     def _create_and_notify(
         self,

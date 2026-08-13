@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, PanelLeft, PanelLeftClose } from 'lucide-react';
+import { ArrowLeft, Bell, PanelLeft, PanelLeftClose } from 'lucide-react';
 import { HavisIQMark } from '../components/HavisIQMark';
 import { PageContainer } from '../components/PageContainer';
 import { Select } from '../components/Select';
@@ -28,11 +28,14 @@ type EscalationSummary = {
   problem: string;
   actions_already_taken: { label: string; action_type: string }[];
   suggested_resolution: { product: string; reason: string }[];
+  resolution: string | null;
+  handoff_recap: string | null;
 };
 
 type EscalationMessage = {
   id: string;
   sender_type: 'agent' | 'customer';
+  sender_auth_user_id: string;
   content: string;
   created_at: string | null;
 };
@@ -74,8 +77,29 @@ type DashboardStats = {
   average_resolution_minutes: number | null;
 };
 
+type AgentNotification = {
+  id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  is_read: boolean;
+  created_at: string | null;
+};
+
+type CustomerTimeline = {
+  profile: { id: string; email: string; full_name: string | null; company_name: string | null; industry: string | null } | null;
+  conversations: { id: string; title: string; created_at: string | null; updated_at: string | null }[];
+  saved_recommendations: unknown[];
+  saved_comparisons: unknown[];
+  appointments: { date: string; time: string; status: string }[];
+  past_escalations: { id: string; status: string; created_at: string | null }[];
+  demo_requests: { product: string | null; created_at: string | null }[];
+};
+
 const POLL_INTERVAL_MS = 5000;
 const OPEN_CONVERSATION_POLL_INTERVAL_MS = 2500;
+
+type Section = 'queue' | 'profile' | 'notifications';
 
 export function AgentDashboardPage() {
   const [agent, setAgent] = useState<SupportAgent | null>(null);
@@ -86,7 +110,13 @@ export function AgentDashboardPage() {
   const [openEscalation, setOpenEscalation] = useState<Escalation | null>(null);
   const [messageInput, setMessageInput] = useState('');
   const [noteInput, setNoteInput] = useState('');
-  const [copilotDraft, setCopilotDraft] = useState<string | null>(null);
+  const [copilotQuestion, setCopilotQuestion] = useState('');
+  const [copilotAnswer, setCopilotAnswer] = useState<string | null>(null);
+  const [resolutionDraft, setResolutionDraft] = useState('');
+  const [timeline, setTimeline] = useState<CustomerTimeline | null>(null);
+  const [section, setSection] = useState<Section>('queue');
+  const [notifications, setNotifications] = useState<AgentNotification[] | null>(null);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useSidebarCollapse('havisiq-agent-sidebar-collapsed');
 
   useEffect(() => {
@@ -97,11 +127,19 @@ export function AgentDashboardPage() {
 
   useEffect(() => {
     if (!agent) return;
+    apiJson<{ count: number }>('/notifications/unread-count')
+      .then((r) => setUnreadCount(r.count))
+      .catch(() => setUnreadCount(0));
+  }, [agent]);
+
+  useEffect(() => {
+    if (!agent) return;
 
     const poll = () => {
       apiJson<Escalation[]>('/agent/queue').then(setQueue).catch(() => {});
       apiJson<Escalation[]>('/agent/conversations').then(setMyConversations).catch(() => {});
       apiJson<DashboardStats>('/agent/dashboard/stats').then(setStats).catch(() => {});
+      apiJson<{ count: number }>('/notifications/unread-count').then((r) => setUnreadCount(r.count)).catch(() => {});
       if (openEscalation) {
         apiJson<Escalation>(`/agent/escalations/${openEscalation.id}`)
           .then(setOpenEscalation)
@@ -113,6 +151,23 @@ export function AgentDashboardPage() {
     const interval = setInterval(poll, openEscalation ? OPEN_CONVERSATION_POLL_INTERVAL_MS : POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [agent, openEscalation?.id]);
+
+  // Customer Timeline — resolved from the first customer message's
+  // sender_auth_user_id (no dedicated field links an escalation straight
+  // to a customer identity; a real customer message is the only place
+  // that id appears).
+  useEffect(() => {
+    setTimeline(null);
+    const customerAuthUserId = openEscalation?.messages?.find((m) => m.sender_type === 'customer')?.sender_auth_user_id;
+    if (!customerAuthUserId) return;
+    apiJson<CustomerTimeline>(`/agent/customers/${customerAuthUserId}/timeline`)
+      .then(setTimeline)
+      .catch(() => setTimeline(null));
+  }, [openEscalation?.id, openEscalation?.messages?.length]);
+
+  useEffect(() => {
+    setResolutionDraft(openEscalation?.summary?.resolution ?? '');
+  }, [openEscalation?.id, openEscalation?.summary?.resolution]);
 
   async function setStatus(status: AgentStatus) {
     const updated = await apiJson<SupportAgent>('/agents/status', {
@@ -129,7 +184,20 @@ export function AgentDashboardPage() {
   }
 
   async function resolveEscalation(escalationId: string) {
-    await apiJson('/agent/resolve', { method: 'POST', body: JSON.stringify({ escalation_id: escalationId }) });
+    // Stays open — the agent reviews/edits the AI-drafted resolution
+    // summary next, then explicitly closes. Never disappears silently.
+    const updated = await apiJson<Escalation>('/agent/resolve', {
+      method: 'POST',
+      body: JSON.stringify({ escalation_id: escalationId }),
+    });
+    setOpenEscalation(updated);
+  }
+
+  async function closeEscalation(escalationId: string) {
+    await apiJson(`/agent/escalations/${escalationId}/close`, {
+      method: 'POST',
+      body: JSON.stringify({ resolution_summary: resolutionDraft || null }),
+    });
     setOpenEscalation(null);
   }
 
@@ -153,7 +221,7 @@ export function AgentDashboardPage() {
       body: JSON.stringify({ content: messageInput }),
     });
     setMessageInput('');
-    setCopilotDraft(null);
+    setCopilotAnswer(null);
     const detail = await apiJson<Escalation>(`/agent/escalations/${openEscalation.id}`);
     setOpenEscalation(detail);
   }
@@ -170,14 +238,34 @@ export function AgentDashboardPage() {
     setOpenEscalation(detail);
   }
 
-  async function requestCopilotDraft() {
-    if (!openEscalation) return;
-    const question = openEscalation.summary?.problem ?? '';
+  async function askCopilot(event: FormEvent) {
+    event.preventDefault();
+    if (!openEscalation || !copilotQuestion.trim()) return;
     const result = await apiJson<{ draft: string }>(
       `/agent/escalations/${openEscalation.id}/copilot/suggest-reply`,
-      { method: 'POST', body: JSON.stringify({ question }) },
+      { method: 'POST', body: JSON.stringify({ question: copilotQuestion }) },
     );
-    setCopilotDraft(result.draft);
+    setCopilotAnswer(result.draft);
+  }
+
+  async function markNotificationRead(id: string) {
+    await apiJson(`/notifications/${id}/read`, { method: 'POST' });
+    setNotifications((prev) => {
+      const next = prev ? prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)) : prev;
+      setUnreadCount(next ? next.filter((n) => !n.is_read).length : 0);
+      return next;
+    });
+  }
+
+  async function markAllNotificationsRead() {
+    await apiJson('/notifications/read-all', { method: 'POST' });
+    setNotifications((prev) => (prev ? prev.map((n) => ({ ...n, is_read: true })) : prev));
+    setUnreadCount(0);
+  }
+
+  function openNotifications() {
+    setSection('notifications');
+    apiJson<AgentNotification[]>('/notifications').then(setNotifications).catch(() => setNotifications([]));
   }
 
   if (notAnAgent) {
@@ -209,7 +297,12 @@ export function AgentDashboardPage() {
             {sidebarCollapsed ? <PanelLeft size={16} /> : <PanelLeftClose size={16} />}
           </button>
           <HavisIQMark />
-          <span className="font-display font-semibold text-ink">Agent Dashboard</span>
+          <button
+            onClick={() => setSection('queue')}
+            className="font-display font-semibold text-ink"
+          >
+            Agent Dashboard
+          </button>
           <Link
             to="/dashboard"
             className="ml-2 flex items-center gap-1.5 rounded-full border border-ink/15 px-3 py-1.5 text-xs text-ink transition hover:border-gold-400 hover:text-gold-700"
@@ -218,7 +311,21 @@ export function AgentDashboardPage() {
           </Link>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-ink/50">{agent.name} · {agent.department}</span>
+          <button
+            onClick={openNotifications}
+            className="relative rounded-full p-1.5 text-ink/50 transition hover:bg-paper hover:text-ink"
+            aria-label={unreadCount > 0 ? `${unreadCount} unread notifications` : 'Notifications'}
+          >
+            <Bell size={18} />
+            {unreadCount > 0 ? (
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-gold-500 px-1 text-[9px] font-bold text-ink">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            ) : null}
+          </button>
+          <button onClick={() => setSection('profile')} className="text-sm text-ink/50 hover:text-ink">
+            {agent.name} · {agent.department}
+          </button>
           <div className="w-32">
             <Select value={agent.status} onChange={(e) => setStatus(e.target.value as AgentStatus)}>
               <option value="available">Available</option>
@@ -270,7 +377,10 @@ export function AgentDashboardPage() {
             {myConversations.map((escalation) => (
               <button
                 key={escalation.id}
-                onClick={() => setOpenEscalation(escalation)}
+                onClick={() => {
+                  setOpenEscalation(escalation);
+                  setSection('queue');
+                }}
                 className="w-full text-left border border-ink/10 rounded-xl p-3 mb-2 transition hover:border-gold-400 hover:bg-paper"
               >
                 <p className="text-sm font-medium text-ink">{STATUS_LABELS[escalation.status]}</p>
@@ -282,7 +392,80 @@ export function AgentDashboardPage() {
 
         <main className="flex-1 flex flex-col p-6 overflow-y-auto">
           <PageContainer className="flex-1 flex flex-col h-full">
-          {!openEscalation ? (
+          {section === 'notifications' ? (
+            <div className="max-w-2xl space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="font-display text-xl text-ink">Notifications</h2>
+                {notifications?.some((n) => !n.is_read) ? (
+                  <button onClick={markAllNotificationsRead} className="text-xs font-semibold text-ink/60 hover:text-ink">
+                    Mark all read
+                  </button>
+                ) : null}
+              </div>
+              {notifications === null ? (
+                <p className="text-sm text-ink/40">Loading…</p>
+              ) : notifications.length === 0 ? (
+                <p className="text-sm text-ink/40">
+                  New escalations, assignments, and customer replies will show up here.
+                </p>
+              ) : (
+                notifications.map((n) => (
+                  <button
+                    key={n.id}
+                    onClick={() => !n.is_read && markNotificationRead(n.id)}
+                    className={`flex w-full items-start gap-3 rounded-2xl border p-4 text-left transition ${
+                      n.is_read ? 'border-ink/10 bg-white' : 'border-gold-300 bg-gold-50/60'
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-ink">{n.title}</p>
+                      {n.body ? <p className="mt-0.5 text-sm text-ink/60">{n.body}</p> : null}
+                      {n.created_at ? (
+                        <p className="mt-1 text-xs text-ink/35">{new Date(n.created_at).toLocaleString()}</p>
+                      ) : null}
+                    </div>
+                    {!n.is_read ? <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-gold-500" aria-hidden="true" /> : null}
+                  </button>
+                ))
+              )}
+            </div>
+          ) : section === 'profile' ? (
+            <div className="max-w-md space-y-4">
+              <h2 className="font-display text-xl text-ink">Your profile</h2>
+              <dl className="text-sm grid grid-cols-2 gap-y-3 text-ink bg-white border border-ink/10 rounded-2xl p-4">
+                <dt className="text-ink/50">Name</dt>
+                <dd>{agent.name}</dd>
+                <dt className="text-ink/50">Email</dt>
+                <dd>{agent.email}</dd>
+                <dt className="text-ink/50">Role</dt>
+                <dd>Support Agent</dd>
+                <dt className="text-ink/50">Department</dt>
+                <dd>{agent.department}</dd>
+                <dt className="text-ink/50">Workspace</dt>
+                <dd>{agent.workspace_id}</dd>
+                <dt className="text-ink/50">Availability</dt>
+                <dd>
+                  <div className="w-32">
+                    <Select value={agent.status} onChange={(e) => setStatus(e.target.value as AgentStatus)}>
+                      <option value="available">Available</option>
+                      <option value="away">Away</option>
+                      <option value="offline">Offline</option>
+                    </Select>
+                  </div>
+                </dd>
+              </dl>
+              {stats ? (
+                <dl className="text-sm grid grid-cols-2 gap-y-3 text-ink bg-white border border-ink/10 rounded-2xl p-4">
+                  <dt className="text-ink/50">Current workload</dt>
+                  <dd>{stats.current_workload}</dd>
+                  <dt className="text-ink/50">Resolved today</dt>
+                  <dd>{stats.resolved_today}</dd>
+                  <dt className="text-ink/50">Average resolution time</dt>
+                  <dd>{stats.average_resolution_minutes != null ? `${Math.round(stats.average_resolution_minutes)}m` : '—'}</dd>
+                </dl>
+              ) : null}
+            </div>
+          ) : !openEscalation ? (
             <p className="text-ink/40">Select a conversation to view details.</p>
           ) : (
             <div className="flex flex-col h-full">
@@ -329,6 +512,45 @@ export function AgentDashboardPage() {
                 )}
               </div>
 
+              {openEscalation.status === 'resolved' ? (
+                <div className="bg-gold-50 border border-gold-200 rounded-2xl p-4 mb-4">
+                  <h3 className="text-sm font-semibold text-gold-700 mb-2">Resolution summary (AI-drafted — review before closing)</h3>
+                  <textarea
+                    value={resolutionDraft}
+                    onChange={(e) => setResolutionDraft(e.target.value)}
+                    rows={3}
+                    className={`w-full ${INPUT_CLASS} mt-0`}
+                    placeholder="No draft available — describe what was resolved before closing…"
+                  />
+                  <button
+                    onClick={() => closeEscalation(openEscalation.id)}
+                    className="mt-2 text-xs rounded-full bg-ink text-paper px-3 py-1.5 font-semibold transition hover:bg-ink-soft"
+                  >
+                    Close ticket
+                  </button>
+                </div>
+              ) : null}
+
+              {timeline ? (
+                <div className="bg-white border border-ink/10 rounded-2xl p-3 mb-4">
+                  <h3 className="text-sm font-semibold text-ink/50 uppercase mb-2">Customer Timeline</h3>
+                  <dl className="text-xs grid grid-cols-2 gap-1 text-ink/70 mb-2">
+                    <dt className="text-ink/40">Company</dt>
+                    <dd>{timeline.profile?.company_name ?? '—'}</dd>
+                    <dt className="text-ink/40">Industry</dt>
+                    <dd>{timeline.profile?.industry ?? '—'}</dd>
+                    <dt className="text-ink/40">Prior conversations</dt>
+                    <dd>{timeline.conversations.length}</dd>
+                    <dt className="text-ink/40">Prior escalations</dt>
+                    <dd>{timeline.past_escalations.length}</dd>
+                    <dt className="text-ink/40">Appointments</dt>
+                    <dd>{timeline.appointments.length}</dd>
+                    <dt className="text-ink/40">Demo requests</dt>
+                    <dd>{timeline.demo_requests.length}</dd>
+                  </dl>
+                </div>
+              ) : null}
+
               <div className="bg-white border border-ink/10 rounded-2xl p-3 mb-4">
                 <h3 className="text-sm font-semibold text-ink/50 uppercase mb-2">Internal Notes</h3>
                 {(openEscalation.notes ?? []).map((note) => (
@@ -353,23 +575,31 @@ export function AgentDashboardPage() {
                 ))}
               </div>
 
-              {copilotDraft && (
-                <div className="bg-gold-50 border border-gold-200 rounded-2xl p-3 mb-3 text-sm">
-                  <p className="text-xs font-semibold text-gold-700 mb-1">Suggested reply (review before sending)</p>
-                  <p className="mb-2 text-ink">{copilotDraft}</p>
-                  <button
-                    onClick={() => setMessageInput(copilotDraft)}
-                    className="text-xs rounded-full bg-gold-600 text-white px-3 py-1 transition hover:bg-gold-700"
-                  >
-                    Use as draft
-                  </button>
-                </div>
-              )}
+              <div className="bg-white border border-ink/10 rounded-2xl p-3 mb-3">
+                <p className="text-xs font-semibold text-ink/50 uppercase mb-2">Ask AI</p>
+                <form onSubmit={askCopilot} className="flex gap-2">
+                  <input
+                    value={copilotQuestion}
+                    onChange={(e) => setCopilotQuestion(e.target.value)}
+                    className={`flex-1 ${INPUT_CLASS} mt-0 text-sm`}
+                    placeholder='e.g. "Summarize this conversation" or "What does our knowledge base say about SPIDIFY?"'
+                  />
+                  <button type="submit" className={`${SECONDARY_BUTTON} py-2`}>Ask</button>
+                </form>
+                {copilotAnswer && (
+                  <div className="mt-3 rounded-xl bg-gold-50 border border-gold-200 p-3 text-sm">
+                    <p className="mb-2 text-ink">{copilotAnswer}</p>
+                    <button
+                      onClick={() => setMessageInput(copilotAnswer)}
+                      className="text-xs rounded-full bg-gold-600 text-white px-3 py-1 transition hover:bg-gold-700"
+                    >
+                      Use as draft reply
+                    </button>
+                  </div>
+                )}
+              </div>
 
               <form onSubmit={sendMessage} className="flex gap-2">
-                <button type="button" onClick={requestCopilotDraft} className={`${SECONDARY_BUTTON} py-2`}>
-                  Ask Copilot
-                </button>
                 <input
                   value={messageInput}
                   onChange={(e) => setMessageInput(e.target.value)}

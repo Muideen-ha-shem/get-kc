@@ -131,6 +131,52 @@ class WorkspaceAnalyticsSchema(BaseModel):
     feedback_not_helpful_count: int
 
 
+class WorkspaceAgentBreakdownSchema(BaseModel):
+    id: str
+    name: str
+    department: str
+    status: str
+    current_workload: int
+
+
+class WorkspaceReportSchema(BaseModel):
+    """Extends WorkspaceAnalyticsSchema with resolution rate/timing, per-
+    agent breakdown, and customer/AI trend signals — see
+    TenantAnalyticsService.workspace_operational_report(). Knowledge-gap
+    fields are honestly None (no tracking infra exists yet) rather than
+    fabricated — see knowledge_tracking_note."""
+
+    conversation_count: int
+    escalation_count: int
+    escalation_status_breakdown: dict[str, int]
+    appointment_count: int
+    saved_recommendation_count: int
+    saved_comparison_count: int
+    feedback_helpful_count: int
+    feedback_not_helpful_count: int
+    resolution_rate: float | None
+    average_resolution_minutes: float | None
+    department_activity: dict[str, int]
+    frustrated_conversation_count: int
+    agents: list[WorkspaceAgentBreakdownSchema]
+    requested_products: dict[str, int]
+    ai_resolved_rate_estimate: float | None
+    ai_resolved_rate_caveat: str
+    knowledge_gaps: list[str] | None
+    frequently_searched_topics: list[str] | None
+    insufficient_evidence_questions: list[str] | None
+    source_failures: list[str] | None
+    knowledge_tracking_note: str
+
+
+class WorkspaceAskRequest(BaseModel):
+    question: str = Field(..., min_length=1)
+
+
+class WorkspaceAskResponseSchema(BaseModel):
+    answer: str
+
+
 class PlatformDashboardSchema(BaseModel):
     total_workspace_count: int
     active_workspace_count: int

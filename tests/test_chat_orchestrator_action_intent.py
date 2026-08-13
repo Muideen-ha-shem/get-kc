@@ -371,3 +371,164 @@ class TestPhase28IntentSwitch:
         result = orchestrator.chat("Can you arrange a quick chat with a specialist?")
 
         assert "live connection" not in result["answer"].lower()
+
+    def test_explicit_product_in_message_wins_over_stale_session_product(self):
+        """Live-confirmed bug: "I'd like a demo of SPIDIFY" was summarized
+        as "Product: V-Login" — the session's stale last-discussed product
+        (from an earlier, unrelated turn) was seeded instead of the product
+        actually named in the demo request itself."""
+        response_generator = MagicMock()
+        response_generator.generate.return_value = {"answer": "Answer.", "citations": []}
+        search_manager = MagicMock()
+        search_manager.retrieve.return_value = []
+        search_manager.product_match = None
+        source_router = MagicMock()
+        source_router.route.return_value = RoutingDecision(knowledge=True, web=False)
+
+        session_service = SessionService(session_context=SessionContext())
+        orchestrator = ChatOrchestrator(
+            source_router=source_router,
+            search_manager=search_manager,
+            response_generator=response_generator,
+            session_service=session_service,
+        )
+        # Simulate a session that previously discussed a DIFFERENT product.
+        session_service.record_products("s1", ["V-Login"])
+
+        r1 = orchestrator.chat("I'd like a demo of SPIDIFY", session_id="s1")
+        assert "which havisiq" not in r1["answer"].lower()  # skipped — product was given
+
+        orchestrator.chat("Aliko", session_id="s1")
+        orchestrator.chat("i.muideen27@gmail.com", session_id="s1")
+        r4 = orchestrator.chat("skip", session_id="s1")
+
+        assert "Product: SPIDIFY" in r4["answer"]
+        assert "V-Login" not in r4["answer"]
+
+    def test_explicit_product_in_switch_message_also_respected(self):
+        response_generator = MagicMock()
+        response_generator.generate.return_value = {"answer": "Answer.", "citations": []}
+        search_manager = MagicMock()
+        search_manager.retrieve.return_value = []
+        search_manager.product_match = None
+        source_router = MagicMock()
+        source_router.route.return_value = RoutingDecision(knowledge=True, web=False)
+
+        session_service = SessionService(session_context=SessionContext())
+        orchestrator = ChatOrchestrator(
+            source_router=source_router,
+            search_manager=search_manager,
+            response_generator=response_generator,
+            session_service=session_service,
+        )
+        session_service.record_products("s1", ["V-Login"])
+
+        orchestrator.chat("Can you arrange a quick chat with a specialist?", session_id="s1")
+        orchestrator.chat("Actually, I'd like a demo of SPIDIFY instead", session_id="s1")
+
+        orchestrator.chat("Aliko", session_id="s1")
+        orchestrator.chat("i.muideen27@gmail.com", session_id="s1")
+        r5 = orchestrator.chat("skip", session_id="s1")
+
+        assert "Product: SPIDIFY" in r5["answer"]
+
+    def test_cancel_after_action_already_completed_never_reaches_rag(self):
+        """Live-confirmed bug: a demo request was submitted (pending action
+        cleared), then "Cancel that" fell through to RAG and hallucinated
+        an unrelated "cancel your PayCheq subscription" answer."""
+        from unittest.mock import patch
+
+        with patch("src.api.services.demo_requests.submit_demo_request") as mock_submit:
+            mock_submit.return_value = {"id": "d1"}
+            orchestrator, source_router, search_manager, response_generator = _make_stateful_orchestrator()
+
+            orchestrator.chat("I'd like a demo for V-Login", session_id="s1")
+            orchestrator.chat("Segun", session_id="s1")
+            orchestrator.chat("i.muideen27@gmail.com", session_id="s1")
+            orchestrator.chat("skip", session_id="s1")
+            orchestrator.chat("Yes please", session_id="s1")  # demo submitted, pending cleared
+
+            search_manager.reset_mock()
+            response_generator.reset_mock()
+            r = orchestrator.chat("Cancel that", session_id="s1")
+
+        search_manager.retrieve.assert_not_called()
+        response_generator.generate.assert_not_called()
+        assert "PayCheq" not in r["answer"]
+        assert "nothing active" in r["answer"].lower()
+
+    def test_real_cancellation_question_still_reaches_rag(self):
+        """The exact-match design must not swallow a genuine, longer
+        product question that happens to contain "cancel"."""
+        orchestrator, source_router, search_manager, response_generator = _make_stateful_orchestrator()
+
+        orchestrator.chat("How do I cancel my PayCheq subscription?", session_id="s1")
+
+        search_manager.retrieve.assert_called_once()
+
+
+class TestMultiIntentHandling:
+    """Live-confirmed bug: "I want to understand SPIDIFY, compare it with
+    V-Login, and then book a demo." jumped straight to "Could I get your
+    name?", silently dropping the two knowledge requests that came first."""
+
+    def test_reported_transcript_answers_knowledge_then_starts_demo(self):
+        response_generator = MagicMock()
+        response_generator.generate.return_value = {
+            "answer": "SPIDIFY handles identity verification [1]. V-Login handles visitor management [2].",
+            "citations": [{"url": "https://ha-shem.com/spidify"}, {"url": "https://ha-shem.com/v-login"}],
+        }
+        search_manager = MagicMock()
+        search_manager.retrieve.return_value = []
+        search_manager.product_match = None
+        source_router = MagicMock()
+        source_router.route.return_value = RoutingDecision(knowledge=True, web=False)
+
+        session_service = SessionService(session_context=SessionContext())
+        orchestrator = ChatOrchestrator(
+            source_router=source_router,
+            search_manager=search_manager,
+            response_generator=response_generator,
+            session_service=session_service,
+        )
+
+        result = orchestrator.chat(
+            "I want to understand SPIDIFY, compare it with V-Login, and then book a demo.",
+            session_id="s1",
+        )
+
+        response_generator.generate.assert_called_once()
+        called_question = response_generator.generate.call_args.kwargs["question"]
+        assert called_question == "I want to understand SPIDIFY. compare it with V-Login"
+
+        assert "identity verification" in result["answer"]
+        assert "could you get your name" in result["answer"].lower() or "could i get your name" in result["answer"].lower()
+
+        pending = session_service.get_pending_action("s1")
+        assert pending is not None
+        assert pending.kind == "demo"
+        assert pending.fields.get("product") == "SPIDIFY"
+
+    def test_multi_segment_message_with_no_action_falls_through_unchanged(self):
+        response_generator = MagicMock()
+        response_generator.generate.return_value = {"answer": "Answer.", "citations": []}
+        search_manager = MagicMock()
+        search_manager.retrieve.return_value = []
+        search_manager.product_match = None
+        source_router = MagicMock()
+        source_router.route.return_value = RoutingDecision(knowledge=True, web=False)
+
+        session_service = SessionService(session_context=SessionContext())
+        orchestrator = ChatOrchestrator(
+            source_router=source_router,
+            search_manager=search_manager,
+            response_generator=response_generator,
+            session_service=session_service,
+        )
+
+        original = "I need help with onboarding, payroll, and compliance"
+        orchestrator.chat(original, session_id="s1")
+
+        response_generator.generate.assert_called_once()
+        assert response_generator.generate.call_args.kwargs["question"] == original
+        assert session_service.get_pending_action("s1") is None
