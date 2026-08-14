@@ -5,13 +5,29 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/authContext';
 import { apiJson } from '../../lib/apiClient';
 
-/** A support agent has no business landing on the customer dashboard (it
- * shows customer-only actions like "Talk to a human"). Same cheap
- * 403-probe pattern DashboardPage already uses to decide whether to show
- * the "Agent Dashboard" sidebar link — reused here so the redirect itself
- * sends an agent straight to /agent instead of making them notice and
- * click a secondary link after landing on the wrong page first. */
+/** Neither a platform admin nor a support agent has any business landing
+ * on the customer dashboard first (it shows customer-only actions like
+ * "Talk to a human", and previously required an extra click on "Admin
+ * Dashboard"/"Agent Dashboard" to get where they actually needed to go).
+ * Same cheap 403-probe pattern DashboardPage already uses for its sidebar
+ * links, reused here so login sends each role straight to its own home
+ * page. Checked in order of specificity: super admin, then workspace
+ * admin (via /workspace-admins/me, which always succeeds and just
+ * returns an empty list for non-admins), then agent, else the customer
+ * dashboard. */
 async function resolvePostLoginDestination(): Promise<string> {
+  try {
+    await apiJson('/admin/me');
+    return '/admin';
+  } catch {
+    // not a super admin — fall through
+  }
+  try {
+    const { workspaces } = await apiJson<{ workspaces: { id: string }[] }>('/workspace-admins/me');
+    if (workspaces.length > 0) return `/admin/workspaces/${workspaces[0].id}`;
+  } catch {
+    // not a workspace admin — fall through
+  }
   try {
     await apiJson('/agents/me');
     return '/agent';

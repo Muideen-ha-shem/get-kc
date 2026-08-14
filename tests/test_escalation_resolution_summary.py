@@ -64,6 +64,24 @@ class TestGenerateResolutionSummary:
 
         assert service.generate_resolution_summary("e1", response_generator=generator) is None
 
+    def test_strips_dangling_sources_section_from_transcript_only_summary(self):
+        """The synthetic transcript evidence item has no real URL — if the
+        model still cites it, the resulting "Sources" section points at
+        nothing and must be stripped rather than shown to the agent."""
+        repo = MagicMock(spec=EscalationRepository)
+        repo.list_messages.return_value = [_message("customer", "help")]
+        service = EscalationService(repository=repo)
+
+        generator = MagicMock()
+        generator.generate.return_value = {
+            "answer": "Customer needed help; issue resolved.\n\n**Sources**\n[1]",
+            "citations": [{"url": "", "title": "Support conversation transcript", "source_type": "escalation_transcript"}],
+        }
+
+        result = service.generate_resolution_summary("e1", response_generator=generator)
+
+        assert result == "Customer needed help; issue resolved."
+
     def test_empty_llm_answer_returns_none_not_empty_string(self):
         repo = MagicMock(spec=EscalationRepository)
         repo.list_messages.return_value = [_message("customer", "help")]

@@ -75,6 +75,11 @@ class WorkspaceSettingsSchema(BaseModel):
     auto_assignment_enabled: bool = True
     secondary_color: str | None = None
     chat_avatar: str | None = None
+    target_resolution_rate: float | None = None
+    target_response_minutes: float | None = None
+    target_resolution_minutes: float | None = None
+    target_csat: float | None = None
+    aux_categories: dict[str, str] | None = None
     company_name: str | None = None
     footer_text: str | None = None
 
@@ -96,6 +101,11 @@ class WorkspaceSettingsUpdateRequest(BaseModel):
     chat_avatar: str | None = None
     company_name: str | None = None
     footer_text: str | None = None
+    target_resolution_rate: float | None = None
+    target_response_minutes: float | None = None
+    target_resolution_minutes: float | None = None
+    target_csat: float | None = None
+    aux_categories: dict[str, str] | None = None
 
 
 class WorkspaceProductSchema(BaseModel):
@@ -137,6 +147,24 @@ class WorkspaceAgentBreakdownSchema(BaseModel):
     department: str
     status: str
     current_workload: int
+    clock_in_at: str | None = None
+    current_aux: str | None = None
+    current_aux_started_at: str | None = None
+    avg_first_response_minutes: float | None = None
+
+
+class WorkspacePerformanceTargetsSchema(BaseModel):
+    resolution_rate: float | None
+    response_minutes: float | None
+    resolution_minutes: float | None
+    csat: float | None
+
+
+class WorkspaceAdherenceEntrySchema(BaseModel):
+    agent_id: str
+    scheduled_start: str
+    actual_clock_in_at: str
+    difference_minutes: float
 
 
 class WorkspaceReportSchema(BaseModel):
@@ -156,17 +184,30 @@ class WorkspaceReportSchema(BaseModel):
     feedback_not_helpful_count: int
     resolution_rate: float | None
     average_resolution_minutes: float | None
+    avg_first_response_minutes: float | None
     department_activity: dict[str, int]
     frustrated_conversation_count: int
     agents: list[WorkspaceAgentBreakdownSchema]
     requested_products: dict[str, int]
     ai_resolved_rate_estimate: float | None
     ai_resolved_rate_caveat: str
+    clocked_in_count: int
+    available_count: int
+    aux_breakdown: dict[str, int]
+    aux_time_by_category: dict[str, int]
+    performance_targets: WorkspacePerformanceTargetsSchema
+    adherence: list[WorkspaceAdherenceEntrySchema] | None
+    adherence_note: str | None
+    csat_note: str
     knowledge_gaps: list[str] | None
     frequently_searched_topics: list[str] | None
     insufficient_evidence_questions: list[str] | None
     source_failures: list[str] | None
     knowledge_tracking_note: str
+
+
+class AgentDepartmentUpdateRequest(BaseModel):
+    department: str = Field(..., min_length=1)
 
 
 class WorkspaceAskRequest(BaseModel):

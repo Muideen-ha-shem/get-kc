@@ -32,6 +32,11 @@ export type WorkspaceSettings = {
   chat_avatar: string | null;
   company_name: string | null;
   footer_text: string | null;
+  target_resolution_rate: number | null;
+  target_response_minutes: number | null;
+  target_resolution_minutes: number | null;
+  target_csat: number | null;
+  aux_categories: Record<string, string> | null;
 };
 
 export type WorkspaceProduct = { product_id: string; enabled: boolean };
@@ -54,11 +59,30 @@ export type WorkspaceAgentBreakdown = {
   department: string;
   status: string;
   current_workload: number;
+  clock_in_at: string | null;
+  current_aux: string | null;
+  current_aux_started_at: string | null;
+  avg_first_response_minutes: number | null;
+};
+
+export type WorkspacePerformanceTargets = {
+  resolution_rate: number | null;
+  response_minutes: number | null;
+  resolution_minutes: number | null;
+  csat: number | null;
+};
+
+export type WorkspaceAdherenceEntry = {
+  agent_id: string;
+  scheduled_start: string;
+  actual_clock_in_at: string;
+  difference_minutes: number;
 };
 
 export type WorkspaceReport = WorkspaceAnalytics & {
   resolution_rate: number | null;
   average_resolution_minutes: number | null;
+  avg_first_response_minutes: number | null;
   department_activity: Record<string, number>;
   frustrated_conversation_count: number;
   agents: WorkspaceAgentBreakdown[];
@@ -70,6 +94,14 @@ export type WorkspaceReport = WorkspaceAnalytics & {
   insufficient_evidence_questions: string[] | null;
   source_failures: string[] | null;
   knowledge_tracking_note: string;
+  clocked_in_count: number;
+  available_count: number;
+  aux_breakdown: Record<string, number>;
+  aux_time_by_category: Record<string, number>;
+  performance_targets: WorkspacePerformanceTargets;
+  adherence: WorkspaceAdherenceEntry[] | null;
+  adherence_note: string | null;
+  csat_note: string;
 };
 
 export type PlatformDashboard = {

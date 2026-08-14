@@ -316,6 +316,36 @@ class AgentStatusUpdate(BaseModel):
     status: Literal["available", "away", "offline"]
 
 
+class WorkSessionSchema(BaseModel):
+    id: str
+    agent_id: str
+    work_date: str
+    clock_in_at: str
+    clock_out_at: str | None = None
+    total_work_seconds: int | None = None
+
+
+class AuxEventSchema(BaseModel):
+    id: str
+    agent_id: str
+    aux_type: str
+    started_at: str
+    ended_at: str | None = None
+    duration_seconds: int | None = None
+    reason: str | None = None
+
+
+class AuxStartRequest(BaseModel):
+    aux_type: str = Field(..., min_length=1)
+    reason: str | None = None
+
+
+class AttendanceMeSchema(BaseModel):
+    session: WorkSessionSchema | None
+    aux: AuxEventSchema | None
+    today_aux_history: list[AuxEventSchema]
+
+
 class EscalationSummarySchema(BaseModel):
     customer: str
     workspace: str
@@ -460,3 +490,12 @@ class AgentDashboardStatsSchema(BaseModel):
     current_workload: int
     resolved_today: int
     average_resolution_minutes: float | None = None
+    resolution_rate: float | None = None
+    avg_first_response_minutes: float | None = None
+
+
+class AgentPerformanceTargetsSchema(BaseModel):
+    resolution_rate: float | None = None
+    response_minutes: float | None = None
+    resolution_minutes: float | None = None
+    csat: float | None = None

@@ -17,6 +17,11 @@ _UPDATABLE_FIELDS = {
     "ai_personality", "welcome_prompt", "chat_enabled", "offline_mode", "greeting_message",
     "working_hours", "escalation_timeout_minutes", "auto_assignment_enabled", "secondary_color",
     "chat_avatar", "company_name", "footer_text",
+    # Agent Operations (Phase 29) — all nullable; a workspace with none of
+    # these configured simply shows no target comparison / uses the
+    # built-in AUX category defaults (see tenant_analytics_service.py).
+    "target_resolution_rate", "target_response_minutes", "target_resolution_minutes",
+    "target_csat", "aux_categories",
 }
 
 

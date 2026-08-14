@@ -140,6 +140,60 @@ class EscalationRepository:
         )
         return [Escalation.from_row(row) for row in response.data]
 
+    def resolution_stats_for_agent(self, agent_id: str) -> tuple[int, int]:
+        """(resolved_or_closed_count, total_ever_assigned_count) — all-time,
+        for the agent's own resolution-rate KPI card."""
+        response = (
+            self._client.table(_ESCALATIONS)
+            .select("status", count="exact")
+            .eq("assigned_agent_id", agent_id)
+            .execute()
+        )
+        rows = response.data or []
+        resolved = sum(1 for row in rows if row["status"] in ("resolved", "closed"))
+        return resolved, len(rows)
+
+    def avg_first_response_minutes_for_agent(self, agent_id: str) -> float | None:
+        """Mirrors TenantAnalyticsService's per-workspace calculation, scoped
+        to one agent: first agent message timestamp minus assigned_at (or
+        created_at if never separately assigned)."""
+        assigned_rows = (
+            self._client.table(_ESCALATIONS)
+            .select("id,assigned_at,created_at")
+            .eq("assigned_agent_id", agent_id)
+            .not_.is_("assigned_agent_id", "null")
+            .execute()
+        ).data or []
+        if not assigned_rows:
+            return None
+        escalation_ids = [row["id"] for row in assigned_rows]
+        assigned_at_by_id = {row["id"]: row.get("assigned_at") or row.get("created_at") for row in assigned_rows}
+        message_rows = (
+            self._client.table(_MESSAGES)
+            .select("escalation_id,created_at")
+            .in_("escalation_id", escalation_ids)
+            .eq("sender_type", "agent")
+            .order("created_at")
+            .execute()
+        ).data or []
+        first_agent_message: dict[str, str] = {}
+        for row in message_rows:
+            eid = row["escalation_id"]
+            if eid not in first_agent_message:
+                first_agent_message[eid] = row["created_at"]
+
+        minutes: list[float] = []
+        for eid, first_at in first_agent_message.items():
+            assigned_at = assigned_at_by_id.get(eid)
+            if not assigned_at:
+                continue
+            delta = (
+                datetime.fromisoformat(first_at.replace("Z", "+00:00"))
+                - datetime.fromisoformat(assigned_at.replace("Z", "+00:00"))
+            ).total_seconds() / 60
+            minutes.append(max(0.0, delta))
+        return (sum(minutes) / len(minutes)) if minutes else None
+
     def list_resolved_today_for_agent(self, agent_id: str, since_iso: str) -> list[Escalation]:
         response = (
             self._client.table(_ESCALATIONS)

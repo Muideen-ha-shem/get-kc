@@ -302,11 +302,18 @@ _REPORT_FIXTURE = {
     },
     "appointment_count": 0, "saved_recommendation_count": 0, "saved_comparison_count": 0,
     "feedback_helpful_count": 0, "feedback_not_helpful_count": 0,
-    "resolution_rate": 0.5, "average_resolution_minutes": 45.0,
+    "resolution_rate": 0.5, "average_resolution_minutes": 45.0, "avg_first_response_minutes": 3.5,
     "department_activity": {"Support": 2}, "frustrated_conversation_count": 1,
-    "agents": [{"id": "a1", "name": "Ada", "department": "Support", "status": "available", "current_workload": 2}],
+    "agents": [{
+        "id": "a1", "name": "Ada", "department": "Support", "status": "available", "current_workload": 2,
+        "clock_in_at": None, "current_aux": None, "current_aux_started_at": None,
+        "avg_first_response_minutes": None,
+    }],
     "requested_products": {"SPIDIFY": 2}, "ai_resolved_rate_estimate": 0.8,
     "ai_resolved_rate_caveat": "Approximate.",
+    "clocked_in_count": 1, "available_count": 1, "aux_breakdown": {}, "aux_time_by_category": {},
+    "performance_targets": {"resolution_rate": None, "response_minutes": None, "resolution_minutes": None, "csat": None},
+    "adherence": None, "adherence_note": "No schedule configured.", "csat_note": "Not tracked yet.",
     "knowledge_gaps": None, "frequently_searched_topics": None,
     "insufficient_evidence_questions": None, "source_failures": None,
     "knowledge_tracking_note": "Not tracked yet.",
@@ -364,3 +371,94 @@ class TestWorkspaceReportAndAnalyst:
             response = client.post("/admin/workspaces/w1/ask", json={"question": "How did we do?"})
 
         assert response.status_code == 404
+
+
+def _support_agent(**overrides):
+    from src.services.agents.agent_models import SupportAgent
+
+    base = {
+        "id": "a1", "workspace_id": "w1", "auth_user_id": "u1", "name": "Ada",
+        "email": "ada@example.com", "department": "Support", "status": "available",
+        "created_at": None, "updated_at": None,
+    }
+    base.update(overrides)
+    return SupportAgent(**base)
+
+
+class TestWorkspaceScopedAgentManagement:
+    def test_list_workspace_agents_requires_workspace_admin(self, client):
+        response = client.get("/admin/workspaces/w1/agents")
+        assert response.status_code == 401
+
+    def test_list_workspace_agents_returns_agents(self, client):
+        _authenticate_as_admin()
+        with patch("src.api.routes.admin_workspaces._tenant_service.get_workspace", return_value=_workspace()), \
+             patch(
+                 "src.api.routes.admin_workspaces._agent_service.list_by_workspace",
+                 return_value=[_support_agent()],
+             ):
+            response = client.get("/admin/workspaces/w1/agents")
+
+        assert response.status_code == 200
+        assert response.json()[0]["id"] == "a1"
+
+    def test_update_department_succeeds_for_own_workspace_agent(self, client):
+        _authenticate_as_admin()
+        with patch("src.api.routes.admin_workspaces._tenant_service.get_workspace", return_value=_workspace()), \
+             patch("src.api.routes.admin_workspaces._agent_service.get_by_id", return_value=_support_agent()), \
+             patch(
+                 "src.api.routes.admin_workspaces._agent_service.update_department",
+                 return_value=_support_agent(department="Sales"),
+             ) as mock_update, \
+             patch("src.api.routes.admin_workspaces._audit_service.record") as mock_audit:
+            response = client.patch(
+                "/admin/workspaces/w1/agents/a1/department", json={"department": "Sales"}
+            )
+
+        assert response.status_code == 200
+        assert response.json()["department"] == "Sales"
+        mock_update.assert_called_once_with("a1", "Sales")
+        mock_audit.assert_called_once()
+        assert mock_audit.call_args[0][0] == "agent.department_changed"
+
+    def test_update_department_404s_for_agent_in_another_workspace(self, client):
+        """Tenant isolation: an agent belonging to a different workspace
+        must never be manageable through this workspace's admin route."""
+        _authenticate_as_admin()
+        with patch("src.api.routes.admin_workspaces._tenant_service.get_workspace", return_value=_workspace()), \
+             patch(
+                 "src.api.routes.admin_workspaces._agent_service.get_by_id",
+                 return_value=_support_agent(workspace_id="w2"),
+             ), \
+             patch("src.api.routes.admin_workspaces._agent_service.update_department") as mock_update:
+            response = client.patch(
+                "/admin/workspaces/w1/agents/a1/department", json={"department": "Sales"}
+            )
+
+        assert response.status_code == 404
+        mock_update.assert_not_called()
+
+    def test_deactivate_agent_succeeds_and_audits(self, client):
+        _authenticate_as_admin()
+        with patch("src.api.routes.admin_workspaces._tenant_service.get_workspace", return_value=_workspace()), \
+             patch("src.api.routes.admin_workspaces._agent_service.get_by_id", return_value=_support_agent()), \
+             patch("src.api.routes.admin_workspaces._agent_service.delete") as mock_delete, \
+             patch("src.api.routes.admin_workspaces._audit_service.record") as mock_audit:
+            response = client.delete("/admin/workspaces/w1/agents/a1")
+
+        assert response.status_code == 200
+        mock_delete.assert_called_once_with("a1")
+        assert mock_audit.call_args[0][0] == "agent.removed"
+
+    def test_deactivate_agent_404s_for_agent_in_another_workspace(self, client):
+        _authenticate_as_admin()
+        with patch("src.api.routes.admin_workspaces._tenant_service.get_workspace", return_value=_workspace()), \
+             patch(
+                 "src.api.routes.admin_workspaces._agent_service.get_by_id",
+                 return_value=_support_agent(workspace_id="w2"),
+             ), \
+             patch("src.api.routes.admin_workspaces._agent_service.delete") as mock_delete:
+            response = client.delete("/admin/workspaces/w1/agents/a1")
+
+        assert response.status_code == 404
+        mock_delete.assert_not_called()

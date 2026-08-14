@@ -2,16 +2,18 @@
 
 from fastapi import APIRouter, Depends
 
+from ...services.admin.settings_service import SettingsService
 from ...services.agents.agent_models import SupportAgent
 from ...services.agents.agent_service import AgentService
 from ...services.auth.auth_service import AuthUser
 from ...services.workspace.workspace_context import WorkspaceContext
 from ..deps import get_current_agent, get_current_user_required, get_current_workspace
-from ..schemas import AgentStatusUpdate, SupportAgentSchema
+from ..schemas import AgentPerformanceTargetsSchema, AgentStatusUpdate, SupportAgentSchema
 
 router = APIRouter()
 
 _agent_service = AgentService()
+_settings_service = SettingsService()
 
 
 def _to_schema(agent) -> SupportAgentSchema:
@@ -43,6 +45,23 @@ def update_my_status(
 ) -> SupportAgentSchema:
     updated = _agent_service.update_status(agent.id, request.status)
     return _to_schema(updated)
+
+
+@router.get("/agents/targets", response_model=AgentPerformanceTargetsSchema)
+def get_my_performance_targets(
+    agent: SupportAgent = Depends(get_current_agent),
+) -> AgentPerformanceTargetsSchema:
+    """Read-only, agent-scoped view of the workspace's configured
+    performance targets — `/admin/workspaces/{id}/settings` is
+    workspace_admin-only, so this exposes just the target fields an agent
+    needs for their own KPI-vs-target row, nothing else from settings."""
+    settings = _settings_service.get(agent.workspace_id)
+    return AgentPerformanceTargetsSchema(
+        resolution_rate=settings.target_resolution_rate,
+        response_minutes=settings.target_response_minutes,
+        resolution_minutes=settings.target_resolution_minutes,
+        csat=settings.target_csat,
+    )
 
 
 @router.get("/agents", response_model=list[SupportAgentSchema])

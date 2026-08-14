@@ -88,6 +88,10 @@ def _client_by_table_and_select(responses: dict[tuple[str, str], list[dict]]) ->
             chain.eq.return_value = chain
             chain.in_.return_value = chain
             chain.gte.return_value = chain
+            chain.lte.return_value = chain
+            chain.limit.return_value = chain
+            chain.order.return_value = chain
+            chain.not_.is_.return_value = chain
             response = MagicMock()
             response.data = responses.get((table_name, select_arg), [])
             chain.execute.return_value = response
@@ -140,7 +144,13 @@ class TestWorkspaceOperationalReport:
         ]
         escalation_repo = MagicMock()
         escalation_repo.count_active_for_agent.return_value = 2
-        service = TenantAnalyticsService(client=client, agent_repository=agent_repo, escalation_repository=escalation_repo)
+        attendance_repo = MagicMock()
+        attendance_repo.get_active_session.return_value = None
+        attendance_repo.get_active_aux.return_value = None
+        service = TenantAnalyticsService(
+            client=client, agent_repository=agent_repo, escalation_repository=escalation_repo,
+            attendance_repository=attendance_repo,
+        )
 
         with patch.object(service, "workspace_stats", return_value=_BASE_STATS):
             report = service.workspace_operational_report("w1")
@@ -150,16 +160,30 @@ class TestWorkspaceOperationalReport:
         assert report["department_activity"] == {"Support": 2}
         assert report["frustrated_conversation_count"] == 1
         assert report["agents"] == [
-            {"id": "a1", "name": "Ada", "department": "Support", "status": "available", "current_workload": 2},
+            {
+                "id": "a1", "name": "Ada", "department": "Support", "status": "available", "current_workload": 2,
+                "clock_in_at": None, "current_aux": None, "current_aux_started_at": None,
+                "avg_first_response_minutes": None,
+            },
         ]
         assert report["requested_products"] == {"SPIDIFY": 2, "V-Login": 1}
         assert report["ai_resolved_rate_estimate"] == 0.8  # (10 - 2) / 10
+        assert report["clocked_in_count"] == 0
+        assert report["available_count"] == 0
+        assert report["performance_targets"] == {
+            "resolution_rate": None, "response_minutes": None, "resolution_minutes": None, "csat": None,
+        }
+        assert report["adherence"] is None
+        assert "no schedule configured" in report["adherence_note"].lower()
 
     def test_zero_escalations_gives_none_resolution_rate(self):
         client = _client_by_table_and_select({})
         agent_repo = MagicMock()
         agent_repo.list_by_workspace.return_value = []
-        service = TenantAnalyticsService(client=client, agent_repository=agent_repo)
+        attendance_repo = MagicMock()
+        service = TenantAnalyticsService(
+            client=client, agent_repository=agent_repo, attendance_repository=attendance_repo,
+        )
 
         stats = {**_BASE_STATS, "escalation_count": 0, "conversation_count": 0}
         with patch.object(service, "workspace_stats", return_value=stats):
@@ -173,7 +197,10 @@ class TestWorkspaceOperationalReport:
         client = _client_by_table_and_select({})
         agent_repo = MagicMock()
         agent_repo.list_by_workspace.return_value = []
-        service = TenantAnalyticsService(client=client, agent_repository=agent_repo)
+        attendance_repo = MagicMock()
+        service = TenantAnalyticsService(
+            client=client, agent_repository=agent_repo, attendance_repository=attendance_repo,
+        )
 
         with patch.object(service, "workspace_stats", return_value=_BASE_STATS):
             report = service.workspace_operational_report("w1")
@@ -183,3 +210,43 @@ class TestWorkspaceOperationalReport:
         assert report["insufficient_evidence_questions"] is None
         assert report["source_failures"] is None
         assert "not tracked yet" in report["knowledge_tracking_note"].lower()
+        assert "not tracked" in report["csat_note"].lower()
+
+    def test_aux_breakdown_and_categorization(self):
+        client = _client_by_table_and_select({})
+        from types import SimpleNamespace
+
+        agent_repo = MagicMock()
+        agent_repo.list_by_workspace.return_value = [
+            SimpleNamespace(id="a1", name="Ada", department="Support", status="away"),
+            SimpleNamespace(id="a2", name="David", department="Support", status="available"),
+        ]
+        escalation_repo = MagicMock()
+        escalation_repo.count_active_for_agent.return_value = 0
+        attendance_repo = MagicMock()
+
+        session_a1 = SimpleNamespace(clock_in_at="2026-01-01T08:00:00+00:00")
+        session_a2 = SimpleNamespace(clock_in_at="2026-01-01T08:15:00+00:00")
+        aux_a1 = SimpleNamespace(aux_type="training", started_at="2026-01-01T09:00:00+00:00")
+
+        def get_active_session(agent_id):
+            return {"a1": session_a1, "a2": session_a2}.get(agent_id)
+
+        def get_active_aux(agent_id):
+            return aux_a1 if agent_id == "a1" else None
+
+        attendance_repo.get_active_session.side_effect = get_active_session
+        attendance_repo.get_active_aux.side_effect = get_active_aux
+
+        service = TenantAnalyticsService(
+            client=client, agent_repository=agent_repo, escalation_repository=escalation_repo,
+            attendance_repository=attendance_repo,
+        )
+
+        with patch.object(service, "workspace_stats", return_value=_BASE_STATS):
+            report = service.workspace_operational_report("w1")
+
+        assert report["clocked_in_count"] == 2
+        assert report["available_count"] == 1  # a2 only — a1 is in AUX
+        assert report["aux_breakdown"] == {"training": 1}
+        assert report["aux_time_by_category"] == {"productive_operational": 1}  # built-in default
