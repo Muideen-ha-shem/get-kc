@@ -67,6 +67,14 @@ class TestDashboardStats:
              patch(
                  "src.api.routes.escalation._escalation_repository.list_resolved_today_for_agent",
                  return_value=resolved,
+             ), \
+             patch(
+                 "src.api.routes.escalation._escalation_repository.resolution_stats_for_agent",
+                 return_value=(8, 10),
+             ), \
+             patch(
+                 "src.api.routes.escalation._escalation_repository.avg_first_response_minutes_for_agent",
+                 return_value=4.5,
              ):
             response = client.get("/agent/dashboard/stats")
 
@@ -77,3 +85,5 @@ class TestDashboardStats:
         assert body["average_resolution_minutes"] == 20.0
         assert body["status"] == "available"
         assert body["department"] == "Support"
+        assert body["resolution_rate"] == 0.8
+        assert body["avg_first_response_minutes"] == 4.5

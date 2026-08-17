@@ -26,8 +26,10 @@ from ...services.admin.workspace_deletion_service import (
     WorkspaceDeletionConfirmationError,
     WorkspaceHardDeleteService,
 )
+from ...services.agents.agent_service import AgentService
 from ...services.auth.auth_service import AuthUser
 from ..deps import require_super_admin, require_workspace_admin
+from ..schemas import SupportAgentSchema
 from ..schemas_admin import (
     ApiKeyRegenerateResponse,
     AuditLogEntrySchema,
@@ -42,6 +44,7 @@ from ..schemas_admin import (
     WorkspaceCreateRequest,
     WorkspaceCreateResponse,
     WorkspaceHardDeleteRequest,
+    AgentDepartmentUpdateRequest,
     WorkspaceProductSchema,
     WorkspaceProductsUpdateRequest,
     WorkspaceReportSchema,
@@ -53,6 +56,7 @@ router = APIRouter()
 
 _tenant_service = TenantService()
 _tenant_analytics_service = TenantAnalyticsService()
+_agent_service = AgentService()
 _settings_service = SettingsService()
 _feature_flag_service = FeatureFlagService()
 _product_service = ProductService()
@@ -90,6 +94,11 @@ def _to_settings_schema(settings) -> WorkspaceSettingsSchema:
         chat_avatar=settings.chat_avatar,
         company_name=settings.company_name,
         footer_text=settings.footer_text,
+        target_resolution_rate=settings.target_resolution_rate,
+        target_response_minutes=settings.target_response_minutes,
+        target_resolution_minutes=settings.target_resolution_minutes,
+        target_csat=settings.target_csat,
+        aux_categories=settings.aux_categories,
     )
 
 
@@ -156,6 +165,58 @@ def ask_workspace_analyst(
     _get_workspace_or_404(workspace_id)
     result = answer_question(workspace_id, request.question, analytics_service=_tenant_analytics_service)
     return WorkspaceAskResponseSchema(answer=result["answer"])
+
+
+def _to_agent_schema(agent) -> SupportAgentSchema:
+    return SupportAgentSchema(
+        id=agent.id, workspace_id=agent.workspace_id, name=agent.name,
+        email=agent.email, department=agent.department, status=agent.status,
+        created_at=agent.created_at,
+    )
+
+
+@router.get("/admin/workspaces/{workspace_id}/agents", response_model=list[SupportAgentSchema])
+def list_workspace_agents(
+    workspace_id: str, user: AuthUser = Depends(require_workspace_admin)
+) -> list[SupportAgentSchema]:
+    """The list of already-active agents `WorkspaceTeamPage.tsx` was
+    missing — it previously only showed pending/accepted invitations."""
+    _get_workspace_or_404(workspace_id)
+    return [_to_agent_schema(a) for a in _agent_service.list_by_workspace(workspace_id)]
+
+
+@router.patch(
+    "/admin/workspaces/{workspace_id}/agents/{agent_id}/department", response_model=SupportAgentSchema
+)
+def update_workspace_agent_department(
+    workspace_id: str,
+    agent_id: str,
+    request: AgentDepartmentUpdateRequest,
+    user: AuthUser = Depends(require_workspace_admin),
+) -> SupportAgentSchema:
+    _get_workspace_or_404(workspace_id)
+    agent = _agent_service.get_by_id(agent_id)
+    if agent is None or agent.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="Agent not found in this workspace")
+    updated = _agent_service.update_department(agent_id, request.department)
+    _audit_service.record(
+        "agent.department_changed", user.id, workspace_id,
+        {"agent_id": agent_id, "department": request.department},
+    )
+    return _to_agent_schema(updated)
+
+
+@router.delete("/admin/workspaces/{workspace_id}/agents/{agent_id}")
+def deactivate_workspace_agent(
+    workspace_id: str, agent_id: str, user: AuthUser = Depends(require_workspace_admin)
+) -> dict[str, str]:
+    _get_workspace_or_404(workspace_id)
+    agent = _agent_service.get_by_id(agent_id)
+    if agent is None or agent.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="Agent not found in this workspace")
+    _agent_service.delete(agent_id)
+    _audit_service.record("agent.removed", user.id, workspace_id, {"agent_id": agent_id})
+    return {"status": "deleted"}
 
 
 @router.patch("/admin/workspaces/{workspace_id}/branding", response_model=WorkspaceAdminSchema)

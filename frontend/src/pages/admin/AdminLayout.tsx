@@ -1,8 +1,9 @@
 import { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ArrowLeft, Bot, Building2, LayoutDashboard, PanelLeft, PanelLeftClose, ScrollText, Users } from 'lucide-react';
+import { ArrowLeft, Bot, Building2, LayoutDashboard, LogOut, PanelLeft, PanelLeftClose, ScrollText, Users } from 'lucide-react';
 import { HavisIQMark } from '../../components/HavisIQMark';
 import { PageContainer } from '../../components/PageContainer';
+import { useAuth } from '../../lib/authContext';
 import { useSidebarCollapse } from '../../lib/useSidebarCollapse';
 
 const NAV_ITEMS = [
@@ -15,6 +16,7 @@ const NAV_ITEMS = [
 
 export function AdminLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
+  const { signOut } = useAuth();
   const [collapsed, setCollapsed] = useSidebarCollapse('havisiq-admin-sidebar-collapsed');
 
   return (
@@ -34,7 +36,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
             </div>
           )}
         </div>
-        <div className="px-2 pt-2">
+        {/* <div className="px-2 pt-2">
           <Link
             to="/dashboard"
             title={collapsed ? 'Back to Dashboard' : undefined}
@@ -43,7 +45,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
             <ArrowLeft size={16} className="shrink-0" />
             {!collapsed && <span className="truncate">Back to Dashboard</span>}
           </Link>
-        </div>
+        </div> */}
         <nav className="flex flex-col p-2 gap-1 border-t border-ink/10 mt-1 pt-2">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
@@ -64,8 +66,17 @@ export function AdminLayout({ children }: { children: ReactNode }) {
           })}
         </nav>
         <button
-          onClick={() => setCollapsed((v) => !v)}
+          onClick={() => signOut()}
+          title={collapsed ? 'Log out' : undefined}
           className="mt-auto flex items-center gap-2 px-4 py-3 text-xs text-ink/50 border-t border-ink/10 transition hover:text-ink hover:bg-paper"
+          aria-label="Log out"
+        >
+          <LogOut size={16} className="shrink-0" />
+          {!collapsed && <span>Log out</span>}
+        </button>
+        <button
+          onClick={() => setCollapsed((v) => !v)}
+          className="flex items-center gap-2 px-4 py-3 text-xs text-ink/50 border-t border-ink/10 transition hover:text-ink hover:bg-paper"
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
           {collapsed ? <PanelLeft size={16} /> : <PanelLeftClose size={16} />}

@@ -80,6 +80,11 @@ class WorkspaceSettings:
     chat_avatar: str | None = None
     company_name: str | None = None
     footer_text: str | None = None
+    target_resolution_rate: float | None = None
+    target_response_minutes: float | None = None
+    target_resolution_minutes: float | None = None
+    target_csat: float | None = None
+    aux_categories: dict[str, str] | None = None
     created_at: str | None = None
     updated_at: str | None = None
 

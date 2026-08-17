@@ -239,6 +239,11 @@ def get_my_agent_conversations(agent: SupportAgent = Depends(get_current_agent))
 def accept_escalation(
     request: EscalationActionRequest, agent: SupportAgent = Depends(get_current_agent)
 ) -> EscalationSchema:
+    if agent.status != "available":
+        raise HTTPException(
+            status_code=409,
+            detail="You must be Available (not clocked out or in an AUX state) to accept new escalations.",
+        )
     escalation = _get_escalation_or_404(request.escalation_id, agent.workspace_id)
     if escalation.status != "waiting":
         raise HTTPException(status_code=409, detail="Escalation is not waiting for assignment")
@@ -379,7 +384,13 @@ def copilot_suggest_reply(
     """Drafts a suggested reply — never sent automatically. The agent
     reviews/edits it and sends it explicitly via POST .../messages."""
     _get_escalation_or_404(escalation_id, agent.workspace_id)
-    result = suggest_reply(workspace_id=agent.workspace_id, question=request.question)
+    messages = _escalation_repository.list_messages(escalation_id)
+    transcript = "\n".join(
+        f"{'Customer' if m.sender_type == 'customer' else 'Agent'}: {m.content}" for m in messages
+    )
+    result = suggest_reply(
+        workspace_id=agent.workspace_id, question=request.question, conversation_transcript=transcript or None,
+    )
     return CopilotSuggestReplySchema(draft=result["draft"], citations=result["citations"])
 
 
@@ -479,10 +490,16 @@ def get_agent_dashboard_stats(agent: SupportAgent = Depends(get_current_agent)) 
         if durations:
             average_minutes = sum(durations) / len(durations)
 
+    resolved_count, total_assigned = _escalation_repository.resolution_stats_for_agent(agent.id)
+    resolution_rate = (resolved_count / total_assigned) if total_assigned else None
+    avg_first_response_minutes = _escalation_repository.avg_first_response_minutes_for_agent(agent.id)
+
     return AgentDashboardStatsSchema(
         status=agent.status,
         department=agent.department,
         current_workload=workload,
         resolved_today=len(resolved_today),
         average_resolution_minutes=average_minutes,
+        resolution_rate=resolution_rate,
+        avg_first_response_minutes=avg_first_response_minutes,
     )

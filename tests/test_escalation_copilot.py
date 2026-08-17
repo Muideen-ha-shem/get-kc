@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from src.services.escalation.copilot import recommend_documentation, suggest_reply
+from src.services.escalation.copilot import clean_dangling_citations, recommend_documentation, suggest_reply
 
 
 class TestSuggestReply:
@@ -51,6 +51,64 @@ class TestSuggestReply:
         assert "draft" in result
         # No mock for any EscalationRepository/NotificationService was ever
         # constructed or passed in — nothing in this module can persist.
+
+
+    def test_conversation_transcript_grounds_summary_requests(self):
+        """A "summarize this conversation" request has no KB matches at
+        all — without the transcript folded in as evidence, generate()
+        would short-circuit to the no-evidence fallback. Confirms the
+        transcript is passed through as grounding evidence."""
+        knowledge_service = MagicMock()
+        knowledge_service.retrieve_context.return_value = ([], [], [])
+        response_generator = MagicMock()
+        response_generator.generate.return_value = {
+            "answer": "The customer asked about pricing; the agent explained the tiers.",
+            "citations": [],
+        }
+
+        result = suggest_reply(
+            workspace_id="w1", question="Summarize this conversation",
+            conversation_transcript="Customer: What does it cost?\nAgent: Here are our tiers...",
+            knowledge_service=knowledge_service, response_generator=response_generator,
+        )
+
+        assert "customer asked about pricing" in result["draft"]
+        context = response_generator.generate.call_args.kwargs["context"]
+        assert any(item.source_type == "escalation_transcript" for item in context)
+
+    def test_strips_dangling_citation_for_transcript_only_evidence(self):
+        knowledge_service = MagicMock()
+        knowledge_service.retrieve_context.return_value = ([], [], [])
+        response_generator = MagicMock()
+        response_generator.generate.return_value = {
+            "answer": "Summary text here.\n\n**Sources**\n[1]",
+            "citations": [{"url": "", "title": "Conversation so far", "source_type": "escalation_transcript", "score": 1.0}],
+        }
+
+        result = suggest_reply(
+            workspace_id="w1", question="Summarize this conversation",
+            conversation_transcript="Customer: Hi\nAgent: Hello",
+            knowledge_service=knowledge_service, response_generator=response_generator,
+        )
+
+        assert "Sources" not in result["draft"]
+        assert result["citations"] == []
+
+
+class TestCleanDanglingCitations:
+    def test_preserves_real_citations_untouched(self):
+        answer = "Answer.\n\n**Sources**\n[1] https://x.com"
+        citations = [{"url": "https://x.com"}]
+        cleaned_answer, cleaned_citations = clean_dangling_citations(answer, citations)
+        assert cleaned_answer == answer
+        assert cleaned_citations == citations
+
+    def test_strips_sources_section_when_no_real_citations_remain(self):
+        answer = "Here is the summary.\n\n**Sources**\n[1]"
+        citations = [{"url": ""}]
+        cleaned_answer, cleaned_citations = clean_dangling_citations(answer, citations)
+        assert cleaned_answer == "Here is the summary."
+        assert cleaned_citations == []
 
 
 class TestRecommendDocumentation:

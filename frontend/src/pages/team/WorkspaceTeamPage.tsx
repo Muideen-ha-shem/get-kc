@@ -4,9 +4,13 @@ import { apiJson } from '../../lib/apiClient';
 import { Select } from '../../components/Select';
 import { StatusBadge, type BadgeTone } from '../../components/StatusBadge';
 import { INPUT_CLASS, PRIMARY_BUTTON } from '../../lib/uiClassNames';
+import type { SupportAgent } from '../admin/adminTypes';
 import type { Department, InvitationRole, WorkspaceInvitation } from './teamTypes';
 
 const DEPARTMENTS: Department[] = ['Support', 'Sales', 'Solution Architect', 'Customer Success', 'General'];
+const AGENT_DEPARTMENTS = [
+  'Support', 'Sales', 'Solution Architect', 'Customer Success', 'General', 'Implementation', 'Training', 'Finance',
+];
 
 const STATUS_TONE: Record<string, BadgeTone> = {
   pending: 'warning',
@@ -16,6 +20,7 @@ const STATUS_TONE: Record<string, BadgeTone> = {
 
 function WorkspaceTeamContent({ workspaceId }: { workspaceId: string }) {
   const [invitations, setInvitations] = useState<WorkspaceInvitation[]>([]);
+  const [agents, setAgents] = useState<SupportAgent[]>([]);
   const [forbidden, setForbidden] = useState(false);
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<InvitationRole>('agent');
@@ -32,7 +37,26 @@ function WorkspaceTeamContent({ workspaceId }: { workspaceId: string }) {
       .catch(() => setForbidden(true));
   }
 
+  function loadAgents() {
+    apiJson<SupportAgent[]>(`/admin/workspaces/${workspaceId}/agents`).then(setAgents).catch(() => {});
+  }
+
   useEffect(load, [workspaceId]);
+  useEffect(loadAgents, [workspaceId]);
+
+  async function changeAgentDepartment(agentId: string, newDepartment: string) {
+    await apiJson(`/admin/workspaces/${workspaceId}/agents/${agentId}/department`, {
+      method: 'PATCH',
+      body: JSON.stringify({ department: newDepartment }),
+    });
+    loadAgents();
+  }
+
+  async function deactivateAgent(agentId: string) {
+    if (!confirm('Deactivate this agent? They will no longer receive new escalations.')) return;
+    await apiJson(`/admin/workspaces/${workspaceId}/agents/${agentId}`, { method: 'DELETE' });
+    loadAgents();
+  }
 
   async function sendInvite(event: FormEvent) {
     event.preventDefault();
@@ -114,6 +138,33 @@ function WorkspaceTeamContent({ workspaceId }: { workspaceId: string }) {
         </button>
       </form>
 
+      <h2 className="text-sm font-semibold text-ink/50 uppercase mb-2">Current agents</h2>
+      <div className="bg-white border border-ink/10 rounded-2xl divide-y divide-ink/10 mb-6">
+        {agents.map((a) => (
+          <div key={a.id} className="flex items-center justify-between px-4 py-3 gap-3">
+            <div>
+              <p className="text-sm font-medium text-ink">{a.name}</p>
+              <p className="text-xs text-ink/50">{a.email} · {a.status}</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="w-44">
+                <Select value={a.department} onChange={(e) => changeAgentDepartment(a.id, e.target.value)}>
+                  {AGENT_DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
+                </Select>
+              </div>
+              <button
+                onClick={() => deactivateAgent(a.id)}
+                className="rounded-full bg-red-50 text-red-700 border border-red-200 px-3 py-1 text-xs transition hover:bg-red-100"
+              >
+                Deactivate
+              </button>
+            </div>
+          </div>
+        ))}
+        {agents.length === 0 && <p className="px-4 py-3 text-sm text-ink/40">No active agents yet.</p>}
+      </div>
+
+      <h2 className="text-sm font-semibold text-ink/50 uppercase mb-2">Invitations</h2>
       <div className="bg-white border border-ink/10 rounded-2xl divide-y divide-ink/10">
         {invitations.map((i) => (
           <div key={i.id} className="flex items-center justify-between px-4 py-3">

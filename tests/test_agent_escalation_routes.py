@@ -123,6 +123,25 @@ class TestAgentsRoutes:
         assert response.status_code == 200
         assert response.json()["status"] == "available"
 
+    def test_get_targets_returns_configured_workspace_targets(self, client):
+        from types import SimpleNamespace
+
+        _authenticate_as_agent(_agent())
+        settings = SimpleNamespace(
+            target_resolution_rate=0.9, target_response_minutes=5.0,
+            target_resolution_minutes=30.0, target_csat=None,
+        )
+        with patch("src.api.routes.agents._settings_service.get", return_value=settings) as mock_get:
+            response = client.get("/agents/targets")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["resolution_rate"] == 0.9
+        assert body["response_minutes"] == 5.0
+        assert body["resolution_minutes"] == 30.0
+        assert body["csat"] is None
+        mock_get.assert_called_once_with("w1")
+
 
 class TestEscalationRoutes:
     def test_chat_escalate_creates_and_notifies(self, client):
@@ -167,7 +186,7 @@ class TestEscalationRoutes:
         assert response.status_code == 409
 
     def test_accept_waiting_escalation_succeeds(self, client):
-        _authenticate_as_agent(_agent())
+        _authenticate_as_agent(_agent(status="available"))
         with patch("src.api.routes.escalation._escalation_repository.get", return_value=_escalation()), \
              patch(
                  "src.api.routes.escalation._escalation_repository.assign",
@@ -178,6 +197,38 @@ class TestEscalationRoutes:
         assert response.status_code == 200
         assert response.json()["status"] == "assigned"
         mock_assign.assert_called_once_with("e1", "a1")
+
+    def test_accept_rejected_when_agent_not_available(self, client):
+        _authenticate_as_agent(_agent(status="away"))
+        response = client.post("/agent/accept", json={"escalation_id": "e1"})
+
+        assert response.status_code == 409
+
+    def test_copilot_suggest_reply_passes_conversation_transcript(self, client):
+        _authenticate_as_agent(_agent())
+        escalation = _escalation()
+        with patch("src.api.routes.escalation._escalation_repository.get", return_value=escalation), \
+             patch(
+                 "src.api.routes.escalation._escalation_repository.list_messages",
+                 return_value=[
+                     MagicMock(sender_type="customer", content="I need help"),
+                     MagicMock(sender_type="agent", content="Sure, what's up?"),
+                 ],
+             ), \
+             patch(
+                 "src.api.routes.escalation.suggest_reply",
+                 return_value={"draft": "Summary of the chat.", "citations": []},
+             ) as mock_suggest:
+            response = client.post(
+                f"/agent/escalations/{escalation.id}/copilot/suggest-reply",
+                json={"question": "Summarize this conversation"},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["draft"] == "Summary of the chat."
+        _, kwargs = mock_suggest.call_args
+        assert "Customer: I need help" in kwargs["conversation_transcript"]
+        assert "Agent: Sure, what's up?" in kwargs["conversation_transcript"]
 
     def test_resolve_requires_assigned_or_active(self, client):
         _authenticate_as_agent(_agent())

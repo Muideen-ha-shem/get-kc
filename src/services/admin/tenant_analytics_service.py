@@ -10,7 +10,7 @@ tables — no caching, no second pipeline, mirroring the exact query style
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timezone
 from typing import Any
 
 from supabase import Client
@@ -18,8 +18,23 @@ from supabase import Client
 from ...api.services.demo_requests import list_by_email
 from ...sb import get_client
 from ..agents.agent_repository import AgentRepository
+from ..agents.attendance_repository import AttendanceRepository
 from ..escalation.escalation_repository import EscalationRepository
 from ..profile.profile_service import ProfileService
+
+# Built-in defaults, used only when a workspace hasn't configured its own
+# workspace_settings.aux_categories override. AUX time is never
+# automatically "unproductive" — Training/Meetings/Admin Work count as
+# productive operational time, not penalized.
+_DEFAULT_AUX_CATEGORIES: dict[str, str] = {
+    "meeting": "productive_operational",
+    "training": "productive_operational",
+    "admin_work": "productive_operational",
+    "customer_follow_up": "customer_service",
+    "technical_issue": "non_customer_work",
+    "break": "non_working",
+    "lunch": "non_working",
+}
 
 # Honest limitation, not a silent gap: kb_confidence and evidence-
 # sufficiency are computed per-request in SearchManager and never written
@@ -47,10 +62,12 @@ class TenantAnalyticsService:
         client: Client | None = None,
         escalation_repository: EscalationRepository | None = None,
         agent_repository: AgentRepository | None = None,
+        attendance_repository: AttendanceRepository | None = None,
     ) -> None:
         self._client = client or get_client()
         self._escalations = escalation_repository or EscalationRepository()
         self._agents = agent_repository or AgentRepository()
+        self._attendance = attendance_repository or AttendanceRepository()
 
     def workspace_stats(self, workspace_id: str) -> dict[str, Any]:
         conversation_count = _count(self._client, "conversations", workspace_id)
@@ -140,16 +157,79 @@ class TenantAnalyticsService:
         average_resolution_minutes = (sum(durations) / len(durations)) if durations else None
 
         agents = self._agents.list_by_workspace(workspace_id)
-        agent_breakdown = [
-            {
+
+        # First-response time — fully computable from existing data, no new
+        # tracking: first agent message timestamp minus the escalation's
+        # assigned_at (falling back to created_at if never separately
+        # assigned), grouped per agent in one pass.
+        assigned_rows = (
+            self._client.table("escalations")
+            .select("id,assigned_agent_id,assigned_at,created_at")
+            .eq("workspace_id", workspace_id)
+            .not_.is_("assigned_agent_id", "null")
+            .execute()
+        ).data or []
+        response_minutes_by_agent: dict[str, list[float]] = {}
+        if assigned_rows:
+            escalation_ids = [row["id"] for row in assigned_rows]
+            assigned_at_by_id = {row["id"]: row.get("assigned_at") or row.get("created_at") for row in assigned_rows}
+            agent_by_escalation = {row["id"]: row["assigned_agent_id"] for row in assigned_rows}
+            message_rows = (
+                self._client.table("escalation_messages")
+                .select("escalation_id,sender_type,created_at")
+                .in_("escalation_id", escalation_ids)
+                .eq("sender_type", "agent")
+                .order("created_at")
+                .execute()
+            ).data or []
+            first_agent_message: dict[str, str] = {}
+            for row in message_rows:
+                eid = row["escalation_id"]
+                if eid not in first_agent_message:
+                    first_agent_message[eid] = row["created_at"]
+            for eid, first_at in first_agent_message.items():
+                assigned_at = assigned_at_by_id.get(eid)
+                if not assigned_at:
+                    continue
+                minutes = (
+                    datetime.fromisoformat(first_at.replace("Z", "+00:00"))
+                    - datetime.fromisoformat(assigned_at.replace("Z", "+00:00"))
+                ).total_seconds() / 60
+                agent_id = agent_by_escalation.get(eid)
+                if agent_id:
+                    response_minutes_by_agent.setdefault(agent_id, []).append(max(0.0, minutes))
+
+        all_response_minutes = [m for values in response_minutes_by_agent.values() for m in values]
+        avg_first_response_minutes = (
+            sum(all_response_minutes) / len(all_response_minutes) if all_response_minutes else None
+        )
+
+        # Live AUX/session state per agent — current, not historical.
+        clocked_in_count = 0
+        available_count = 0
+        aux_breakdown: dict[str, int] = {}
+        agent_breakdown = []
+        for agent in agents:
+            session = self._attendance.get_active_session(agent.id)
+            aux = self._attendance.get_active_aux(agent.id) if session else None
+            if session is not None:
+                clocked_in_count += 1
+                if aux is None:
+                    available_count += 1
+                else:
+                    aux_breakdown[aux.aux_type] = aux_breakdown.get(aux.aux_type, 0) + 1
+            agent_minutes = response_minutes_by_agent.get(agent.id, [])
+            agent_breakdown.append({
                 "id": agent.id,
                 "name": agent.name,
                 "department": agent.department,
                 "status": agent.status,
                 "current_workload": self._escalations.count_active_for_agent(agent.id),
-            }
-            for agent in agents
-        ]
+                "clock_in_at": session.clock_in_at if session else None,
+                "current_aux": aux.aux_type if aux else None,
+                "current_aux_started_at": aux.started_at if aux else None,
+                "avg_first_response_minutes": (sum(agent_minutes) / len(agent_minutes)) if agent_minutes else None,
+            })
 
         # Requested products — from saved_recommendations only (workspace-
         # scoped, unlike demo_requests which has no workspace_id column and
@@ -185,10 +265,54 @@ class TenantAnalyticsService:
             else None
         )
 
+        # Performance targets + AUX categorization — read straight from
+        # workspace_settings, all nullable. A workspace with none configured
+        # gets None targets (no fabricated benchmark) and the built-in AUX
+        # category defaults.
+        settings_rows = (
+            self._client.table("workspace_settings")
+            .select("target_resolution_rate,target_response_minutes,target_resolution_minutes,"
+                     "target_csat,aux_categories,working_hours")
+            .eq("workspace_id", workspace_id)
+            .limit(1)
+            .execute()
+        ).data or []
+        settings_row = settings_rows[0] if settings_rows else {}
+        aux_categories = {**_DEFAULT_AUX_CATEGORIES, **(settings_row.get("aux_categories") or {})}
+        aux_time_by_category: dict[str, int] = {}
+        for aux_type, count in aux_breakdown.items():
+            category = aux_categories.get(aux_type, "productive_operational")
+            aux_time_by_category[category] = aux_time_by_category.get(category, 0) + count
+
+        # Adherence — only when a schedule exists (workspace_settings.
+        # working_hours = {"start": "HH:MM", ...}). Never inferring "late"
+        # without one configured.
+        working_hours = settings_row.get("working_hours") or {}
+        adherence = None
+        scheduled_start = working_hours.get("start")
+        if scheduled_start:
+            today = date.today()
+            adherence = []
+            for agent in agents:
+                session = self._attendance.get_active_session(agent.id)
+                if session is None:
+                    continue
+                actual = datetime.fromisoformat(session.clock_in_at.replace("Z", "+00:00"))
+                scheduled = datetime.combine(
+                    today, datetime.strptime(scheduled_start, "%H:%M").time(), tzinfo=timezone.utc
+                )
+                adherence.append({
+                    "agent_id": agent.id,
+                    "scheduled_start": scheduled_start,
+                    "actual_clock_in_at": session.clock_in_at,
+                    "difference_minutes": (actual - scheduled).total_seconds() / 60,
+                })
+
         return {
             **stats,
             "resolution_rate": resolution_rate,
             "average_resolution_minutes": average_resolution_minutes,
+            "avg_first_response_minutes": avg_first_response_minutes,
             "department_activity": department_activity,
             "frustrated_conversation_count": frustrated_count,
             "agents": agent_breakdown,
@@ -198,6 +322,21 @@ class TenantAnalyticsService:
                 "Approximate — a conversation with an escalation may still have "
                 "continued with AI afterward, so this understates true AI resolution."
             ),
+            "clocked_in_count": clocked_in_count,
+            "available_count": available_count,
+            "aux_breakdown": aux_breakdown,
+            "aux_time_by_category": aux_time_by_category,
+            "performance_targets": {
+                "resolution_rate": settings_row.get("target_resolution_rate"),
+                "response_minutes": settings_row.get("target_response_minutes"),
+                "resolution_minutes": settings_row.get("target_resolution_minutes"),
+                "csat": settings_row.get("target_csat"),
+            },
+            "adherence": adherence,
+            "adherence_note": None if adherence is not None else (
+                "No schedule configured for this workspace (working_hours) — adherence not computed."
+            ),
+            "csat_note": "No per-agent CSAT data source exists yet — not tracked.",
             "knowledge_gaps": None,
             "frequently_searched_topics": None,
             "insufficient_evidence_questions": None,

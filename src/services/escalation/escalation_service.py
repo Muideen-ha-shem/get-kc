@@ -19,6 +19,7 @@ from ..agents.agent_service import AgentService
 from ..generator.response_generator import ResponseGenerator
 from ..merger.context_merger import EvidenceItem
 from ..notifications.notification_service import NotificationService
+from .copilot import clean_dangling_citations
 from .decision import decide_escalation
 from .department_routing import determine_department
 from .escalation_models import Escalation
@@ -124,7 +125,8 @@ class EscalationService:
             )
             generator = response_generator or ResponseGenerator()
             result = generator.generate(question=question, context=evidence)
-            return result.get("answer") or None
+            answer, _citations = clean_dangling_citations(result.get("answer") or "", result.get("citations", []))
+            return answer or None
         except Exception as exc:
             logger.warning(
                 "EscalationService: resolution summary generation failed for %s — %s.",

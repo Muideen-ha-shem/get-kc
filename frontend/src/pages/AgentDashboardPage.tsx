@@ -1,10 +1,11 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Bell, PanelLeft, PanelLeftClose } from 'lucide-react';
+import { Bell, Clock, LogOut, PanelLeft, PanelLeftClose } from 'lucide-react';
 import { HavisIQMark } from '../components/HavisIQMark';
 import { PageContainer } from '../components/PageContainer';
 import { Select } from '../components/Select';
 import { apiJson } from '../lib/apiClient';
+import { useAuth } from '../lib/authContext';
 import { INPUT_CLASS, PRIMARY_BUTTON, SECONDARY_BUTTON } from '../lib/uiClassNames';
 import { useSidebarCollapse } from '../lib/useSidebarCollapse';
 
@@ -75,7 +76,60 @@ type DashboardStats = {
   current_workload: number;
   resolved_today: number;
   average_resolution_minutes: number | null;
+  resolution_rate: number | null;
+  avg_first_response_minutes: number | null;
 };
+
+type WorkSession = {
+  id: string;
+  agent_id: string;
+  work_date: string;
+  clock_in_at: string;
+  clock_out_at: string | null;
+  total_work_seconds: number | null;
+};
+
+type AuxEvent = {
+  id: string;
+  agent_id: string;
+  aux_type: string;
+  started_at: string;
+  ended_at: string | null;
+  duration_seconds: number | null;
+  reason: string | null;
+};
+
+type AttendanceMe = {
+  session: WorkSession | null;
+  aux: AuxEvent | null;
+  today_aux_history: AuxEvent[];
+};
+
+type PerformanceTargets = {
+  resolution_rate: number | null;
+  response_minutes: number | null;
+  resolution_minutes: number | null;
+  csat: number | null;
+};
+
+const AUX_TYPES = [
+  { value: 'meeting', label: 'Meeting' },
+  { value: 'training', label: 'Training' },
+  { value: 'admin_work', label: 'Admin Work' },
+  { value: 'customer_follow_up', label: 'Customer Follow-up' },
+  { value: 'technical_issue', label: 'Technical Issue' },
+  { value: 'break', label: 'Break' },
+  { value: 'lunch', label: 'Lunch' },
+];
+
+function formatDuration(seconds: number): string {
+  const clamped = Math.max(0, seconds);
+  const h = Math.floor(clamped / 3600);
+  const m = Math.floor((clamped % 3600) / 60);
+  const s = Math.floor(clamped % 60);
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${pad(h)}:${pad(m)}:${pad(s)}`;
+}
 
 type AgentNotification = {
   id: string;
@@ -101,7 +155,35 @@ const OPEN_CONVERSATION_POLL_INTERVAL_MS = 2500;
 
 type Section = 'queue' | 'profile' | 'notifications';
 
+function KpiCard({
+  label,
+  value,
+  sub,
+  target,
+  met,
+}: {
+  label: string;
+  value: string | number;
+  sub?: string;
+  target?: string;
+  met?: boolean;
+}) {
+  return (
+    <div className="bg-white border border-ink/10 rounded-2xl p-3">
+      <p className="text-xs text-ink/50 uppercase">{label}</p>
+      <p className="text-lg font-display text-ink">{value}</p>
+      {sub ? <p className="text-xs text-ink/40">{sub}</p> : null}
+      {target ? (
+        <p className={`text-xs mt-0.5 ${met ? 'text-green-600' : met === false ? 'text-red-600' : 'text-ink/40'}`}>
+          {met === true ? '✓ ' : met === false ? '✗ ' : ''}Target: {target}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function AgentDashboardPage() {
+  const { signOut } = useAuth();
   const [agent, setAgent] = useState<SupportAgent | null>(null);
   const [notAnAgent, setNotAnAgent] = useState(false);
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -118,6 +200,10 @@ export function AgentDashboardPage() {
   const [notifications, setNotifications] = useState<AgentNotification[] | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useSidebarCollapse('havisiq-agent-sidebar-collapsed');
+  const [attendance, setAttendance] = useState<AttendanceMe | null>(null);
+  const [targets, setTargets] = useState<PerformanceTargets | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     apiJson<SupportAgent>('/agents/me')
@@ -152,6 +238,24 @@ export function AgentDashboardPage() {
     return () => clearInterval(interval);
   }, [agent, openEscalation?.id]);
 
+  useEffect(() => {
+    if (!agent) return;
+    apiJson<PerformanceTargets>('/agents/targets').then(setTargets).catch(() => setTargets(null));
+  }, [agent]);
+
+  useEffect(() => {
+    if (!agent) return;
+    const poll = () => apiJson<AttendanceMe>('/agents/attendance/me').then(setAttendance).catch(() => {});
+    poll();
+    const interval = setInterval(poll, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [agent]);
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Customer Timeline — resolved from the first customer message's
   // sender_auth_user_id (no dedicated field links an escalation straight
   // to a customer identity; a real customer message is the only place
@@ -169,18 +273,61 @@ export function AgentDashboardPage() {
     setResolutionDraft(openEscalation?.summary?.resolution ?? '');
   }, [openEscalation?.id, openEscalation?.summary?.resolution]);
 
-  async function setStatus(status: AgentStatus) {
-    const updated = await apiJson<SupportAgent>('/agents/status', {
-      method: 'PATCH',
-      body: JSON.stringify({ status }),
-    });
-    setAgent(updated);
+  // A stale draft/question from the previous conversation must never
+  // carry over — Ask AI answers a conversation's content, not the agent's
+  // desk, so switching escalations clears it.
+  useEffect(() => {
+    setCopilotQuestion('');
+    setCopilotAnswer(null);
+  }, [openEscalation?.id]);
+
+  async function clockIn() {
+    try {
+      const session = await apiJson<WorkSession>('/agents/clock-in', { method: 'POST' });
+      setAttendance((prev) => ({ session, aux: null, today_aux_history: prev?.today_aux_history ?? [] }));
+      setActionError(null);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to clock in.');
+    }
+  }
+
+  async function clockOut() {
+    try {
+      await apiJson<WorkSession>('/agents/clock-out', { method: 'POST' });
+      setAttendance({ session: null, aux: null, today_aux_history: [] });
+      setActionError(null);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to clock out.');
+    }
+  }
+
+  async function changeAux(auxType: string) {
+    try {
+      if (auxType === '') {
+        const aux = await apiJson<AuxEvent>('/agents/aux/end', { method: 'POST' });
+        setAttendance((prev) => (prev ? { ...prev, aux: null, today_aux_history: [...prev.today_aux_history.filter((e) => e.id !== aux.id), aux] } : prev));
+      } else {
+        const aux = await apiJson<AuxEvent>('/agents/aux/start', {
+          method: 'POST',
+          body: JSON.stringify({ aux_type: auxType }),
+        });
+        setAttendance((prev) => (prev ? { ...prev, aux } : prev));
+      }
+      setActionError(null);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to update status.');
+    }
   }
 
   async function acceptEscalation(escalationId: string) {
-    await apiJson('/agent/accept', { method: 'POST', body: JSON.stringify({ escalation_id: escalationId }) });
-    const detail = await apiJson<Escalation>(`/agent/escalations/${escalationId}`);
-    setOpenEscalation(detail);
+    try {
+      await apiJson('/agent/accept', { method: 'POST', body: JSON.stringify({ escalation_id: escalationId }) });
+      const detail = await apiJson<Escalation>(`/agent/escalations/${escalationId}`);
+      setOpenEscalation(detail);
+      setActionError(null);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to accept escalation.');
+    }
   }
 
   async function resolveEscalation(escalationId: string) {
@@ -296,19 +443,15 @@ export function AgentDashboardPage() {
           >
             {sidebarCollapsed ? <PanelLeft size={16} /> : <PanelLeftClose size={16} />}
           </button>
-          <HavisIQMark />
+          <Link to="/" aria-label="Back to HavisIQ" className="transition hover:opacity-70">
+            <HavisIQMark />
+          </Link>
           <button
             onClick={() => setSection('queue')}
             className="font-display font-semibold text-ink"
           >
             Agent Dashboard
           </button>
-          <Link
-            to="/dashboard"
-            className="ml-2 flex items-center gap-1.5 rounded-full border border-ink/15 px-3 py-1.5 text-xs text-ink transition hover:border-gold-400 hover:text-gold-700"
-          >
-            <ArrowLeft size={13} /> Back to Dashboard
-          </Link>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -326,15 +469,61 @@ export function AgentDashboardPage() {
           <button onClick={() => setSection('profile')} className="text-sm text-ink/50 hover:text-ink">
             {agent.name} · {agent.department}
           </button>
-          <div className="w-32">
-            <Select value={agent.status} onChange={(e) => setStatus(e.target.value as AgentStatus)}>
-              <option value="available">Available</option>
-              <option value="away">Away</option>
-              <option value="offline">Offline</option>
-            </Select>
-          </div>
+          {attendance?.session ? (
+            <>
+              <span
+                className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+                  attendance.aux ? 'bg-gold-50 text-gold-700' : 'bg-green-50 text-green-700'
+                }`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${attendance.aux ? 'bg-gold-500' : 'bg-green-500'}`} />
+                {attendance.aux ? AUX_TYPES.find((t) => t.value === attendance.aux?.aux_type)?.label ?? attendance.aux.aux_type : 'Available'}
+              </span>
+              <span className="flex items-center gap-1.5 text-xs text-ink/50" title="Session duration">
+                <Clock size={13} />
+                {formatDuration(Math.floor((now - new Date(attendance.session.clock_in_at).getTime()) / 1000))}
+              </span>
+              <div className="w-40">
+                <Select value={attendance.aux?.aux_type ?? ''} onChange={(e) => changeAux(e.target.value)}>
+                  <option value="">Available</option>
+                  {AUX_TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </Select>
+              </div>
+              <button onClick={clockOut} className={SECONDARY_BUTTON}>
+                Clock Out
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="flex items-center gap-1.5 rounded-full bg-ink/5 px-2.5 py-1 text-xs font-medium text-ink/50">
+                <span className="h-1.5 w-1.5 rounded-full bg-ink/30" />
+                Clocked out
+              </span>
+              <button onClick={clockIn} className={PRIMARY_BUTTON}>
+                Clock In
+              </button>
+            </>
+          )}
+          <button
+            onClick={() => signOut()}
+            className="rounded-full p-1.5 text-ink/50 transition hover:bg-paper hover:text-ink"
+            aria-label="Sign out"
+          >
+            <LogOut size={16} />
+          </button>
         </div>
       </header>
+
+      {actionError ? (
+        <div className="flex items-center justify-between px-6 py-2 border-b border-red-200 bg-red-50 text-sm text-red-700">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError(null)} className="text-xs font-semibold hover:underline">
+            Dismiss
+          </button>
+        </div>
+      ) : null}
 
       {stats && (
         <div className="flex gap-6 px-6 py-3 border-b border-ink/10 bg-white text-sm text-ink/60">
@@ -445,24 +634,68 @@ export function AgentDashboardPage() {
                 <dd>{agent.workspace_id}</dd>
                 <dt className="text-ink/50">Availability</dt>
                 <dd>
-                  <div className="w-32">
-                    <Select value={agent.status} onChange={(e) => setStatus(e.target.value as AgentStatus)}>
-                      <option value="available">Available</option>
-                      <option value="away">Away</option>
-                      <option value="offline">Offline</option>
-                    </Select>
-                  </div>
+                  {attendance?.session
+                    ? attendance.aux
+                      ? AUX_TYPES.find((t) => t.value === attendance.aux?.aux_type)?.label ?? attendance.aux.aux_type
+                      : 'Available'
+                    : 'Clocked out'}
                 </dd>
               </dl>
               {stats ? (
-                <dl className="text-sm grid grid-cols-2 gap-y-3 text-ink bg-white border border-ink/10 rounded-2xl p-4">
-                  <dt className="text-ink/50">Current workload</dt>
-                  <dd>{stats.current_workload}</dd>
-                  <dt className="text-ink/50">Resolved today</dt>
-                  <dd>{stats.resolved_today}</dd>
-                  <dt className="text-ink/50">Average resolution time</dt>
-                  <dd>{stats.average_resolution_minutes != null ? `${Math.round(stats.average_resolution_minutes)}m` : '—'}</dd>
-                </dl>
+                <div className="grid grid-cols-2 gap-3">
+                  <KpiCard
+                    label="Current status"
+                    value={
+                      attendance?.session
+                        ? attendance.aux
+                          ? AUX_TYPES.find((t) => t.value === attendance.aux?.aux_type)?.label ?? attendance.aux.aux_type
+                          : 'Available'
+                        : 'Clocked out'
+                    }
+                    sub={
+                      attendance?.session
+                        ? formatDuration(
+                            Math.floor(
+                              (now - new Date(attendance.aux?.started_at ?? attendance.session.clock_in_at).getTime()) / 1000,
+                            ),
+                          )
+                        : undefined
+                    }
+                  />
+                  <KpiCard label="Active conversations" value={myConversations.length} />
+                  <KpiCard label="Queue" value={queue.length} />
+                  <KpiCard label="Resolved today" value={stats.resolved_today} />
+                  <KpiCard
+                    label="Resolution rate"
+                    value={stats.resolution_rate != null ? `${Math.round(stats.resolution_rate * 100)}%` : '—'}
+                    target={targets?.resolution_rate != null ? `${Math.round(targets.resolution_rate * 100)}%` : undefined}
+                    met={
+                      targets?.resolution_rate != null && stats.resolution_rate != null
+                        ? stats.resolution_rate >= targets.resolution_rate
+                        : undefined
+                    }
+                  />
+                  <KpiCard
+                    label="Avg first response"
+                    value={stats.avg_first_response_minutes != null ? `${Math.round(stats.avg_first_response_minutes)}m` : '—'}
+                    target={targets?.response_minutes != null ? `${Math.round(targets.response_minutes)}m` : undefined}
+                    met={
+                      targets?.response_minutes != null && stats.avg_first_response_minutes != null
+                        ? stats.avg_first_response_minutes <= targets.response_minutes
+                        : undefined
+                    }
+                  />
+                  <KpiCard
+                    label="Avg resolution time"
+                    value={stats.average_resolution_minutes != null ? `${Math.round(stats.average_resolution_minutes)}m` : '—'}
+                    target={targets?.resolution_minutes != null ? `${Math.round(targets.resolution_minutes)}m` : undefined}
+                    met={
+                      targets?.resolution_minutes != null && stats.average_resolution_minutes != null
+                        ? stats.average_resolution_minutes <= targets.resolution_minutes
+                        : undefined
+                    }
+                  />
+                </div>
               ) : null}
             </div>
           ) : !openEscalation ? (
