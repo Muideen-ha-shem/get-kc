@@ -7,6 +7,11 @@
 .env.test.local
 .env.production.local
 
+# Generated from sdk/.env by sdk/scripts/gen-env.mjs — carries the real
+# HavisIQ API key as a plain <script>, since sdk/example.html is opened
+# as a bare static file with no build step to inject env vars otherwise.
+sdk/env.local.js
+
 # Python virtual environments and caches
 venv/
 .venv/

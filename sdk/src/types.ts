@@ -7,6 +7,27 @@ export interface QuickAction {
   prompt: string;
 }
 
+/** What the host application knows about where HavisIQ is embedded —
+ * shown as-is in the Intelligence Layer's Context panel, and the seed for
+ * later phases where it's actually sent to the backend to ground
+ * responses. Every field is optional and falls back to a neutral label
+ * (see config.ts) rather than the panel inventing or omitting the
+ * section — a host that passes nothing still gets a coherent, honest
+ * Context panel, just a generic one. */
+export interface HavisIQContext {
+  /** The host platform's own name, e.g. "myAIRA" — falls back to the
+   * workspace name from `GET /workspace/config` when omitted. */
+  platform?: string;
+  /** The signed-in user's display name, used only for the greeting
+   * ("Good morning, {userName}"). Omit rather than guess — the greeting
+   * degrades to a name-free one, never a placeholder like "there". */
+  userName?: string;
+  /** The end user's role in the host platform, e.g. "Candidate", "Admin". */
+  role?: string;
+  /** A human label for the page HavisIQ was opened from, e.g. "Dashboard". */
+  currentPage?: string;
+}
+
 /** Configuration passed to `HavisIQ.init({...})`. Only `apiKey` is required
  * — everything else has a sensible default (see config.ts). */
 export interface HavisIQConfig {
@@ -17,6 +38,12 @@ export interface HavisIQConfig {
   position?: Position;
   /** Required only for mode:'inline' (extension point, not implemented this phase). */
   container?: string | HTMLElement;
+  context?: HavisIQContext;
+  /** Pixels of the host's own nav/sidebar the panel must never cover —
+   * e.g. a 264px-wide left sidebar passes 264. 0 (the default) means the
+   * panel fills the full width; it's still never a total takeover since
+   * a host with no fixed sidebar has nothing to protect. */
+  reserveLeft?: number;
 }
 
 /** `HavisIQConfig` after defaults have been merged in and validated. */
@@ -27,6 +54,8 @@ export interface ResolvedConfig {
   theme: Theme;
   position: Position;
   container?: string | HTMLElement;
+  context: HavisIQContext;
+  reserveLeft: number;
 }
 
 /** Mirrors `WorkspaceConfigSchema` in src/api/schemas.py — camelCase JSON

@@ -3,12 +3,34 @@ import {
   appendErrorMessage,
   appendMessage,
   appendQuickActionChips,
+  appendSuggestionCards,
+  applyPrimaryColor,
+  applyReserveLeft,
   applyTheme,
   buildPanel,
-  buildToggleButton,
   createShadowHost,
 } from './renderer';
-import type { ResolvedConfig, WorkspaceConfigResponse } from './types';
+import type { QuickAction, ResolvedConfig, WorkspaceConfigResponse } from './types';
+
+/** The currently-mounted panel, if any — one widget per page (same
+ * assumption `renderer.ts`'s singleton `HOST_ID` shadow host already
+ * makes), set at the end of `mountWidget()` so a host page's own UI
+ * (e.g. a sidebar "Intelligence Layer" button) can open/close the panel
+ * itself via `HavisIQ.open()`/`close()`, not just the SDK's own internal
+ * floating toggle. */
+let activePanel: HTMLElement | null = null;
+
+export function openPanel(): void {
+  if (!activePanel) {
+    console.warn('HavisIQ.open(): called before HavisIQ.init() finished mounting the widget.');
+    return;
+  }
+  activePanel.classList.add('havisiq-open');
+}
+
+export function closePanel(): void {
+  activePanel?.classList.remove('havisiq-open');
+}
 
 /** Orchestrates SDK init → resolve config → render → wire events.
  *
@@ -25,6 +47,7 @@ export async function mountWidget(config: ResolvedConfig): Promise<void> {
 
   const { root } = createShadowHost(config.position);
   applyTheme(root, config.theme);
+  applyReserveLeft(root, config.reserveLeft);
 
   let workspace: WorkspaceConfigResponse | null = null;
   let loadError: string | null = null;
@@ -34,27 +57,39 @@ export async function mountWidget(config: ResolvedConfig): Promise<void> {
     loadError = error instanceof Error ? error.message : 'Failed to load HavisIQ configuration.';
   }
 
-  buildToggleButton(root, workspace?.primaryColor);
-  const { panel, messageList, input, sendButton } = buildPanel(root, {
-    logo: workspace?.logo,
-    name: workspace?.name,
-    welcomeMessage: workspace?.welcomeMessage,
-  });
+  applyPrimaryColor(root, workspace?.primaryColor);
+  const { panel, messageList, input, sendButton, suggestedRow, suggestionList, colCenter, scrollArea } = buildPanel(
+    root,
+    { name: workspace?.name, welcomeMessage: workspace?.welcomeMessage },
+    config.context,
+  );
 
   if (loadError) {
     appendErrorMessage(messageList, loadError);
-  } else if (workspace?.quickActions?.length) {
-    appendQuickActionChips(panel, workspace.quickActions, (prompt) => {
+  } else {
+    const actions: QuickAction[] = workspace?.quickActions ?? [];
+    const onSelect = (prompt: string) => {
       input.value = prompt;
       void submit(prompt);
-    });
+    };
+    appendQuickActionChips(suggestedRow, actions, onSelect);
+    appendSuggestionCards(suggestionList, actions, onSelect);
   }
 
   const sessionId = getOrCreateSessionId();
 
+  function scrollToLatest(): void {
+    scrollArea.scrollTop = scrollArea.scrollHeight;
+  }
+
   async function submit(message: string): Promise<void> {
     if (!message.trim()) return;
+    // The greeting/suggestions only make sense before a real
+    // conversation exists — once the first message goes out, the
+    // transcript takes over the scroll area instead of sitting below it.
+    colCenter.classList.add('havisiq-active');
     appendMessage(messageList, { role: 'user', text: message });
+    scrollToLatest();
     input.value = '';
     sendButton.disabled = true;
     try {
@@ -67,17 +102,18 @@ export async function mountWidget(config: ResolvedConfig): Promise<void> {
       );
     } finally {
       sendButton.disabled = false;
+      scrollToLatest();
     }
   }
-
-  const toggle = root.querySelector('.havisiq-toggle') as HTMLButtonElement;
-  toggle.addEventListener('click', () => {
-    panel.classList.toggle('havisiq-open');
-  });
 
   const form = panel.querySelector('.havisiq-form') as HTMLFormElement;
   form.addEventListener('submit', (event) => {
     event.preventDefault();
     void submit(input.value);
   });
+
+  const helpLink = panel.querySelector('.havisiq-help-link') as HTMLButtonElement;
+  helpLink.addEventListener('click', () => void submit('How do I use this platform?'));
+
+  activePanel = panel;
 }
