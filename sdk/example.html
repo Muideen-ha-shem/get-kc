@@ -2,18 +2,452 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>HavisIQ SDK — local test page</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>myAIRA — Candidate Dashboard (HavisIQ widget host page)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink: 10 15 26;
+      --ink-soft: 17 25 41;
+      --bg: 246 247 251;
+      --surface: 255 255 255;
+      --border: 226 229 238;
+      --text: 10 15 26;
+      --text-dim: 91 100 114;
+      --brand-a: 15 155 142;
+      --brand-b: 15 82 122;
+      --amber: 217 138 15;
+      --amber-tint: 253 243 224;
+      --teal-tint: 224 246 243;
+      --blue-tint: 224 238 248;
+      --rose: 214 84 96;
+      --rose-tint: 251 228 230;
+      --shadow: 10 15 26;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: rgb(var(--bg));
+      color: rgb(var(--text));
+      font-family: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    h1, h2, h3, .display { font-family: 'Fraunces', Georgia, serif; text-wrap: balance; }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
+
+    .app { display: flex; min-height: 100vh; }
+
+    /* ---------------- sidebar ---------------- */
+    .sidebar {
+      width: 264px; flex-shrink: 0;
+      background: rgb(var(--ink));
+      color: rgb(var(--bg) / 0.92);
+      display: flex; flex-direction: column;
+      position: sticky; top: 0; height: 100vh;
+      padding: 22px 16px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 26px; }
+    .brand-mark {
+      width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+      background: linear-gradient(135deg, rgb(var(--brand-a)), rgb(var(--brand-b)));
+      display: flex; align-items: center; justify-content: center;
+    }
+    .brand-name { font-family: 'Fraunces', serif; font-weight: 600; font-size: 17px; color: #fff; line-height: 1.1; }
+    .brand-sub { font-size: 10.5px; color: rgb(var(--bg) / 0.45); letter-spacing: 0.06em; text-transform: uppercase; }
+
+    .nav-label {
+      font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+      color: rgb(var(--bg) / 0.32); padding: 16px 12px 8px;
+    }
+    .nav-item {
+      display: flex; align-items: center; gap: 11px;
+      padding: 10px 12px; border-radius: 12px; margin-bottom: 2px;
+      font-size: 13.5px; font-weight: 600; color: rgb(var(--bg) / 0.62);
+      text-decoration: none; cursor: pointer; border: none; background: none;
+      width: 100%; text-align: left; font-family: inherit;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .nav-item svg { flex-shrink: 0; opacity: 0.85; }
+    .nav-item:hover { background: rgb(255 255 255 / 0.06); color: rgb(var(--bg) / 0.9); }
+    .nav-item.active {
+      background: linear-gradient(135deg, rgb(var(--brand-a) / 0.9), rgb(var(--brand-b) / 0.9));
+      color: #fff; box-shadow: 0 6px 16px rgb(var(--brand-a) / 0.35);
+    }
+    .nav-item.active svg { opacity: 1; }
+
+    .sidebar-spacer { flex: 1; }
+    .nav-bottom { display: flex; flex-direction: column; gap: 4px; padding-top: 10px; border-top: 1px solid rgb(255 255 255 / 0.08); }
+    .feedback-btn {
+      margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 8px;
+      background: rgb(var(--amber)); color: #1a1200; font-weight: 700; font-size: 13px;
+      padding: 11px; border-radius: 12px; border: none; cursor: pointer; font-family: inherit;
+      transition: filter 0.15s ease, transform 0.15s ease;
+    }
+    .feedback-btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
+
+    /* ---------------- HavisIQ entry point ---------------- */
+    /* A real, wired button (unlike the data-demo-locked rows above it) —
+       this is what a host platform like myAIRA would build into its own
+       navigation to open the HavisIQ Intelligence Layer, calling
+       window.HavisIQ.open() instead of relying only on the SDK's own
+       floating corner toggle. */
+    .havisiq-entry {
+      display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+      margin-top: 14px; padding: 10px 12px; border-radius: 12px; cursor: pointer;
+      font-family: inherit; font-size: 13.5px; font-weight: 600; color: #fff;
+      border: 1px solid rgb(200 154 62 / 0.4);
+      background: linear-gradient(135deg, rgb(200 154 62 / 0.18), rgb(20 23 29 / 0.4));
+      transition: border-color 0.15s ease, transform 0.15s ease;
+    }
+    .havisiq-entry:hover { border-color: rgb(200 154 62); transform: translateY(-1px); }
+    .havisiq-entry-mark { flex-shrink: 0; }
+    .havisiq-entry-text { display: flex; flex-direction: column; line-height: 1.2; }
+    .havisiq-entry-ai {
+      font-size: 9px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+      color: rgb(200 154 62); margin-top: 1px;
+    }
+
+    /* ---------------- main ---------------- */
+    .main { flex: 1; min-width: 0; }
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 18px 34px; background: rgb(var(--surface) / 0.85); backdrop-filter: blur(8px);
+      border-bottom: 1px solid rgb(var(--border)); position: sticky; top: 0; z-index: 5;
+    }
+    .topbar h1 { font-size: 19px; font-weight: 600; }
+    .user-chip {
+      display: flex; align-items: center; gap: 9px; cursor: default; user-select: none;
+    }
+    .avatar {
+      width: 32px; height: 32px; border-radius: 50%;
+      background: linear-gradient(135deg, rgb(var(--brand-a)), rgb(var(--brand-b)));
+      color: #fff; display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 13px; font-family: 'Fraunces', serif;
+    }
+    .user-chip .name { font-size: 13.5px; font-weight: 600; }
+    .user-chip svg { color: rgb(var(--text-dim)); }
+
+    .content { padding: 30px 34px 80px; max-width: 1180px; }
+
+    /* ---------------- hero ---------------- */
+    .hero {
+      position: relative; overflow: hidden;
+      border-radius: 26px; padding: 38px 40px;
+      background: linear-gradient(120deg, rgb(var(--brand-a)) 0%, rgb(var(--brand-b)) 100%);
+      color: #fff; display: flex; align-items: center; justify-content: space-between; gap: 24px;
+      box-shadow: 0 24px 60px rgb(var(--brand-b) / 0.28);
+    }
+    .hero::before {
+      content: ""; position: absolute; inset: -40% -10% auto auto; width: 420px; height: 420px;
+      background: radial-gradient(circle, rgb(255 255 255 / 0.16), transparent 70%);
+      border-radius: 50%; pointer-events: none;
+    }
+    .hero-copy { position: relative; z-index: 1; }
+    .hero-eyebrow { font-size: 13px; font-weight: 600; opacity: 0.82; margin-bottom: 6px; }
+    .hero h2 { font-size: 34px; font-weight: 600; line-height: 1.15; margin: 0 0 12px; }
+    .hero h2 .wave { display: inline-block; animation: wave 2.2s ease-in-out infinite; transform-origin: 70% 70%; }
+    @keyframes wave { 0%, 100% { transform: rotate(0deg); } 15% { transform: rotate(14deg); } 30% { transform: rotate(-8deg); } 45% { transform: rotate(14deg); } 60% { transform: rotate(0deg); } }
+    .hero p { font-size: 14.5px; opacity: 0.86; max-width: 42ch; margin: 0; line-height: 1.6; }
+
+    .score-ring { position: relative; z-index: 1; flex-shrink: 0; width: 122px; height: 122px; }
+    .score-ring svg { transform: rotate(-90deg); }
+    .score-ring .track { stroke: rgb(255 255 255 / 0.22); }
+    .score-ring .fill { stroke: #fff; stroke-linecap: round; transition: stroke-dashoffset 1s cubic-bezier(0.4,0,0.2,1); }
+    .score-label {
+      position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    }
+    .score-label .num { font-family: 'Fraunces', serif; font-size: 27px; font-weight: 600; line-height: 1; }
+    .score-label .cap { font-size: 9px; letter-spacing: 0.1em; opacity: 0.78; margin-top: 3px; }
+
+    /* ---------------- stat cards ---------------- */
+    .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 22px; }
+    @media (max-width: 900px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
+    .stat-card {
+      background: rgb(var(--surface)); border: 1px solid rgb(var(--border));
+      border-radius: 18px; padding: 20px; opacity: 0; transform: translateY(10px);
+      animation: rise 0.5s ease forwards;
+      transition: box-shadow 0.2s ease, transform 0.2s ease;
+    }
+    .stat-card:hover { box-shadow: 0 14px 30px rgb(var(--shadow) / 0.08); transform: translateY(-2px); }
+    @keyframes rise { to { opacity: 1; transform: translateY(0); } }
+    .stat-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .stat-icon { width: 38px; height: 38px; border-radius: 11px; display: flex; align-items: center; justify-content: center; }
+    .stat-tag { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; }
+    .stat-num { font-family: 'Fraunces', serif; font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .stat-name { font-size: 12.5px; color: rgb(var(--text-dim)); margin-top: 2px; }
+
+    .icon-teal { background: rgb(var(--teal-tint)); color: rgb(var(--brand-a)); }
+    .icon-blue { background: rgb(var(--blue-tint)); color: rgb(var(--brand-b)); }
+    .icon-amber { background: rgb(var(--amber-tint)); color: rgb(var(--amber)); }
+    .icon-rose { background: rgb(var(--rose-tint)); color: rgb(var(--rose)); }
+    .tag-teal { background: rgb(var(--teal-tint)); color: rgb(var(--brand-a)); }
+    .tag-blue { background: rgb(var(--blue-tint)); color: rgb(var(--brand-b)); }
+    .tag-amber { background: rgb(var(--amber-tint)); color: rgb(var(--amber)); }
+    .tag-rose { background: rgb(var(--rose-tint)); color: rgb(var(--rose)); }
+
+    /* ---------------- promo ---------------- */
+    .promo {
+      margin-top: 18px; display: flex; align-items: center; gap: 20px;
+      border: 1.5px dashed rgb(var(--brand-a) / 0.4); border-radius: 20px;
+      padding: 22px 26px; background: rgb(var(--teal-tint) / 0.5);
+    }
+    .promo-icon {
+      width: 46px; height: 46px; border-radius: 13px; flex-shrink: 0;
+      background: rgb(var(--surface)); border: 1px solid rgb(var(--border));
+      display: flex; align-items: center; justify-content: center; color: rgb(var(--amber));
+    }
+    .promo-tag {
+      display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em;
+      background: rgb(var(--amber)); color: #fff; padding: 3px 10px; border-radius: 999px; margin-bottom: 6px;
+    }
+    .promo h3 { font-size: 16px; font-weight: 600; margin: 0 0 3px; }
+    .promo p { font-size: 13px; color: rgb(var(--text-dim)); margin: 0; }
+
+    /* ---------------- toast (only-Dashboard-works notice) ---------------- */
+    .toast {
+      position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 12px);
+      background: rgb(var(--ink)); color: #fff; font-size: 13px; font-weight: 600;
+      padding: 11px 18px; border-radius: 999px; box-shadow: 0 12px 30px rgb(var(--shadow) / 0.35);
+      opacity: 0; pointer-events: none; transition: opacity 0.2s ease, transform 0.2s ease;
+      z-index: 40;
+    }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+    ::selection { background: rgb(var(--brand-a) / 0.25); }
+  </style>
 </head>
 <body>
-  <h1>Any normal website</h1>
-  <p>The widget should appear as a floating button in the bottom-right corner.</p>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 20 L12 4 L20 20" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 13.5 H16" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg>
+        </div>
+        <div>
+          <div class="brand-name">myAIRA</div>
+          <div class="brand-sub">Candidate</div>
+        </div>
+      </div>
 
-  <!-- Locally-built SDK bundle (run `npm run build` in sdk/ first) -->
-  <script src="./dist/havisiq-sdk.js"></script>
+      <div class="nav-label">Overview</div>
+      <button class="nav-item active" type="button">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M3 11 L12 3 L21 11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 10 V20 H19 V10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Dashboard
+      </button>
+      <button class="nav-item" type="button" data-demo-locked>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 7 V5.5 A1.5 1.5 0 0 1 9.5 4 H14.5 A1.5 1.5 0 0 1 16 5.5 V7" stroke="currentColor" stroke-width="2"/></svg>
+        Find Jobs
+      </button>
+      <button class="nav-item" type="button" data-demo-locked>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M6 3 H14 L19 8 V21 H6 Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M14 3 V8 H19" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 13 H15 M9 17 H15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        Applications
+      </button>
+      <button class="nav-item" type="button" data-demo-locked>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 8 H16 M8 12 H16 M8 16 H12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        Resume Hub
+      </button>
+
+      <div class="nav-label">AI Tools</div>
+      <button class="nav-item" type="button" data-demo-locked>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M13 2 L4 14 H11 L10 22 L20 9 H13 Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+        AI Resume Builder
+      </button>
+      <button class="nav-item" type="button" data-demo-locked>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><rect x="9" y="2" width="6" height="12" rx="3" stroke="currentColor" stroke-width="2"/><path d="M5 11 A7 7 0 0 0 19 11 M12 18 V22 M8 22 H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        Mock Interview
+      </button>
+      <button class="nav-item" type="button" data-demo-locked>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><rect x="2" y="6" width="14" height="12" rx="2" stroke="currentColor" stroke-width="2"/><path d="M16 10 L22 7 V17 L16 14" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+        Video Interview
+      </button>
+      <button class="nav-item" type="button" data-demo-locked>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M9 11 L11 13 L15 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><rect x="4" y="4" width="16" height="16" rx="4" stroke="currentColor" stroke-width="2"/></svg>
+        Assessments
+      </button>
+
+      <button class="havisiq-entry" type="button" onclick="window.HavisIQ && window.HavisIQ.open()">
+        <span class="havisiq-entry-mark">
+          <svg width="26" height="26" viewBox="0 0 26 26" style="border-radius:22%;">
+            <rect width="26" height="26" rx="6" fill="url(#havisiq-entry-grad)"/>
+            <path d="M8 7 L8 19 M18 7 L18 19" stroke="#ECEEF2" stroke-width="2.4" stroke-linecap="round"/>
+            <path d="M8 13 L11 13 M15 13 L18 13" stroke="#ECEEF2" stroke-width="2.4" stroke-linecap="round"/>
+            <circle cx="13" cy="13" r="2.2" fill="#C89A3E"/>
+            <defs>
+              <linearGradient id="havisiq-entry-grad" x1="0" y1="0" x2="26" y2="26">
+                <stop offset="0%" stop-color="#232833"/>
+                <stop offset="48%" stop-color="#171B22"/>
+                <stop offset="100%" stop-color="#0F1216"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </span>
+        <span class="havisiq-entry-text">
+          Intelligence Layer
+          <span class="havisiq-entry-ai">✦ AI · by HavisIQ</span>
+        </span>
+      </button>
+
+      <div class="sidebar-spacer"></div>
+      <div class="nav-bottom">
+        <button class="nav-item" type="button" data-demo-locked>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"/><path d="M4 21 C4 16.6 7.6 14 12 14 C16.4 14 20 16.6 20 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          Profile
+        </button>
+        <button class="feedback-btn" type="button" data-demo-locked>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M21 15 A2 2 0 0 1 19 17 H8 L4 21 V5 A2 2 0 0 1 6 3 H19 A2 2 0 0 1 21 5 Z" stroke="#1a1200" stroke-width="2" stroke-linejoin="round"/></svg>
+          Feedback
+        </button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <h1>Dashboard</h1>
+        <div class="user-chip">
+          <div class="avatar">M</div>
+          <span class="name">Muideen Ilori</span>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M6 9 L12 15 L18 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+      </div>
+
+      <div class="content">
+        <div class="hero">
+          <div class="hero-copy">
+            <div class="hero-eyebrow">Good morning</div>
+            <h2>Muideen <span class="wave">👋</span></h2>
+            <p>Track your applications, sharpen your resume, and land your next role with AI-powered insight.</p>
+          </div>
+          <div class="score-ring">
+            <svg width="122" height="122" viewBox="0 0 122 122">
+              <circle class="track" cx="61" cy="61" r="52" fill="none" stroke-width="10" />
+              <circle class="fill" cx="61" cy="61" r="52" fill="none" stroke-width="10"
+                stroke-dasharray="326.7" stroke-dashoffset="98" />
+            </svg>
+            <div class="score-label">
+              <div class="num">70</div>
+              <div class="cap">SCORE</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat-card" style="animation-delay:.05s">
+            <div class="stat-top">
+              <div class="stat-icon icon-teal">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="3" y="7" width="18" height="13" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 7 V5.5 A1.5 1.5 0 0 1 9.5 4 H14.5 A1.5 1.5 0 0 1 16 5.5 V7" stroke="currentColor" stroke-width="2"/></svg>
+              </div>
+              <span class="stat-tag tag-teal">5 active</span>
+            </div>
+            <div class="stat-num">6</div>
+            <div class="stat-name">Applications</div>
+          </div>
+
+          <div class="stat-card" style="animation-delay:.12s">
+            <div class="stat-top">
+              <div class="stat-icon icon-blue">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 8 H16 M8 12 H16 M8 16 H12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              </div>
+              <span class="stat-tag tag-blue">Uploaded</span>
+            </div>
+            <div class="stat-num">3</div>
+            <div class="stat-name">Resumes</div>
+          </div>
+
+          <div class="stat-card" style="animation-delay:.19s">
+            <div class="stat-top">
+              <div class="stat-icon icon-amber">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="0.8" fill="currentColor"/></svg>
+              </div>
+              <span class="stat-tag tag-amber">Good potential</span>
+            </div>
+            <div class="stat-num">70%</div>
+            <div class="stat-name">Match Score</div>
+          </div>
+
+          <div class="stat-card" style="animation-delay:.26s">
+            <div class="stat-top">
+              <div class="stat-icon icon-rose">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M13 2 L4 14 H11 L10 22 L20 9 H13 Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+              </div>
+              <span class="stat-tag tag-rose">1 hired</span>
+            </div>
+            <div class="stat-num">20%</div>
+            <div class="stat-name">Success Rate</div>
+          </div>
+        </div>
+
+        <div class="promo">
+          <div class="promo-icon">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none"><rect x="3" y="8" width="18" height="13" rx="1" stroke="currentColor" stroke-width="2"/><path d="M3 12 H21 M12 8 V21" stroke="currentColor" stroke-width="2"/><path d="M12 8 C9 8 8 6.5 8 5.2 A2.2 2.2 0 0 1 12 4 A2.2 2.2 0 0 1 16 5.2 C16 6.5 15 8 12 8 Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+          </div>
+          <div>
+            <span class="promo-tag">Refer &amp; Earn</span>
+            <h3>Refer friends, you both earn credits</h3>
+            <p>Invite another candidate to myAIRA and you'll both unlock a free resume review.</p>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="toast" id="demo-toast">This page is a demo — only Dashboard is wired up.</div>
+
+  <script>
+    // Sidebar/topbar items other than "Dashboard" are intentionally inert —
+    // this file exists to host the HavisIQ widget for an embedding demo,
+    // not to be a real product, so navigation elsewhere just surfaces a
+    // quick toast instead of silently doing nothing.
+    var toast = document.getElementById('demo-toast');
+    var toastTimer = null;
+    document.querySelectorAll('[data-demo-locked]').forEach(function (el) {
+      el.addEventListener('click', function (event) {
+        event.preventDefault();
+        toast.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(function () { toast.classList.remove('show'); }, 1800);
+      });
+    });
+  </script>
+
+  <!-- ============================================================ -->
+  <!-- HavisIQ embeddable widget — the actual point of this page.    -->
+  <!-- Locally-built SDK bundle (run `npm run build` in sdk/ first). -->
+  <!-- ============================================================ -->
+  <!-- The ?build= query string is a cache-buster — bump it any time
+       dist/havisiq-sdk.js is rebuilt, so a browser that cached the old
+       file:// response is forced to fetch the new one instead of
+       silently showing stale styling. -->
+  <script src="./dist/havisiq-sdk.js?build=4"></script>
+  <!-- Real API key lives in sdk/.env, never in this file — this loads
+       sdk/env.local.js, generated from it by `npm run gen-env` (both
+       gitignored). Copy sdk/.env.example to sdk/.env first if this is
+       missing. -->
+  <script src="./env.local.js"></script>
   <script>
     HavisIQ.init({
-      apiKey: "PASTE_YOUR_WORKSPACE_API_KEY_HERE",
+      apiKey: window.HAVISIQ_API_KEY || "PASTE_YOUR_WORKSPACE_API_KEY_HERE",
       apiBaseUrl: "http://localhost:8000", // your local backend — production would omit this
+      // Host-application context — this is what the Intelligence Layer's
+      // header ("You are in: myAIRA") and right-hand Context panel
+      // display. Every field is optional; a host that passes nothing
+      // still gets a coherent, generic panel.
+      context: {
+        platform: "myAIRA",
+        role: "Candidate",
+        currentPage: "Dashboard",
+        userName: "Muideen",
+      },
+      // myAIRA's own left sidebar (see .sidebar in this file) is 264px
+      // wide — the panel leaves exactly that much of it uncovered
+      // instead of guessing at a generic margin.
+      reserveLeft: 264,
     });
   </script>
 </body>

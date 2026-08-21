@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveConfig } from '../src/config';
-import { mountWidget } from '../src/widget';
+import { mountWidget, openPanel } from '../src/widget';
 
 const mockWorkspace = {
   id: 'w1',
@@ -34,20 +34,21 @@ describe('mountWidget', () => {
     expect(host?.shadowRoot).not.toBeNull();
   });
 
-  it('renders a toggle button inside the shadow root', async () => {
+  it('renders the panel inside the shadow root, closed by default', async () => {
     await mountWidget(resolveConfig({ apiKey: 'k' }));
 
     const root = document.getElementById('havisiq-sdk-root')!.shadowRoot!;
-    expect(root.querySelector('.havisiq-toggle')).not.toBeNull();
+    const panel = root.querySelector('.havisiq-panel');
+    expect(panel).not.toBeNull();
+    expect(panel?.classList.contains('havisiq-open')).toBe(false);
   });
 
-  it('shows the welcome message and quick-action chips after opening the panel', async () => {
+  it('shows the welcome message and quick-action chips once opened via openPanel()', async () => {
     await mountWidget(resolveConfig({ apiKey: 'k' }));
 
-    const root = document.getElementById('havisiq-sdk-root')!.shadowRoot!;
-    const toggle = root.querySelector('.havisiq-toggle') as HTMLButtonElement;
-    toggle.click();
+    openPanel();
 
+    const root = document.getElementById('havisiq-sdk-root')!.shadowRoot!;
     const panel = root.querySelector('.havisiq-panel');
     expect(panel?.classList.contains('havisiq-open')).toBe(true);
     expect(panel?.textContent).toContain('Welcome to Acme IQ');
@@ -73,7 +74,7 @@ describe('mountWidget', () => {
 
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('inline'));
     const root = document.getElementById('havisiq-sdk-root')!.shadowRoot!;
-    expect(root.querySelector('.havisiq-toggle')).not.toBeNull();
+    expect(root.querySelector('.havisiq-panel')).not.toBeNull();
     warnSpy.mockRestore();
   });
 });

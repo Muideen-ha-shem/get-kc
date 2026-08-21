@@ -26,5 +26,7 @@ export function resolveConfig(input: HavisIQConfig): ResolvedConfig {
     theme: input.theme ?? DEFAULT_THEME,
     position: input.position ?? DEFAULT_POSITION,
     container: input.container,
+    context: input.context ?? {},
+    reserveLeft: input.reserveLeft ?? 0,
   };
 }

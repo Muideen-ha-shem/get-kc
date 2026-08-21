@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc -b && vite build",
     "test": "vitest run",
-    "dev": "vite build --watch"
+    "dev": "vite build --watch",
+    "gen-env": "node scripts/gen-env.mjs"
   },
   "devDependencies": {
     "typescript": "^5.6.3",
